@@ -1,0 +1,3 @@
+[test]
+# Bun auto-discovers *.test.ts under test/ and src/ — no extra config needed
+# unless you want to change coverage or preload behavior later.

@@ -1,0 +1,34 @@
+{
+  "name": "lms-sdk",
+  "version": "0.1.0",
+  "description": "Framework- and database-agnostic LMS logic SDK",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./core": "./dist/core/index.js",
+    "./enrollment": "./dist/enrollment/index.js",
+    "./content": "./dist/content/index.js",
+    "./assessment": "./dist/assessment/index.js",
+    "./grading": "./dist/grading/index.js",
+    "./communication": "./dist/communication/index.js",
+    "./calendar": "./dist/calendar/index.js",
+    "./scheduling": "./dist/scheduling/index.js",
+    "./reporting": "./dist/reporting/index.js",
+    "./admin": "./dist/admin/index.js",
+    "./interop": "./dist/interop/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "@types/bun": "latest"
+  }
+}
