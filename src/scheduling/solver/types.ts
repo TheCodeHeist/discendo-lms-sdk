@@ -110,9 +110,24 @@ export interface SolveResult {
   status: SolveStatus;
   placements: PlacedSession[];
   unplaced: UnplaceableSession[];
+  /**
+   * Sum of every soft constraint's weighted penalty across the placements
+   * actually found — 0 if no softConstraints were supplied, or if every
+   * placed candidate fully satisfied every constraint. Lower is better.
+   * This scores only the ONE schedule the solver settled on; it is not
+   * compared against alternative feasible schedules (see
+   * soft-constraints.ts's module doc for why).
+   */
+  totalPenalty: number;
 }
 
 export interface SolverOptions {
   /** Backtracking search gives up and returns PARTIAL past this many attempts. */
   maxBacktrackSteps?: number;
+  /**
+   * Preferences to optimize for among feasible placements — see
+   * soft-constraints.ts. Omit or leave empty for the previous
+   * first-feasible-solution behavior with no preference ordering.
+   */
+  softConstraints?: import('./soft-constraints.js').SoftConstraint[];
 }

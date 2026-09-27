@@ -23,7 +23,7 @@ describe('SchedulingService.planAutoSchedule with teacher qualifications', () =>
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate({ courseId: 'course-physics' }));
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
     repo.seedTeacherQualification({ teacherId: 'teacher-1', qualifiedCourseIds: ['course-physics'] });
 
     const service = new SchedulingService(repo);
@@ -39,7 +39,7 @@ describe('SchedulingService.planAutoSchedule with teacher qualifications', () =>
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate({ courseId: 'course-chemistry' }));
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
     repo.seedTeacherQualification({ teacherId: 'teacher-1', qualifiedCourseIds: ['course-physics'] });
 
     const service = new SchedulingService(repo);
@@ -59,7 +59,7 @@ describe('SchedulingService.planAutoSchedule with teacher qualifications', () =>
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate()); // no courseId set
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
     repo.seedTeacherQualification({ teacherId: 'teacher-1', qualifiedCourseIds: [] });
 
     const service = new SchedulingService(repo);
@@ -75,7 +75,7 @@ describe('SchedulingService.planAutoSchedule with teacher qualifications', () =>
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate({ courseId: 'course-anything' }));
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
     // no seedTeacherQualification call at all
 
     const service = new SchedulingService(repo);

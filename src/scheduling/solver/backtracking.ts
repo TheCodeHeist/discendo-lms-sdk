@@ -32,6 +32,7 @@ import type {
   UnscheduledSession,
 } from './types.js';
 import { checkAllTeachersQualified } from '../teacher-qualification.js';
+import { scoreCandidate, type CandidateContext, type SoftConstraint } from './soft-constraints.js';
 
 const DEFAULT_MAX_STEPS = 200_000;
 
@@ -145,6 +146,7 @@ function conflictsWithPlaced(
 
 export function solveSchedule(problem: SchedulingProblem, options: SolverOptions = {}): SolveResult {
   const maxSteps = options.maxBacktrackSteps ?? DEFAULT_MAX_STEPS;
+  const softConstraints = options.softConstraints ?? [];
   const qualifications = problem.teacherQualifications ?? [];
 
   // Qualification is time-independent — check it once per session, up
@@ -168,9 +170,9 @@ export function solveSchedule(problem: SchedulingProblem, options: SolverOptions
   const schedulableSessions = problem.sessions.filter((s) => !unqualifiedSessionIds.has(s.id));
   const sessionsById = new Map(schedulableSessions.map((s) => [s.id, s]));
 
-  // Precompute candidates once per session, then order by fewest options
-  // first (most-constrained-variable) — this is what keeps the search tree
-  // small in practice instead of degrading toward brute force.
+  // Precompute candidates once per session, then order sessions by fewest
+  // options first (most-constrained-variable) — this is what keeps the
+  // search tree small in practice instead of degrading toward brute force.
   const candidatesBySession = new Map(
     schedulableSessions.map((s) => [s.id, candidatesFor(s, problem)] as const),
   );
@@ -181,6 +183,7 @@ export function solveSchedule(problem: SchedulingProblem, options: SolverOptions
   const placedSoFar = new Map<string, PlacedSession>();
   let steps = 0;
   let exhausted = false;
+  let bestPenalty = 0;
 
   function backtrack(index: number): boolean {
     if (index >= orderedSessions.length) return true;
@@ -201,7 +204,34 @@ export function solveSchedule(problem: SchedulingProblem, options: SolverOptions
       return backtrack(index + 1);
     }
 
-    for (const candidate of candidates) {
+    // Soft constraints are scored HERE, not in the static precompute above,
+    // because a constraint like "spread this group's sessions across the
+    // week" depends on what's already been placed in this exact search
+    // branch — that's only known at the moment we're about to try
+    // candidates for this session, not ahead of time. Sorting
+    // ascending-by-penalty means backtracking (which commits to the first
+    // candidate that doesn't conflict) tries the best-scoring options
+    // first — see soft-constraints.ts's module doc for what this does and
+    // does not guarantee.
+    const scored =
+      softConstraints.length === 0
+        ? candidates.map((c) => ({ candidate: c, penalty: 0 }))
+        : candidates
+            .map((c) => {
+              const ctx: CandidateContext = {
+                session,
+                roomId: c.roomId,
+                days: c.days,
+                startTime: c.startTime,
+                endTime: c.endTime,
+                placedSoFar,
+                sessionsById,
+              };
+              return { candidate: c, penalty: scoreCandidate(softConstraints, ctx) };
+            })
+            .sort((a, b) => a.penalty - b.penalty);
+
+    for (const { candidate, penalty } of scored) {
       if (exhausted) return false;
       if (conflictsWithPlaced(session, candidate, placedSoFar, sessionsById)) continue;
 
@@ -212,10 +242,12 @@ export function solveSchedule(problem: SchedulingProblem, options: SolverOptions
         startTime: candidate.startTime,
         endTime: candidate.endTime,
       });
+      bestPenalty += penalty;
 
       if (backtrack(index + 1)) return true;
 
       placedSoFar.delete(session.id);
+      bestPenalty -= penalty;
     }
 
     // Every candidate led to a dead end further down the line — rather than
@@ -234,5 +266,5 @@ export function solveSchedule(problem: SchedulingProblem, options: SolverOptions
   const status: SolveResult['status'] =
     unplaced.length === 0 ? 'COMPLETE' : placements.length === 0 ? 'INFEASIBLE' : 'PARTIAL';
 
-  return { status, placements, unplaced };
+  return { status, placements, unplaced, totalPenalty: bestPenalty };
 }

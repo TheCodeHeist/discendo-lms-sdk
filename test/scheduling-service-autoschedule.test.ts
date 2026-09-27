@@ -24,7 +24,7 @@ describe('SchedulingService auto-scheduling', () => {
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate());
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
 
     const service = new SchedulingService(repo);
     const { result } = await service.planAutoSchedule(['tpl-1'], {
@@ -54,7 +54,7 @@ describe('SchedulingService auto-scheduling', () => {
     );
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
     repo.seedGroup({ id: 'group-2', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
 
     const service = new SchedulingService(repo);
     const { result } = await service.planAutoSchedule(['tpl-1', 'tpl-2'], {
@@ -76,8 +76,8 @@ describe('SchedulingService auto-scheduling', () => {
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate({ requiredRoomFeatures: ['lab'] }));
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
-    repo.seedRoom({ id: 'room-lab', capacity: 30, features: ['lab'] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-lab', name: 'Lab', capacity: 30, features: ['lab'] });
 
     const service = new SchedulingService(repo);
     const { result } = await service.planAutoSchedule(['tpl-1'], {
@@ -93,7 +93,7 @@ describe('SchedulingService auto-scheduling', () => {
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate({ rule: { freq: 'WEEKLY', interval: 1, byDay: ['MO'] } }));
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 20 });
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
     repo.seedAvailability({
       id: 'avail-1',
       resourceId: 'teacher-1',
@@ -119,7 +119,7 @@ describe('SchedulingService auto-scheduling', () => {
     const repo = new InMemorySchedulingRepository();
     repo.seedTemplate(unsolvedTemplate());
     repo.seedGroup({ id: 'group-1', sectionId: 'sec-1', size: 999 }); // too big for any room
-    repo.seedRoom({ id: 'room-1', capacity: 30, features: [] });
+    repo.seedRoom({ id: 'room-1', name: 'Room 1', capacity: 30, features: [] });
 
     const service = new SchedulingService(repo);
     const { result } = await service.planAutoSchedule(['tpl-1'], {
