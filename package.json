@@ -1,5 +1,5 @@
 {
-  "name": "lms-sdk",
+  "name": "hyperlms-sdk",
   "version": "0.1.0",
   "description": "Framework- and database-agnostic LMS logic SDK",
   "type": "module",
@@ -25,10 +25,10 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "zod": "^3.23.0"
+    "zod": "latest"
   },
   "devDependencies": {
-    "typescript": "^5.5.0",
+    "typescript": "latest",
     "@types/bun": "latest"
   }
 }

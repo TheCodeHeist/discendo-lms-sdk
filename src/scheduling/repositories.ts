@@ -5,6 +5,7 @@ import type {
   ClassSessionTemplate,
   Room,
   SchedulingGroup,
+  TeacherQualification,
 } from './types.js';
 
 export interface SchedulingRepository {
@@ -15,6 +16,7 @@ export interface SchedulingRepository {
   updateTemplate(id: Id, patch: Partial<ClassSessionTemplate>): Promise<ClassSessionTemplate>;
 
   // Occurrences — the materialized, editable calendar
+  findOccurrence(id: Id): Promise<ClassOccurrence | null>;
   listOccurrences(templateId: Id, from: Date, to: Date): Promise<ClassOccurrence[]>;
   /**
    * List every occurrence touching a resource (teacher/room/group) in a
@@ -31,6 +33,13 @@ export interface SchedulingRepository {
 
   // Availability
   listAvailability(resourceType: 'teacher' | 'room' | 'group', resourceId: Id): Promise<AvailabilityRule[]>;
+
+  /**
+   * Returns null if the teacher has no qualification record on file — which
+   * means "qualified for everything" (see teacher-qualification.ts), not
+   * "not found as an error condition."
+   */
+  findTeacherQualification(teacherId: Id): Promise<TeacherQualification | null>;
 
   // Resources
   findRoom(id: Id): Promise<Room | null>;

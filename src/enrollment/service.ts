@@ -1,9 +1,13 @@
 import type { RepositoryContext } from '../core/repositories.js';
 import type { Enrollment } from '../core/types.js';
+import type { EventBus } from '../core/events.js';
 import type { EnrollOptions, BatchEnrollRow, BatchReport } from './types.js';
 
 export class EnrollmentService {
-  constructor(private readonly repos: RepositoryContext) {}
+  constructor(
+    private readonly repos: RepositoryContext,
+    private readonly events?: EventBus,
+  ) {}
 
   async enroll(opts: EnrollOptions): Promise<Enrollment> {
     const existing = await this.repos.enrollments.findByUserAndSection(
@@ -28,21 +32,42 @@ export class EnrollmentService {
       }
     }
 
-    return this.repos.enrollments.create({
+    const enrollment = await this.repos.enrollments.create({
       userId: opts.userId,
       sectionId: opts.sectionId,
       role: opts.role,
       status,
       enrolledAt: new Date(),
     });
+
+    // Fire-and-forget — a slow or failing listener should never delay or
+    // break the enrollment itself (see EventBus's failure-isolation note).
+    void this.events?.emit({
+      type: 'enrollment.enrolled',
+      enrollmentId: enrollment.id,
+      userId: enrollment.userId,
+      sectionId: enrollment.sectionId,
+      status: status as 'active' | 'waitlisted',
+    });
+
+    return enrollment;
   }
 
   async drop(enrollmentId: string): Promise<Enrollment> {
     // Never hard-delete — preserve history for audit/reporting.
-    return this.repos.enrollments.update(enrollmentId, {
+    const dropped = await this.repos.enrollments.update(enrollmentId, {
       status: 'dropped',
       droppedAt: new Date(),
     });
+
+    void this.events?.emit({
+      type: 'enrollment.dropped',
+      enrollmentId: dropped.id,
+      userId: dropped.userId,
+      sectionId: dropped.sectionId,
+    });
+
+    return dropped;
   }
 
   async listRoster(

@@ -3,14 +3,14 @@
  * SchedulingProblem shape. The solver itself never touches a repository
  * (see solver/types.ts) — this is where that boundary is crossed.
  */
-import type { Id } from "../core/types.js";
-import type { AvailabilityRule, Room, Weekday } from "./types.js";
+import type { Id } from '../core/types.js';
+import type { AvailabilityRule, Room, Weekday } from './types.js';
 import type {
   PlacedSession,
   ResourceAvailabilityWindow,
   SolverRoom,
   UnscheduledSession,
-} from "./solver/types.js";
+} from './solver/types.js';
 
 /**
  * Flattens an AvailabilityRule into per-weekday windows for the solver's
@@ -27,7 +27,7 @@ import type {
  */
 export function flattenAvailabilityForSolver(
   rules: AvailabilityRule[],
-  resourceType: "teacher" | "room" | "group",
+  resourceType: 'teacher' | 'room' | 'group',
   resourceId: Id,
 ): { windows: ResourceAvailabilityWindow[]; skipped: AvailabilityRule[] } {
   const windows: ResourceAvailabilityWindow[] = [];
@@ -57,15 +57,7 @@ export function roomToSolverRoom(room: Room): SolverRoom {
 }
 
 /** Every weekday the solver's `days` field can contain, in institution order. */
-export const ALL_WEEKDAYS: Weekday[] = [
-  "MO",
-  "TU",
-  "WE",
-  "TH",
-  "FR",
-  "SA",
-  "SU",
-];
+export const ALL_WEEKDAYS: Weekday[] = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
 
 export interface SolvedTemplatePatch {
   templateId: Id;
@@ -77,9 +69,7 @@ export interface SolvedTemplatePatch {
 }
 
 /** Converts solver placements back into the patches a caller applies to templates. */
-export function placementsToTemplatePatches(
-  placements: PlacedSession[],
-): SolvedTemplatePatch[] {
+export function placementsToTemplatePatches(placements: PlacedSession[]): SolvedTemplatePatch[] {
   return placements.map((p) => ({
     templateId: p.sessionId,
     roomId: p.roomId,
