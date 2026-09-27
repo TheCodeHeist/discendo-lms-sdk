@@ -1,15 +1,17 @@
-export type AttendanceStatus = 'present' | 'absent' | 'excused' | 'late';
+import type { Id } from "../core/types.js";
+
+export type AttendanceStatus = "present" | "absent" | "excused" | "late";
 
 export interface AttendanceRecord {
-  sessionId: string;
-  userId: string;
+  sessionId: Id;
+  userId: Id;
   status: AttendanceStatus;
   recordedAt: Date;
 }
 
 export interface AttendanceRepository {
   record(entry: AttendanceRecord): Promise<void>;
-  listForSession(sessionId: string): Promise<AttendanceRecord[]>;
+  listForSession(sessionId: Id): Promise<AttendanceRecord[]>;
 }
 
 /** Anything exportable as flat rows can reuse this — gradebook, roster, attendance, etc. */
@@ -19,13 +21,15 @@ export interface Exportable {
 
 export function toCsv(exportable: Exportable): string {
   const rows = exportable.toRows();
-  if (rows.length === 0) return '';
+  if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]!);
-  const lines = [headers.join(',')];
+  const lines = [headers.join(",")];
   for (const row of rows) {
-    lines.push(headers.map((h) => escapeCsvCell(String(row[h] ?? ''))).join(','));
+    lines.push(
+      headers.map((h) => escapeCsvCell(String(row[h] ?? ""))).join(","),
+    );
   }
-  return lines.join('\n');
+  return lines.join("\n");
 }
 
 function escapeCsvCell(value: string): string {

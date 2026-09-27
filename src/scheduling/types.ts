@@ -53,6 +53,20 @@ export interface AvailabilityRule {
 }
 
 /**
+ * Which courses a teacher is qualified to teach, keyed by the same loose
+ * `courseId` a ClassSessionTemplate optionally carries. Like
+ * AvailabilityRule, this is opt-in: a teacher with no
+ * TeacherQualification record on file is treated as qualified for
+ * everything (see teacher-qualification.ts) — institutions that don't
+ * track subject-specific staffing (a single-tutor setup, say) never need
+ * to declare these at all. One that does adds a record per teacher.
+ */
+export interface TeacherQualification {
+  teacherId: Id;
+  qualifiedCourseIds: Id[];
+}
+
+/**
  * Abstract "this class meets on this pattern" — not yet placed on a real
  * calendar. Room/time are decisions (see solver/), so they're optional here:
  * a template can exist unscheduled, then get slotted in by the generator.
@@ -60,6 +74,15 @@ export interface AvailabilityRule {
 export interface ClassSessionTemplate {
   id: Id;
   sectionId: Id;
+  /**
+   * Loose reference to whatever the host app calls "the course" this
+   * section belongs to (e.g. core.Course.id, if the host app uses core).
+   * Optional and only consulted for teacher-qualification checks (see
+   * TeacherQualification below) — omit it if you don't need that check.
+   * scheduling deliberately never resolves this through `core` itself, to
+   * keep the module's zero-dependency stance on other modules intact.
+   */
+  courseId?: Id;
   /** Multiple co-teachers supported; first is not privileged over the rest. */
   teacherIds: Id[];
   groupId: Id;

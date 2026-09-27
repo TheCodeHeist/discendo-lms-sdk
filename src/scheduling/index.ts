@@ -4,6 +4,8 @@ export * from './recurrence.js';
 export * from './conflict.js';
 export * from './availability.js';
 export * from './room-matching.js';
+export * from './teacher-qualification.js';
+export * from './attendance.js';
 export * from './generator.js';
 export * from './solver/index.js';
 export * from './solver-adapter.js';

@@ -31,6 +31,7 @@ import type {
   UnplaceableSession,
   UnscheduledSession,
 } from './types.js';
+import { checkAllTeachersQualified } from '../teacher-qualification.js';
 
 const DEFAULT_MAX_STEPS = 200_000;
 
@@ -144,20 +145,40 @@ function conflictsWithPlaced(
 
 export function solveSchedule(problem: SchedulingProblem, options: SolverOptions = {}): SolveResult {
   const maxSteps = options.maxBacktrackSteps ?? DEFAULT_MAX_STEPS;
-  const sessionsById = new Map(problem.sessions.map((s) => [s.id, s]));
+  const qualifications = problem.teacherQualifications ?? [];
+
+  // Qualification is time-independent — check it once per session, up
+  // front, rather than inside the per-slot candidate loop. An unqualified
+  // session can never be placed regardless of room/time, so it's pulled
+  // out before backtracking even starts, with a specific reason rather
+  // than the generic "no slot found" message a time/room failure gets.
+  const unqualifiedSessionIds = new Set<string>();
+  const unplaced: UnplaceableSession[] = [];
+  for (const session of problem.sessions) {
+    const failures = checkAllTeachersQualified(session.teacherIds, session.courseId, qualifications);
+    if (failures.length > 0) {
+      unqualifiedSessionIds.add(session.id);
+      unplaced.push({
+        sessionId: session.id,
+        reason: failures.map((f) => f.reason).join(' '),
+      });
+    }
+  }
+
+  const schedulableSessions = problem.sessions.filter((s) => !unqualifiedSessionIds.has(s.id));
+  const sessionsById = new Map(schedulableSessions.map((s) => [s.id, s]));
 
   // Precompute candidates once per session, then order by fewest options
   // first (most-constrained-variable) — this is what keeps the search tree
   // small in practice instead of degrading toward brute force.
   const candidatesBySession = new Map(
-    problem.sessions.map((s) => [s.id, candidatesFor(s, problem)] as const),
+    schedulableSessions.map((s) => [s.id, candidatesFor(s, problem)] as const),
   );
-  const orderedSessions = [...problem.sessions].sort(
+  const orderedSessions = [...schedulableSessions].sort(
     (a, b) => (candidatesBySession.get(a.id)?.length ?? 0) - (candidatesBySession.get(b.id)?.length ?? 0),
   );
 
   const placedSoFar = new Map<string, PlacedSession>();
-  const unplaced: UnplaceableSession[] = [];
   let steps = 0;
   let exhausted = false;
 

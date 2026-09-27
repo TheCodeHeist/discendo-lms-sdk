@@ -12,6 +12,7 @@ import type {
   ClassSessionTemplate,
   Room,
   SchedulingGroup,
+  TeacherQualification,
 } from '../types.js';
 
 let counter = 0;
@@ -26,6 +27,7 @@ export class InMemorySchedulingRepository implements SchedulingRepository {
   private availability = new Map<Id, AvailabilityRule[]>();
   private rooms = new Map<Id, Room>();
   private groups = new Map<Id, SchedulingGroup>();
+  private qualifications = new Map<Id, TeacherQualification>();
 
   // --- seeding helpers (test/dev only) ---
   seedTemplate(template: ClassSessionTemplate): void {
@@ -42,6 +44,9 @@ export class InMemorySchedulingRepository implements SchedulingRepository {
     const list = this.availability.get(key) ?? [];
     list.push(rule);
     this.availability.set(key, list);
+  }
+  seedTeacherQualification(qualification: TeacherQualification): void {
+    this.qualifications.set(qualification.teacherId, qualification);
   }
 
   // --- SchedulingRepository ---
@@ -65,6 +70,10 @@ export class InMemorySchedulingRepository implements SchedulingRepository {
     const updated = { ...existing, ...patch };
     this.templates.set(id, updated);
     return updated;
+  }
+
+  async findOccurrence(id: Id): Promise<ClassOccurrence | null> {
+    return this.occurrences.get(id) ?? null;
   }
 
   async listOccurrences(templateId: Id, from: Date, to: Date): Promise<ClassOccurrence[]> {
@@ -133,5 +142,9 @@ export class InMemorySchedulingRepository implements SchedulingRepository {
 
   async findGroup(id: Id): Promise<SchedulingGroup | null> {
     return this.groups.get(id) ?? null;
+  }
+
+  async findTeacherQualification(teacherId: Id): Promise<TeacherQualification | null> {
+    return this.qualifications.get(teacherId) ?? null;
   }
 }

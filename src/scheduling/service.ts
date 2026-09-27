@@ -13,6 +13,7 @@ import {
 } from './solver-adapter.js';
 import { solveSchedule } from './solver/backtracking.js';
 import type { SchedulingProblem, SolveResult, SolverOptions, UnscheduledSession } from './solver/types.js';
+import { validateAttendanceTarget, type AttendanceEntry, type AttendanceRecorder } from './attendance.js';
 
 export interface AvailabilityViolation {
   resourceType: 'teacher' | 'room' | 'group';
@@ -34,7 +35,10 @@ export interface SchedulingCheckResult {
 }
 
 export class SchedulingService {
-  constructor(private readonly scheduling: SchedulingRepository) {}
+  constructor(
+    private readonly scheduling: SchedulingRepository,
+    private readonly attendanceRecorder?: AttendanceRecorder,
+  ) {}
 
   /**
    * Checks a candidate occurrence against everything already booked for the
@@ -265,6 +269,54 @@ export class SchedulingService {
   }
 
   /**
+   * Records attendance for a single student against a specific occurrence,
+   * refusing to do so if the occurrence doesn't exist or was cancelled (see
+   * validateAttendanceTarget). Requires an AttendanceRecorder to have been
+   * passed to the constructor — throws otherwise, since calling this
+   * without one wiring one up is a caller mistake, not a runtime condition
+   * to handle gracefully.
+   *
+   * reporting.AttendanceRepository already satisfies AttendanceRecorder's
+   * shape, so the same repository implementation you give ReportingService
+   * can be passed here unchanged.
+   */
+  async recordAttendanceForOccurrence(
+    occurrenceId: Id,
+    userId: Id,
+    status: AttendanceEntry['status'],
+  ): Promise<void> {
+    if (!this.attendanceRecorder) {
+      throw new Error(
+        'recordAttendanceForOccurrence: no AttendanceRecorder was provided to SchedulingService.',
+      );
+    }
+
+    const occurrence = await this.scheduling.findOccurrence(occurrenceId);
+    const error = validateAttendanceTarget(occurrence);
+    if (error) {
+      throw new Error(`recordAttendanceForOccurrence: ${error.message}`);
+    }
+
+    await this.attendanceRecorder.record({
+      sessionId: occurrenceId,
+      userId,
+      status,
+      recordedAt: new Date(),
+    });
+  }
+
+  /**
+   * Same validation as recordAttendanceForOccurrence, without throwing —
+   * use this in a UI path where you want to show the user why a class
+   * can't accept attendance yet (e.g. greyed out for a cancelled session)
+   * rather than catching an exception.
+   */
+  async canRecordAttendance(occurrenceId: Id): Promise<ReturnType<typeof validateAttendanceTarget>> {
+    const occurrence = await this.scheduling.findOccurrence(occurrenceId);
+    return validateAttendanceTarget(occurrence);
+  }
+
+  /**
    * Runs the auto-suggestion solver against a set of templates and returns
    * a plan (which room/day/time each template would get) without writing
    * anything — review the plan, then call `applyAutoSchedulePlan` once
@@ -317,6 +369,12 @@ export class SchedulingService {
       if (skipped.length > 0) skippedAvailability.push(`room:${room.id}`);
     }
 
+    const teacherQualifications = [];
+    for (const teacherId of teacherIds) {
+      const qualification = await this.scheduling.findTeacherQualification(teacherId);
+      if (qualification) teacherQualifications.push(qualification);
+    }
+
     const sessions: UnscheduledSession[] = [];
     for (const t of templates) {
       const group = await this.scheduling.findGroup(t.groupId);
@@ -335,6 +393,7 @@ export class SchedulingService {
         sectionId: t.sectionId,
         teacherIds: t.teacherIds,
         groupId: t.groupId,
+        ...(t.courseId ? { courseId: t.courseId } : {}),
         groupSize: group.size,
         ...(t.requiredRoomFeatures ? { requiredRoomFeatures: t.requiredRoomFeatures } : {}),
         candidateDays: t.rule.byDay,
@@ -346,6 +405,7 @@ export class SchedulingService {
       sessions,
       rooms: rooms.map(roomToSolverRoom),
       availability: availabilityWindows,
+      ...(teacherQualifications.length > 0 ? { teacherQualifications } : {}),
       candidateSlotsPerDay: grid.candidateSlotsPerDay,
       days: grid.days,
     };
