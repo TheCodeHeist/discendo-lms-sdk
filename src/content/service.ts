@@ -1,5 +1,6 @@
 import type { RepositoryContext } from '../core/repositories.js';
 import type { ContentNode } from '../core/types.js';
+import type { EventBus } from '../core/events.js';
 
 export interface PrerequisiteEdge {
   contentId: string;
@@ -16,6 +17,7 @@ export class ContentService {
     private readonly repos: RepositoryContext,
     private readonly completion: CompletionChecker,
     private readonly prerequisites: PrerequisiteEdge[] = [],
+    private readonly events?: EventBus,
   ) {}
 
   async createNode(node: Omit<ContentNode, 'id' | 'version'>): Promise<ContentNode> {
@@ -25,10 +27,19 @@ export class ContentService {
   async publish(id: string): Promise<ContentNode> {
     const current = await this.repos.content.findById(id);
     if (!current) throw new Error(`Content ${id} not found`);
-    return this.repos.content.update(id, {
+    const updated = await this.repos.content.update(id, {
       published: true,
       version: current.version + 1,
     });
+
+    void this.events?.emit({
+      type: 'content.published',
+      contentId: updated.id,
+      sectionId: updated.sectionId,
+      version: updated.version,
+    });
+
+    return updated;
   }
 
   async reorder(sectionId: string, orderedIds: string[]): Promise<void> {

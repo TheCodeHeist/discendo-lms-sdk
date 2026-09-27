@@ -19,9 +19,9 @@
  * to be, and compare across different SoftConstraint configurations run
  * separately if they want to.
  */
-import type { Id } from "../../core/types.js";
-import type { Weekday } from "../types.js";
-import type { PlacedSession, UnscheduledSession } from "./types.js";
+import type { Id } from '../../core/types.js';
+import type { Weekday } from '../types.js';
+import type { PlacedSession, UnscheduledSession } from './types.js';
 
 /**
  * What a SoftConstraint scores: one candidate (room + time + days) being
@@ -52,7 +52,7 @@ export interface SoftConstraint {
 const HOUR_MINUTES = 60;
 
 function toMinutes(time: string): number {
-  const parts = time.split(":");
+  const parts = time.split(':');
   return Number(parts[0] ?? 0) * HOUR_MINUTES + Number(parts[1] ?? 0);
 }
 
@@ -121,12 +121,9 @@ export function preferredRoomForCourse(
  * classes with zero breathing room. Penalizes 0 for a day the candidate
  * doesn't share with any other placed session of the group.
  */
-export function spaceOutSameDaySessions(
-  weight = 1,
-  minGapMinutes = 30,
-): SoftConstraint {
+export function spaceOutSameDaySessions(weight = 1, minGapMinutes = 30): SoftConstraint {
   return {
-    name: "spaceOutSameDaySessions",
+    name: 'spaceOutSameDaySessions',
     weight,
     penalty(ctx) {
       let penalty = 0;
@@ -135,8 +132,7 @@ export function spaceOutSameDaySessions(
 
       for (const placed of ctx.placedSoFar.values()) {
         const placedSession = ctx.sessionsById.get(placed.sessionId);
-        if (!placedSession || placedSession.groupId !== ctx.session.groupId)
-          continue;
+        if (!placedSession || placedSession.groupId !== ctx.session.groupId) continue;
 
         const sharesADay = placed.days.some((d) => ctx.days.includes(d));
         if (!sharesADay) continue;
@@ -156,10 +152,7 @@ export function spaceOutSameDaySessions(
 }
 
 /** Sums every constraint's weighted penalty for one candidate. */
-export function scoreCandidate(
-  constraints: SoftConstraint[],
-  ctx: CandidateContext,
-): number {
+export function scoreCandidate(constraints: SoftConstraint[], ctx: CandidateContext): number {
   let total = 0;
   for (const constraint of constraints) {
     total += constraint.weight * constraint.penalty(ctx);

@@ -1,4 +1,5 @@
 import type { GradeEntry, GradingScheme, GradeScale } from './types.js';
+import type { EventBus } from '../core/events.js';
 import { computeFinalGrade, toLetterGrade } from './calculations.js';
 
 export interface GradeRepository {
@@ -11,7 +12,10 @@ export interface GradeRepository {
 }
 
 export class GradingService {
-  constructor(private readonly grades: GradeRepository) {}
+  constructor(
+    private readonly grades: GradeRepository,
+    private readonly events?: EventBus,
+  ) {}
 
   /**
    * Records a grade. Never overwrites — if the submission was already
@@ -37,6 +41,17 @@ export class GradingService {
     if (previousEntryId) {
       await this.grades.markSuperseded(previousEntryId, entry.id);
     }
+
+    void this.events?.emit({
+      type: 'grading.gradePosted',
+      gradeEntryId: entry.id,
+      submissionId: entry.submissionId,
+      userId: entry.userId,
+      score: entry.score,
+      maxScore: entry.maxScore,
+      graderId: entry.graderId,
+    });
+
     return entry;
   }
 
