@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { checkRoomSuitability, findSuitableRooms } from '../src/scheduling/index.js';
-import type { Room } from '../src/scheduling/index.js';
+import { checkRoomSuitability, findSuitableRooms } from '../src/domains/scheduling/index.js';
+import type { Room } from '../src/domains/scheduling/index.js';
 
 function room(overrides: Partial<Room> = {}): Room {
   return { id: 'room-1', name: 'Room 101', capacity: 30, features: [], ...overrides };

@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'bun:test';
-import { SchedulingService, validateAttendanceTarget } from '../src/scheduling/index.js';
-import { InMemorySchedulingRepository } from '../src/scheduling/testing/in-memory-repository.js';
-import type { AttendanceEntry, AttendanceRecorder } from '../src/scheduling/index.js';
-import type { ClassSessionTemplate } from '../src/scheduling/index.js';
+import { SchedulingService, validateAttendanceTarget } from '../src/domains/scheduling/index.js';
+import { InMemorySchedulingRepository } from '../src/domains/scheduling/testing/in-memory-repository.js';
+import type { AttendanceEntry, AttendanceRecorder } from '../src/domains/scheduling/index.js';
+import type { ClassSessionTemplate } from '../src/domains/scheduling/index.js';
 
 function template(overrides: Partial<ClassSessionTemplate> = {}): ClassSessionTemplate {
   return {

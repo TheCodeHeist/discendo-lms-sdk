@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'bun:test';
-import { GradingService } from '../src/grading/index.js';
-import type { GradeRepository } from '../src/grading/index.js';
+import { GradingService } from '../src/domains/grading/index.js';
+import type { GradeRepository } from '../src/domains/grading/index.js';
 import { EventBus } from '../src/core/index.js';
-import type { GradeEntry } from '../src/grading/index.js';
+import type { GradeEntry } from '../src/domains/grading/index.js';
 
 function makeGradeRepo(): GradeRepository {
   const entries = new Map<string, GradeEntry>();

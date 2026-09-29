@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { findConflictsForResource, effectiveWindow } from '../src/scheduling/index.js';
-import type { ClassOccurrence } from '../src/scheduling/index.js';
+import { findConflictsForResource, effectiveWindow } from '../src/domains/scheduling/index.js';
+import type { ClassOccurrence } from '../src/domains/scheduling/index.js';
 
 function occ(id: string, date: string, status: ClassOccurrence['status'] = 'scheduled'): ClassOccurrence {
   return { id, templateId: 't1', date: new Date(date), status };

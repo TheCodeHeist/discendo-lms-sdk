@@ -11,3 +11,20 @@ This SDK aims to standardize the core LMS logic so that different host applicati
 ## Documentation
 
 Check out the [documentation markdown file](./docs/INDEX.md) for a detailed overview of the SDK's modules, domain models, and services.
+
+## Project layout (for contributors and plugin authors)
+
+Source is organized into layers, each with its own `README.md` explaining
+what belongs there:
+
+| Layer | What goes here | Start with |
+| --- | --- | --- |
+| [`src/core/`](./src/core/README.md) | Shared primitives and the `EventBus` every module can emit to | `events.ts` |
+| [`src/domains/`](./src/domains/README.md) | Modules that own a primary entity: enrollment, content, assessment, grading, scheduling | [`scheduling/README.md`](./src/domains/scheduling/README.md) |
+| [`src/services/`](./src/services/README.md) | Cross-cutting modules that consume what domains produce: communication, reporting, admin | — |
+| `src/interop/` | Pluggable protocol seams (LTI, SSO, SCORM/xAPI), no implementations | — |
+
+**The one rule:** a module may import only `core` and its own files, never
+another domain or service. Modules coordinate through the shared `EventBus`
+instead. This is enforced by `test/architecture.test.ts`, so a change that
+breaks it fails CI.

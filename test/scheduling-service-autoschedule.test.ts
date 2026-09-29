@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'bun:test';
-import { SchedulingService } from '../src/scheduling/index.js';
-import { InMemorySchedulingRepository } from '../src/scheduling/testing/in-memory-repository.js';
-import type { ClassSessionTemplate } from '../src/scheduling/index.js';
+import { SchedulingService } from '../src/domains/scheduling/index.js';
+import { InMemorySchedulingRepository } from '../src/domains/scheduling/testing/in-memory-repository.js';
+import type { ClassSessionTemplate } from '../src/domains/scheduling/index.js';
 
 function unsolvedTemplate(overrides: Partial<ClassSessionTemplate> = {}): ClassSessionTemplate {
   return {

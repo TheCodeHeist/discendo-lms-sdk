@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { computeFinalGrade, toLetterGrade, applyLatePolicy } from '../src/grading/index.js';
-import type { GradeEntry } from '../src/grading/index.js';
+import { computeFinalGrade, toLetterGrade, applyLatePolicy } from '../src/domains/grading/index.js';
+import type { GradeEntry } from '../src/domains/grading/index.js';
 
 function entry(score: number, maxScore: number): GradeEntry {
   return {

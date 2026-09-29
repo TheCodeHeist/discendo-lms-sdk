@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { checkAvailability } from '../src/scheduling/index.js';
-import type { AvailabilityRule } from '../src/scheduling/index.js';
+import { checkAvailability } from '../src/domains/scheduling/index.js';
+import type { AvailabilityRule } from '../src/domains/scheduling/index.js';
 
 function rule(overrides: Partial<AvailabilityRule> = {}): AvailabilityRule {
   return {

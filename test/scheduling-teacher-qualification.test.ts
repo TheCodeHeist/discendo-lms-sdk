@@ -2,8 +2,8 @@ import { describe, it, expect } from 'bun:test';
 import {
   checkTeacherQualified,
   checkAllTeachersQualified,
-} from '../src/scheduling/index.js';
-import type { TeacherQualification } from '../src/scheduling/index.js';
+} from '../src/domains/scheduling/index.js';
+import type { TeacherQualification } from '../src/domains/scheduling/index.js';
 
 function qual(overrides: Partial<TeacherQualification> = {}): TeacherQualification {
   return { teacherId: 'teacher-1', qualifiedCourseIds: ['course-physics'], ...overrides };

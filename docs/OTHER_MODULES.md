@@ -451,12 +451,13 @@ Constructed with `(announcements, threads, sink?)`.
 
 ---
 
-## `calendar` — `hyperlms-sdk/calendar`
+## `scheduling/calendar` — `hyperlms-sdk/scheduling/calendar`
 
-**Not to be confused with `scheduling`** — see `SCHEDULING.md`'s intro for
-the distinction. This module is entirely about assignment due-date
-availability windows and calendar export; it does not model teachers,
-rooms, or recurring class routines at all.
+Lives inside the `scheduling` domain (see `src/domains/scheduling/README.md`
+for why) but documented here because it is unrelated to class routines: this
+sub-module is entirely about assignment due-date availability windows and
+calendar export, and does not model teachers, rooms, or recurring class
+routines at all. Also re-exported from `hyperlms-sdk/scheduling`.
 
 ```ts
 type AvailabilityState = "locked" | "open" | "closed";
