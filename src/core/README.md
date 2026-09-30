@@ -12,6 +12,10 @@ depend on directly.
   `Enrollment`, `ContentNode`, `AcademicTerm`.
 - **`repositories.ts`** — the repository interfaces `enrollment` and
   `content` are built against, bundled as `RepositoryContext`.
+- **`permissions.ts`** — a pluggable, role-based `PermissionPolicy`
+  (`createRolePolicy`, `authorize`, `activeSectionRole`, `DEFAULT_RULES`).
+  Pure functions; a host calls them at its API boundary. Details:
+  `docs/OTHER_MODULES.md`.
 - **`tenancy.ts`** — `sameOrg`, `assertSameOrg` and `TenantMismatchError`,
   the shared vocabulary for multi-tenant checks. A course's `orgId` is the
   source of truth; sections, enrollments and content inherit it. Unset

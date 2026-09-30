@@ -120,6 +120,55 @@ cross-tenant match with `TenantMismatchError`. The difference is that the
 right person then can't be found, because the wrong one was returned first.
 For an unscoped course no `orgId` is passed.
 
+### Permissions
+
+Role-based checks that a host calls at its own API boundary, before it calls
+a service. The SDK does not authenticate anyone, and its services don't yet
+take an "acting user", so nothing is enforced automatically. All functions
+are pure and do no I/O.
+
+```ts
+import { createRolePolicy, authorize, activeSectionRole } from "discendo-sdk/core";
+
+const policy = createRolePolicy(); // or createRolePolicy({ overrides: {...} })
+
+const enrollment = await repos.enrollments.findByUserAndSection(actor.id, sectionId);
+await authorize(policy, "grading.record", {
+  actor,                                        // Identity
+  section: { role: activeSectionRole(enrollment) },
+  resourceOrgId: course.orgId,                  // when the target is org-scoped
+  resourceOwnerId: studentId,                   // for "own" rules
+}); // throws PermissionDeniedError if not allowed
+```
+
+**Two kinds of role.** `Enrollment.role` is a person's role inside one
+section, and actions that target a section use it. `Identity.roles` is
+account-wide, and for section actions only `admin` is honoured: a global
+"instructor" cannot manage every section, only the ones they are enrolled in
+as an instructor. Actions with no `section` in the context use
+`Identity.roles` as they are. `activeSectionRole` returns a role only for an
+`active` enrollment, so waitlisted, dropped and completed ones grant nothing.
+
+**Order of checks.** Tenant first (the same rule as `Tenancy` above, so not
+even an admin acts across organizations), then the action's rule. Unknown
+actions and missing context (for example no `resourceOwnerId` on an "own"
+rule) are denied.
+
+**Default rules** (`DEFAULT_RULES`). "own" means only their own resource.
+
+| Role | Can |
+| --- | --- |
+| admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog` |
+| instructor | `enrollment.enroll`, `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
+| ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
+| student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
+| guardian | nothing (a parent-to-student relationship isn't modelled yet) |
+
+**Customizing.** `overrides` replace an action's rule entirely (they are not
+merged), can add actions of your own, and `{}` denies everyone. For
+attribute-based rules, implement `PermissionPolicy` yourself; `can` may be
+async, and `authorize` accepts any policy.
+
 ### Repository interfaces
 
 ```ts
