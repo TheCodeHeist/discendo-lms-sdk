@@ -134,3 +134,169 @@ describe('EventBus', () => {
     expect(count).toBe(1);
   });
 });
+
+const enrolled = (id: string): LmsEvent => ({
+  type: 'enrollment.enrolled',
+  enrollmentId: id,
+  userId: 'u1',
+  sectionId: 's1',
+  status: 'active',
+});
+
+describe('EventBus handler typing', () => {
+  it('accepts handlers that return a non-void value', async () => {
+    const bus = new EventBus();
+    const received: LmsEvent[] = [];
+    // Returns a number (Array.push). Regression: this used to fail tsc.
+    bus.on('enrollment.enrolled', (e) => received.push(e));
+    bus.on('*', (e) => received.push(e));
+
+    await bus.emit(enrolled('e1'));
+
+    expect(received).toHaveLength(2);
+  });
+});
+
+describe('EventBus wildcard listeners', () => {
+  it("delivers every event type to an '*' handler", async () => {
+    const bus = new EventBus();
+    const types: string[] = [];
+    bus.on('*', (e) => {
+      types.push(e.type);
+    });
+
+    await bus.emit(enrolled('e1'));
+    await bus.emit({ type: 'content.published', contentId: 'c1', sectionId: 's1', version: 1 });
+    await bus.emit({ type: 'assessment.submissionReceived', submissionId: 'x', contentId: 'c', userId: 'u', attemptNumber: 1 });
+
+    expect(types).toEqual(['enrollment.enrolled', 'content.published', 'assessment.submissionReceived']);
+  });
+
+  it('runs specific handlers before wildcard handlers for the same event', async () => {
+    const bus = new EventBus();
+    const order: string[] = [];
+    bus.on('*', () => {
+      order.push('wildcard');
+    });
+    bus.on('enrollment.enrolled', () => {
+      order.push('specific');
+    });
+
+    await bus.emit(enrolled('e1'));
+
+    expect(order).toEqual(['specific', 'wildcard']);
+  });
+
+  it('calls a handler once per event, not twice, when both a specific and a wildcard handler exist', async () => {
+    const bus = new EventBus();
+    let wildcardCalls = 0;
+    bus.on('enrollment.enrolled', () => {});
+    bus.on('*', () => {
+      wildcardCalls++;
+    });
+
+    await bus.emit(enrolled('e1'));
+
+    expect(wildcardCalls).toBe(1);
+  });
+
+  it('can be unsubscribed', async () => {
+    const bus = new EventBus();
+    let count = 0;
+    const off = bus.on('*', () => {
+      count++;
+    });
+
+    await bus.emit(enrolled('e1'));
+    off();
+    await bus.emit(enrolled('e2'));
+
+    expect(count).toBe(1);
+  });
+
+  it('isolates a throwing wildcard handler and reports it via onHandlerError', async () => {
+    const errors: unknown[] = [];
+    const bus = new EventBus({ onHandlerError: (err) => errors.push(err) });
+    let specificCalled = false;
+    bus.on('*', () => {
+      throw new Error('boom');
+    });
+    bus.on('enrollment.enrolled', () => {
+      specificCalled = true;
+    });
+
+    await expect(bus.emit(enrolled('e1'))).resolves.toBeUndefined();
+
+    expect(specificCalled).toBe(true);
+    expect(errors).toHaveLength(1);
+  });
+});
+
+describe('EventBus.once', () => {
+  it('fires a typed handler exactly once', async () => {
+    const bus = new EventBus();
+    const ids: string[] = [];
+    bus.once('enrollment.enrolled', (e) => {
+      ids.push(e.enrollmentId);
+    });
+
+    await bus.emit(enrolled('e1'));
+    await bus.emit(enrolled('e2'));
+
+    expect(ids).toEqual(['e1']);
+  });
+
+  it('fires a wildcard handler exactly once, on the first event of any type', async () => {
+    const bus = new EventBus();
+    const types: string[] = [];
+    bus.once('*', (e) => {
+      types.push(e.type);
+    });
+
+    await bus.emit({ type: 'content.published', contentId: 'c1', sectionId: 's1', version: 1 });
+    await bus.emit(enrolled('e1'));
+
+    expect(types).toEqual(['content.published']);
+  });
+
+  it('does not fire if cancelled before the event arrives', async () => {
+    const bus = new EventBus();
+    let called = false;
+    const cancel = bus.once('enrollment.enrolled', () => {
+      called = true;
+    });
+    cancel();
+
+    await bus.emit(enrolled('e1'));
+
+    expect(called).toBe(false);
+  });
+
+  it('still fires only once when the handler re-emits the same event type', async () => {
+    const bus = new EventBus();
+    let calls = 0;
+    bus.once('enrollment.enrolled', async () => {
+      calls++;
+      await bus.emit(enrolled('nested'));
+    });
+
+    await bus.emit(enrolled('e1'));
+
+    expect(calls).toBe(1);
+  });
+
+  it('does not disturb other handlers registered for the same type', async () => {
+    const bus = new EventBus();
+    let persistent = 0;
+    bus.once('enrollment.enrolled', () => {});
+    bus.on('enrollment.enrolled', () => {
+      persistent++;
+    });
+
+    await bus.emit(enrolled('e1'));
+    await bus.emit(enrolled('e2'));
+
+    expect(persistent).toBe(2);
+  });
+});
+

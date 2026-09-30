@@ -1,4 +1,5 @@
 import type { Id } from '../../core/types.js';
+import type { EventBus } from '../../core/events.js';
 import type { SchedulingRepository } from './repositories.js';
 import type { ClassOccurrence, ClassSessionTemplate } from './types.js';
 import { effectiveWindow, findConflictsForResource, type ResourceConflict } from './rules/conflict.js';
@@ -38,6 +39,7 @@ export class SchedulingService {
   constructor(
     private readonly scheduling: SchedulingRepository,
     private readonly attendanceRecorder?: AttendanceRecorder,
+    private readonly events?: EventBus,
   ) {}
 
   /**
@@ -257,7 +259,14 @@ export class SchedulingService {
   async cancelOccurrence(id: Id, note?: string): Promise<ClassOccurrence> {
     const patch: Partial<ClassOccurrence> = { status: 'cancelled' };
     if (note !== undefined) patch.note = note;
-    return this.scheduling.updateOccurrence(id, patch);
+    const updated = await this.scheduling.updateOccurrence(id, patch);
+    void this.events?.emit({
+      type: 'scheduling.occurrenceCancelled',
+      occurrenceId: updated.id,
+      templateId: updated.templateId,
+      ...(updated.note !== undefined && { note: updated.note }),
+    });
+    return updated;
   }
 
   /** Moves a single occurrence to a new room/time, leaving the template untouched. */
@@ -265,7 +274,17 @@ export class SchedulingService {
     id: Id,
     patch: { roomId?: Id; startTime?: string; endTime?: string; date?: Date },
   ): Promise<ClassOccurrence> {
-    return this.scheduling.updateOccurrence(id, { ...patch, status: 'moved' });
+    const updated = await this.scheduling.updateOccurrence(id, { ...patch, status: 'moved' });
+    void this.events?.emit({
+      type: 'scheduling.occurrenceRescheduled',
+      occurrenceId: updated.id,
+      templateId: updated.templateId,
+      date: updated.date,
+      ...(updated.roomId !== undefined && { roomId: updated.roomId }),
+      ...(updated.startTime !== undefined && { startTime: updated.startTime }),
+      ...(updated.endTime !== undefined && { endTime: updated.endTime }),
+    });
+    return updated;
   }
 
   /**

@@ -108,6 +108,12 @@ const commsService = new CommunicationService(announcementRepo, threadRepo, {
 });
 ```
 
+Events work the same way: build one `EventBus`, pass it as the optional
+last constructor argument to the services that emit, and subscribe with
+`bus.on(...)`. To turn grade events into notifications, use
+`bridgeEventBusToNotificationSink(bus, sink, { resolveContentId })` from
+`hyperlms-sdk/communication`.
+
 Omit these entirely if you don't need them yet — they're optional
 constructor parameters, not required wiring.
 

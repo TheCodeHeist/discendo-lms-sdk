@@ -35,9 +35,14 @@ sanctioned connection between the two layers is:
 
 1. **The shared `EventBus`** (`../core/events.js`) — a domain service emits
    an event; a host app wires a `services/` module (or its own code) to
-   listen for it. `communication.CommunicationService` doesn't currently
-   subscribe to the bus itself, but a host app can freely have its
-   `NotificationSink` implementation do so.
+   listen for it. `communication.CommunicationService` doesn't subscribe to the bus
+   itself, but `communication` ships `bridgeEventBusToNotificationSink(bus,
+   sink, { resolveContentId })` (`communication/event-bridge.ts`), which
+   forwards `grading.gradePosted` to a `NotificationSink` as a `gradePosted`
+   notification. The bus event carries a `submissionId` while the
+   notification needs a `contentId`, so the host supplies `resolveContentId`
+   to look it up; without it, grade events are not forwarded. Other bus
+   events have no `NotificationEvent` equivalent yet and are ignored.
 2. **Loose ID references** — `reporting.AttendanceRecord.sessionId` is
    typed as a plain `Id`, not a hard reference to
    `scheduling.ClassOccurrence`. The host app (or, for the validated path,

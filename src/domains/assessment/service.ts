@@ -1,3 +1,4 @@
+import type { EventBus } from '../../core/events.js';
 import type {
   Submission,
   SubmissionPayload,
@@ -21,6 +22,7 @@ export class AssessmentService {
     private readonly submissions: SubmissionRepository,
     private readonly quizzes: QuizRepository,
     private readonly plagiarismHook?: PlagiarismCheckHook,
+    private readonly events?: EventBus,
   ) {}
 
   async submit(
@@ -46,6 +48,15 @@ export class AssessmentService {
       // Fire-and-forget by design — don't block submission on a slow external check.
       void this.plagiarismHook(submission);
     }
+
+    // Fire-and-forget: a slow or failing listener must never delay or fail a submission.
+    void this.events?.emit({
+      type: 'assessment.submissionReceived',
+      submissionId: submission.id,
+      contentId: submission.contentId,
+      userId: submission.userId,
+      attemptNumber: submission.attemptNumber,
+    });
 
     return submission;
   }
