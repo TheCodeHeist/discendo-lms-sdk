@@ -1,5 +1,6 @@
-# Stupid backup zip files
-# *.zip
+# Stupid save files or development files
+*.zip
+Modelfile
 
 # Logs
 logs
