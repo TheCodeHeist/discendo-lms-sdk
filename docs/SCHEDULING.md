@@ -2,7 +2,7 @@
 
 `src/domains/scheduling/` — class-routine / timetable management, including an
 auto-scheduling solver. This is the largest and most involved module in the
-SDK. Subpath: `hyperlms-sdk/scheduling`.
+SDK. Subpath: `discendo-sdk/scheduling`.
 
 **A note on `scheduling/calendar/`.** Inside this module sits a small,
 self-contained sub-module, `calendar/`, that handles assignment due-date

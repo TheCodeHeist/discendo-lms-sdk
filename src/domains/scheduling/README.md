@@ -76,7 +76,7 @@ teachers, rooms, and groups. A contributor looking for anything
 time-related should only have one folder to check.
 
 If you are building only assignment due dates and do not need class
-routines, you can import `hyperlms-sdk/scheduling/calendar` directly and
+routines, you can import `discendo-sdk/scheduling/calendar` directly and
 skip everything else.
 
 ## Two rules of thumb

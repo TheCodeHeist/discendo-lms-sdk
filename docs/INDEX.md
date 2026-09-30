@@ -1,4 +1,4 @@
-# HyperLMS SDK — Documentation
+# DiscendoLMS SDK — Documentation
 
 A framework- and database-agnostic TypeScript SDK of LMS (Learning Management
 System) logic, built on Bun. The SDK provides typed domain models, pure
@@ -17,23 +17,23 @@ typechecked.
 
 Each top-level folder under `src/` is an independent module with its own
 `index.ts` barrel export, and is independently importable via a package
-subpath (e.g. `hyperlms-sdk/grading`, `hyperlms-sdk/scheduling`). Modules do not import
+subpath (e.g. `discendo-sdk/grading`, `discendo-sdk/scheduling`). Modules do not import
 from each other except where explicitly noted (e.g. several modules import
 shared primitives from `core`). This means a host app can adopt one module
 (say, just `grading`) without pulling in the rest.
 
 | Module            | Subpath                      | What it covers                                                                                                                                                                                                                                     |
 | ----------------- | ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **core**          | `hyperlms-sdk/core`          | Shared primitives: `Id`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, and the `RepositoryContext` bundle other modules are built on                                                                                     |
-| **enrollment**    | `hyperlms-sdk/enrollment`    | Enrolling/dropping students, waitlisting at capacity, bulk roster import                                                                                                                                                                           |
-| **content**       | `hyperlms-sdk/content`       | Content tree management, publishing/versioning, prerequisite gating                                                                                                                                                                                |
-| **assessment**    | `hyperlms-sdk/assessment`    | Submissions, attempt limits, quiz attempt generation with randomization, a plagiarism-check seam                                                                                                                                                   |
-| **grading**       | `hyperlms-sdk/grading`       | Grade recording with full audit history, weighted final-grade calculation, late penalties, letter grades                                                                                                                                           |
-| **communication** | `hyperlms-sdk/communication` | Announcements, discussion threads, a typed notification-event seam                                                                                                                                                                                 |
-| **scheduling**    | `hyperlms-sdk/scheduling`    | Class-routine/timetable management: recurring session templates, materialized occurrences, conflict detection, availability rules, room matching, teacher qualifications, an auto-scheduling solver with soft-constraint preferences, and (under `scheduling/calendar`) assignment due-date windows and iCal export. By far the largest module — start with `src/domains/scheduling/README.md` |
-| **reporting**     | `hyperlms-sdk/reporting`     | Attendance recording, CSV export for any tabular data, completion-percentage calculation                                                                                                                                                           |
-| **admin**         | `hyperlms-sdk/admin`         | Audit logging (`withAudit` wrapper + `AdminService`)                                                                                                                                                                                               |
-| **interop**       | `hyperlms-sdk/interop`       | Type-only seams for LTI launch/grade-passback, generic auth token verification, and content package (SCORM/xAPI) import — deliberately does not implement any protocol itself                                                                      |
+| **core**          | `discendo-sdk/core`          | Shared primitives: `Id`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, and the `RepositoryContext` bundle other modules are built on                                                                                     |
+| **enrollment**    | `discendo-sdk/enrollment`    | Enrolling/dropping students, waitlisting at capacity, bulk roster import                                                                                                                                                                           |
+| **content**       | `discendo-sdk/content`       | Content tree management, publishing/versioning, prerequisite gating                                                                                                                                                                                |
+| **assessment**    | `discendo-sdk/assessment`    | Submissions, attempt limits, quiz attempt generation with randomization, a plagiarism-check seam                                                                                                                                                   |
+| **grading**       | `discendo-sdk/grading`       | Grade recording with full audit history, weighted final-grade calculation, late penalties, letter grades                                                                                                                                           |
+| **communication** | `discendo-sdk/communication` | Announcements, discussion threads, a typed notification-event seam                                                                                                                                                                                 |
+| **scheduling**    | `discendo-sdk/scheduling`    | Class-routine/timetable management: recurring session templates, materialized occurrences, conflict detection, availability rules, room matching, teacher qualifications, an auto-scheduling solver with soft-constraint preferences, and (under `scheduling/calendar`) assignment due-date windows and iCal export. By far the largest module — start with `src/domains/scheduling/README.md` |
+| **reporting**     | `discendo-sdk/reporting`     | Attendance recording, CSV export for any tabular data, completion-percentage calculation                                                                                                                                                           |
+| **admin**         | `discendo-sdk/admin`         | Audit logging (`withAudit` wrapper + `AdminService`)                                                                                                                                                                                               |
+| **interop**       | `discendo-sdk/interop`       | Type-only seams for LTI launch/grade-passback, generic auth token verification, and content package (SCORM/xAPI) import — deliberately does not implement any protocol itself                                                                      |
 
 ## Design principles that hold across every module
 
@@ -92,7 +92,7 @@ Most modules depend only on `core` (for shared types like `Id` and
   `scheduling` as `scheduling/calendar/`. It shares no code with the
   class-routine logic — it sits there because both answer "is this thing
   available right now?", one for assignments, one for teachers/rooms/groups.
-  It is still importable on its own via `hyperlms-sdk/scheduling/calendar`.
+  It is still importable on its own via `discendo-sdk/scheduling/calendar`.
 
 ## Project structure on disk
 

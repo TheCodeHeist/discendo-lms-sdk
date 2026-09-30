@@ -1,6 +1,6 @@
 /**
  * Root export — convenience for consumers who want everything from one
- * import. Prefer subpath imports (e.g. `hyperlms-sdk/grading`) in real apps
+ * import. Prefer subpath imports (e.g. `discendo-sdk/grading`) in real apps
  * to keep bundles small.
  *
  * Modules are organized into three layers — see each layer's README for
