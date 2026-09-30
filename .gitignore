@@ -1,3 +1,6 @@
+# Stupid backup zip files
+*.zip
+
 # Logs
 logs
 *.log
