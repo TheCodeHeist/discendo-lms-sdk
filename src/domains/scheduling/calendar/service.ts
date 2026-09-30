@@ -23,10 +23,10 @@ export class CalendarService {
     for (const e of events) {
       lines.push(
         'BEGIN:VEVENT',
-        `UID:${e.id}`,
+        `UID:${escapeIcalText(e.id)}`,
         `DTSTAMP:${formatIcalDate(new Date())}`,
         `DTSTART:${formatIcalDate(e.dueAt)}`,
-        `SUMMARY:${e.title}`,
+        `SUMMARY:${escapeIcalText(e.title)}`,
         'END:VEVENT',
       );
     }
@@ -37,4 +37,19 @@ export class CalendarService {
 
 function formatIcalDate(d: Date): string {
   return d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+}
+
+/**
+ * Escapes a TEXT value per RFC 5545 section 3.3.11. Backslash must be
+ * handled first so the backslashes added by the later replacements aren't
+ * themselves doubled. Line breaks become a literal `\n`; without that, a
+ * title containing CR/LF could start a new content line and inject
+ * properties or whole events into a feed that other people subscribe to.
+ */
+function escapeIcalText(text: string): string {
+  return text
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\r\n|\r|\n/g, '\\n');
 }

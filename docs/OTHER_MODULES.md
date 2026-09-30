@@ -478,7 +478,12 @@ WILL get off-by-one-timezone bugs."
   else `'open'`.
 - **`toIcal(events: Array<{ id, title, dueAt }>): string`** — Minimal RFC
   5545 iCal export: one `VEVENT` per event with `UID`, `DTSTAMP`, `DTSTART`,
-  `SUMMARY`.
+  `SUMMARY`. `id` and `title` are escaped as iCal TEXT (`\`, `;`, `,` and
+  line breaks), so a title such as `Quiz 1, part 2` is valid and a title
+  containing a line break cannot inject extra properties or events into the
+  feed. `dueAt` is written in UTC (`YYYYMMDDTHHMMSSZ`, no milliseconds) and
+  an invalid `Date` throws `RangeError`. Not implemented yet: folding of
+  lines longer than 75 octets, and a trailing CRLF after `END:VCALENDAR`.
 
 ---
 

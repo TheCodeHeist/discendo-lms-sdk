@@ -93,6 +93,16 @@ describe('architecture: layering rules', () => {
     expect(missing).toEqual([]);
   });
 
+  it('src/ contains only the four layers and the root barrel', () => {
+    // A module folder sitting directly under src/ (e.g. src/scheduling/) would
+    // pass every other check here, because it just looks like a module named
+    // "scheduling". That is exactly how leftover pre-restructure copies went
+    // unnoticed, so the allowed top-level entries are spelled out.
+    const allowed = ['core', 'domains', 'services', 'interop', 'index.ts'];
+    const unexpected = readdirSync(SRC).filter((name) => !allowed.includes(name));
+    expect(unexpected).toEqual([]);
+  });
+
   it('every layer folder has a README explaining its rule', () => {
     for (const layer of ['core', 'domains', 'services']) {
       expect(readdirSync(join(SRC, layer))).toContain('README.md');
