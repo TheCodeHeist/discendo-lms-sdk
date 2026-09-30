@@ -1,4 +1,4 @@
-# HyperLMS SDK | A framework-agnostic SDK for any Learning Management System (LMS)
+# DiscendoLMS SDK | A framework-agnostic SDK for any Learning Management System (LMS)
 
 > **STILL IN EARLY DEVELOPMENT — expect breaking changes and incomplete coverage. The SDK is not yet ready for production use.**
 

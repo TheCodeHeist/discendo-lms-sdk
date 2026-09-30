@@ -1,5 +1,5 @@
 {
-  "name": "hyperlms-sdk",
+  "name": "discendo-sdk",
   "version": "0.1.0",
   "description": "Framework- and database-agnostic LMS logic SDK",
   "type": "module",

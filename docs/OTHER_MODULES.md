@@ -7,7 +7,7 @@ code and its comments.
 
 ---
 
-## `core` — `hyperlms-sdk/core`
+## `core` — `discendo-sdk/core`
 
 Shared primitives every other module is built on. Two files:
 `types.ts`, `repositories.ts`.
@@ -139,7 +139,7 @@ that needs it.
 
 ---
 
-## `enrollment` — `hyperlms-sdk/enrollment`
+## `enrollment` — `discendo-sdk/enrollment`
 
 ### Types
 
@@ -182,7 +182,7 @@ Constructed with a `RepositoryContext`.
 
 ---
 
-## `content` — `hyperlms-sdk/content`
+## `content` — `discendo-sdk/content`
 
 ### `ContentService`
 
@@ -213,7 +213,7 @@ progress storage.
 
 ---
 
-## `assessment` — `hyperlms-sdk/assessment`
+## `assessment` — `discendo-sdk/assessment`
 
 ### Types
 
@@ -298,7 +298,7 @@ Constructed with `(submissions, quizzes, plagiarismHook?)`.
 
 ---
 
-## `grading` — `hyperlms-sdk/grading`
+## `grading` — `discendo-sdk/grading`
 
 ### Types
 
@@ -383,7 +383,7 @@ Promise<string>`**
 
 ---
 
-## `communication` — `hyperlms-sdk/communication`
+## `communication` — `discendo-sdk/communication`
 
 ### Types
 
@@ -451,13 +451,13 @@ Constructed with `(announcements, threads, sink?)`.
 
 ---
 
-## `scheduling/calendar` — `hyperlms-sdk/scheduling/calendar`
+## `scheduling/calendar` — `discendo-sdk/scheduling/calendar`
 
 Lives inside the `scheduling` domain (see `src/domains/scheduling/README.md`
 for why) but documented here because it is unrelated to class routines: this
 sub-module is entirely about assignment due-date availability windows and
 calendar export, and does not model teachers, rooms, or recurring class
-routines at all. Also re-exported from `hyperlms-sdk/scheduling`.
+routines at all. Also re-exported from `discendo-sdk/scheduling`.
 
 ```ts
 type AvailabilityState = "locked" | "open" | "closed";
@@ -478,11 +478,16 @@ WILL get off-by-one-timezone bugs."
   else `'open'`.
 - **`toIcal(events: Array<{ id, title, dueAt }>): string`** — Minimal RFC
   5545 iCal export: one `VEVENT` per event with `UID`, `DTSTAMP`, `DTSTART`,
-  `SUMMARY`.
+  `SUMMARY`. `id` and `title` are escaped as iCal TEXT (`\`, `;`, `,` and
+  line breaks), so a title such as `Quiz 1, part 2` is valid and a title
+  containing a line break cannot inject extra properties or events into the
+  feed. `dueAt` is written in UTC (`YYYYMMDDTHHMMSSZ`, no milliseconds) and
+  an invalid `Date` throws `RangeError`. Not implemented yet: folding of
+  lines longer than 75 octets, and a trailing CRLF after `END:VCALENDAR`.
 
 ---
 
-## `reporting` — `hyperlms-sdk/reporting`
+## `reporting` — `discendo-sdk/reporting`
 
 ### Types
 
@@ -526,7 +531,7 @@ wants that link.
 
 ---
 
-## `admin` — `hyperlms-sdk/admin`
+## `admin` — `discendo-sdk/admin`
 
 ```ts
 interface AuditEntry {
@@ -558,7 +563,7 @@ Promise<T>`** — A generic wrapper function (not a method): runs `fn()`,
 
 ---
 
-## `interop` — `hyperlms-sdk/interop`
+## `interop` — `discendo-sdk/interop`
 
 **Type-only module** — no service class, no implementation, on purpose.
 Source comments are explicit: _"Don't hand-roll LTI/SAML/OIDC — expose the

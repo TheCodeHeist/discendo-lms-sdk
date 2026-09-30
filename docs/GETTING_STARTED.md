@@ -11,15 +11,15 @@ module and the one most likely to need a concrete example to click.
 The SDK is ESM (`"type": "module"`) with a subpath export per module:
 
 ```ts
-import { EnrollmentService } from "hyperlms-sdk/enrollment";
-import { GradingService } from "hyperlms-sdk/grading";
-import { SchedulingService } from "hyperlms-sdk/scheduling";
+import { EnrollmentService } from "discendo-sdk/enrollment";
+import { GradingService } from "discendo-sdk/grading";
+import { SchedulingService } from "discendo-sdk/scheduling";
 ```
 
 or, from the root barrel, everything at once:
 
 ```ts
-import { EnrollmentService, GradingService, SchedulingService } from "hyperlms-sdk";
+import { EnrollmentService, GradingService, SchedulingService } from "discendo-sdk";
 ```
 
 Prefer subpath imports in real apps to keep bundles small — the root barrel
@@ -35,7 +35,7 @@ the interface's method signatures.
 For example, `grading`'s `GradeRepository`:
 
 ```ts
-import type { GradeRepository, GradeEntry } from "hyperlms-sdk/grading";
+import type { GradeRepository, GradeEntry } from "discendo-sdk/grading";
 
 class PrismaGradeRepository implements GradeRepository {
   constructor(private prisma: PrismaClient) {}
@@ -112,7 +112,7 @@ Events work the same way: build one `EventBus`, pass it as the optional
 last constructor argument to the services that emit, and subscribe with
 `bus.on(...)`. To turn grade events into notifications, use
 `bridgeEventBusToNotificationSink(bus, sink, { resolveContentId })` from
-`hyperlms-sdk/communication`.
+`discendo-sdk/communication`.
 
 Omit these entirely if you don't need them yet — they're optional
 constructor parameters, not required wiring.
@@ -123,7 +123,7 @@ constructor parameters, not required wiring.
 so it composes with anything:
 
 ```ts
-import { withAudit } from "hyperlms-sdk/admin";
+import { withAudit } from "discendo-sdk/admin";
 
 await withAudit(auditRepo, "grade.record", submissionId, actorId, () =>
   gradingService.recordGrade(submissionId, userId, score, maxScore, actorId),
@@ -142,9 +142,9 @@ implementation the same way as any other repository.
 ### Step 1 — set up rooms and groups
 
 ```ts
-import { InMemorySchedulingRepository } from "hyperlms-sdk/scheduling"; // path shown for illustration;
+import { InMemorySchedulingRepository } from "discendo-sdk/scheduling"; // path shown for illustration;
 // in a real app this is your own SchedulingRepository implementation, not the in-memory one
-import { SchedulingService } from "hyperlms-sdk/scheduling";
+import { SchedulingService } from "discendo-sdk/scheduling";
 
 const repo = new InMemorySchedulingRepository();
 

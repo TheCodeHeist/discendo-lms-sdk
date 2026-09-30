@@ -45,9 +45,9 @@ your host app's email logic lives (or in a `services/communication`
 ### Wiring it in a host app
 
 ```ts
-import { EventBus } from "hyperlms-sdk/core";
-import { EnrollmentService } from "hyperlms-sdk/enrollment";
-import { GradingService } from "hyperlms-sdk/grading";
+import { EventBus } from "discendo-sdk/core";
+import { EnrollmentService } from "discendo-sdk/enrollment";
+import { GradingService } from "discendo-sdk/grading";
 
 const bus = new EventBus({
   onHandlerError: (err, event) => logger.error("event handler failed", { err, event }),

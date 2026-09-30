@@ -1,4 +1,4 @@
-# Copilot Instructions — hyperlms-sdk
+# Copilot Instructions — discendo-sdk
 
 This is a **framework- and database-agnostic** LMS logic SDK. It ships as a
 TypeScript library that host apps `bun install` / `npm install` into their
