@@ -1,14 +1,16 @@
 # Scheduling Module
 
-`src/scheduling/` — class-routine / timetable management, including an
+`src/domains/scheduling/` — class-routine / timetable management, including an
 auto-scheduling solver. This is the largest and most involved module in the
 SDK. Subpath: `hyperlms-sdk/scheduling`.
 
-**This is not the same thing as `src/calendar/`.** `calendar` handles
-assignment due-date availability windows (locked/open/closed) and iCal
-export. `scheduling` handles _when classes meet_: teachers, rooms, groups,
-recurring patterns, and conflict-free timetable generation. The two modules
-were built independently and never overlap.
+**A note on `scheduling/calendar/`.** Inside this module sits a small,
+self-contained sub-module, `calendar/`, that handles assignment due-date
+windows (locked/open/closed) and iCal export. It shares no code with the
+class-routine logic described in the rest of this document; it lives here
+because both answer "is this thing available right now?". This document
+covers the class-routine side. For a quick folder map and "which piece do I
+need" table, see `src/domains/scheduling/README.md`.
 
 ## Why the module is shaped this way
 
@@ -42,26 +44,31 @@ propose a full conflict-free timetable given a set of unscheduled sessions.
 ## File inventory
 
 ```
-src/scheduling/
+src/domains/scheduling/
   types.ts               Domain model: Weekday, RecurrenceRule, AvailabilityRule,
                           ClassSessionTemplate, ClassOccurrence, Room, SchedulingGroup
   repositories.ts         SchedulingRepository interface
-  recurrence.ts           Shared "does this rule fire on this date" logic
-  generator.ts            Materializes ClassOccurrences from a template + date range
-  conflict.ts             Pure double-booking detection over occurrences
-  availability.ts         Pure "is this resource allowed to be booked here" checks
-  room-matching.ts        Pure capacity/feature matching for rooms
-  solver-adapter.ts        Bridges repository data <-> the solver's pure input/output shapes
   service.ts              SchedulingService — the class most host apps interact with
+  rules/                  Pure constraint checks (no I/O, no repository)
+    recurrence.ts           Shared "does this rule fire on this date" logic
+    conflict.ts             Pure double-booking detection over occurrences
+    availability.ts         Pure "is this resource allowed to be booked here" checks
+    room-matching.ts        Pure capacity/feature matching for rooms
+    teacher-qualification.ts  Pure "is this teacher allowed to teach this course"
+  generator.ts            Materializes ClassOccurrences from a template + date range
+  attendance.ts           Validates attendance can be recorded for an occurrence
+  solver-adapter.ts       Bridges repository data <-> the solver's pure input/output shapes
   solver/
     types.ts               Solver input/output types (UnscheduledSession, SchedulingProblem,
                             PlacedSession, SolveResult, etc.)
     backtracking.ts         The actual solver algorithm
+    soft-constraints.ts     Preference scoring (teacher time, preferred room, spacing)
     index.ts                Barrel export for solver/
+  calendar/               Assignment due-date windows + iCal export (self-contained)
   testing/
     in-memory-repository.ts  Reference SchedulingRepository implementation (Map-backed).
                               NOT exported from the package root — for tests/dev only.
-  index.ts                 Module barrel (exports everything above except testing/)
+  index.ts                Module barrel (exports everything above except testing/)
 ```
 
 ---

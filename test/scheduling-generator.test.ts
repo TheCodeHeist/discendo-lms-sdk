@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'bun:test';
-import { generateOccurrences } from '../src/scheduling/generator.js';
-import { SchedulingService } from '../src/scheduling/service.js';
-import { InMemorySchedulingRepository } from '../src/scheduling/testing/in-memory-repository.js';
-import type { ClassSessionTemplate } from '../src/scheduling/index.js';
+import { generateOccurrences } from '../src/domains/scheduling/generator.js';
+import { SchedulingService } from '../src/domains/scheduling/service.js';
+import { InMemorySchedulingRepository } from '../src/domains/scheduling/testing/in-memory-repository.js';
+import type { ClassSessionTemplate } from '../src/domains/scheduling/index.js';
 
 function baseTemplate(overrides: Partial<ClassSessionTemplate> = {}): ClassSessionTemplate {
   return {

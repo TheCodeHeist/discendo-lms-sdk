@@ -30,8 +30,7 @@ shared primitives from `core`). This means a host app can adopt one module
 | **assessment**    | `hyperlms-sdk/assessment`    | Submissions, attempt limits, quiz attempt generation with randomization, a plagiarism-check seam                                                                                                                                                   |
 | **grading**       | `hyperlms-sdk/grading`       | Grade recording with full audit history, weighted final-grade calculation, late penalties, letter grades                                                                                                                                           |
 | **communication** | `hyperlms-sdk/communication` | Announcements, discussion threads, a typed notification-event seam                                                                                                                                                                                 |
-| **calendar**      | `hyperlms-sdk/calendar`      | Due-date availability windows (locked/open/closed) and iCal export — **not** class-routine scheduling (see `scheduling`)                                                                                                                           |
-| **scheduling**    | `hyperlms-sdk/scheduling`    | Class-routine/timetable management: recurring session templates, materialized occurrences, conflict detection, availability rules, room matching, and an auto-scheduling solver. By far the largest and most involved module — see `SCHEDULING.md` |
+| **scheduling**    | `hyperlms-sdk/scheduling`    | Class-routine/timetable management: recurring session templates, materialized occurrences, conflict detection, availability rules, room matching, teacher qualifications, an auto-scheduling solver with soft-constraint preferences, and (under `scheduling/calendar`) assignment due-date windows and iCal export. By far the largest module — start with `src/domains/scheduling/README.md` |
 | **reporting**     | `hyperlms-sdk/reporting`     | Attendance recording, CSV export for any tabular data, completion-percentage calculation                                                                                                                                                           |
 | **admin**         | `hyperlms-sdk/admin`         | Audit logging (`withAudit` wrapper + `AdminService`)                                                                                                                                                                                               |
 | **interop**       | `hyperlms-sdk/interop`       | Type-only seams for LTI launch/grade-passback, generic auth token verification, and content package (SCORM/xAPI) import — deliberately does not implement any protocol itself                                                                      |
@@ -89,31 +88,40 @@ Most modules depend only on `core` (for shared types like `Id` and
   module, and nothing in `scheduling` currently reads from `CourseSection`
   directly — it uses its own `sectionId: Id` fields as a loose reference the
   host app resolves however it needs to.
-- `calendar` and `scheduling` are **separate, non-overlapping modules**
-  despite the name similarity: `calendar` is about assignment due-date
-  windows, `scheduling` is about class timetables. See `SCHEDULING.md` for
-  the full detail.
+- `calendar` (assignment due-date windows, iCal export) lives inside
+  `scheduling` as `scheduling/calendar/`. It shares no code with the
+  class-routine logic — it sits there because both answer "is this thing
+  available right now?", one for assignments, one for teachers/rooms/groups.
+  It is still importable on its own via `hyperlms-sdk/scheduling/calendar`.
 
 ## Project structure on disk
 
+The SDK is organized into layers. Each layer folder has a `README.md`
+stating its rule, and `test/architecture.test.ts` enforces those rules in CI.
+
 ```
 src/
-  core/           types.ts, repositories.ts, index.ts
-  enrollment/     types.ts, service.ts, index.ts
-  content/        service.ts, index.ts
-  assessment/     types.ts, service.ts, index.ts
-  grading/        types.ts, calculations.ts, service.ts, index.ts
-  communication/  types.ts, service.ts, index.ts
-  calendar/       service.ts, index.ts
-  scheduling/     (see SCHEDULING.md — 13 source files)
-  reporting/      service.ts, index.ts
-  admin/          service.ts, index.ts
-  interop/        types.ts, index.ts
-  index.ts        (root barrel — re-exports every module)
+  core/         shared primitives + EventBus. Imports nothing else in the SDK.
+  domains/      modules that own a primary entity a host app persists
+    enrollment/   content/   assessment/   grading/
+    scheduling/   (rules/, solver/, calendar/, testing/ — see its README)
+  services/     cross-cutting modules that consume/aggregate what domains produce
+    communication/   reporting/   admin/
+  interop/      pluggable protocol seams only (LTI, SSO, SCORM/xAPI)
+  index.ts      root barrel — re-exports every module
 test/
-  grading.test.ts
-  scheduling*.test.ts   (6 files — see SCHEDULING.md)
+  architecture.test.ts   enforces the layering rules
+  *-events.test.ts       EventBus + per-service event emission
+  grading.test.ts, scheduling*.test.ts
 ```
+
+**Where does a new module go?** Does it own an entity with its own
+identity and lifecycle that a host app would have a table for? Put it in
+`domains/`. Does it mostly react to or summarize what domains already
+produced? Put it in `services/`. Is it a protocol seam with no
+implementation? `interop/`. A module may import only `core` and its own
+files — never another domain or service. Coordinate through the shared
+`EventBus` instead.
 
 ## Runtime & tooling
 

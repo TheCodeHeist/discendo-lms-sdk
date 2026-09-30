@@ -4,8 +4,8 @@ import {
   preferredRoomForCourse,
   spaceOutSameDaySessions,
   scoreCandidate,
-} from '../src/scheduling/index.js';
-import type { CandidateContext, UnscheduledSession, PlacedSession } from '../src/scheduling/index.js';
+} from '../src/domains/scheduling/index.js';
+import type { CandidateContext, UnscheduledSession, PlacedSession } from '../src/domains/scheduling/index.js';
 
 function session(overrides: Partial<UnscheduledSession> = {}): UnscheduledSession {
   return {

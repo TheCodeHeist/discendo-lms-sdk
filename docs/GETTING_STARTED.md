@@ -63,7 +63,7 @@ directly, not through `RepositoryContext`.
 
 For quick prototyping or tests, an in-memory `Map`-backed implementation is
 often faster to write than wiring a real database — see
-`src/scheduling/testing/in-memory-repository.ts` for a complete worked
+`src/domains/scheduling/testing/in-memory-repository.ts` for a complete worked
 example of that pattern (note: it's not exported from the package, since
 it's meant to be copied/adapted, not depended on).
 

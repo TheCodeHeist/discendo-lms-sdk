@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { EnrollmentService } from '../src/enrollment/index.js';
+import { EnrollmentService } from '../src/domains/enrollment/index.js';
 import { EventBus } from '../src/core/index.js';
 import type { RepositoryContext } from '../src/core/index.js';
 import type { Enrollment, CourseSection } from '../src/core/index.js';

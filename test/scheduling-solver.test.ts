@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'bun:test';
-import { solveSchedule } from '../src/scheduling/index.js';
-import type { SchedulingProblem, UnscheduledSession } from '../src/scheduling/index.js';
+import { solveSchedule } from '../src/domains/scheduling/index.js';
+import type { SchedulingProblem, UnscheduledSession } from '../src/domains/scheduling/index.js';
 
 function session(overrides: Partial<UnscheduledSession> = {}): UnscheduledSession {
   return {

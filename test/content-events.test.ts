@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { ContentService } from '../src/content/index.js';
+import { ContentService } from '../src/domains/content/index.js';
 import { EventBus } from '../src/core/index.js';
 import type { RepositoryContext } from '../src/core/index.js';
 import type { ContentNode } from '../src/core/index.js';
