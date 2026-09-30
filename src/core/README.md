@@ -62,10 +62,32 @@ bus.on("enrollment.enrolled", async (e) => {
   await syncToRegistrar(e.enrollmentId);
 });
 
+// '*' receives every event: handy for audit logs or forwarding to another system.
+bus.on("*", (e) => auditLog.append(e.type, e));
+
+// once() fires a single time, then removes itself.
+bus.once("content.published", (e) => warmCache(e.contentId));
+
 // Every service that takes an EventBus gets the SAME instance.
 const enrollmentService = new EnrollmentService(repos, bus);
 const gradingService = new GradingService(gradeRepo, bus);
 ```
+
+### Listening rules
+
+- `on(type, handler)` / `once(type, handler)` listen for one event type;
+  passing `"*"` instead listens for all of them. Both return an unsubscribe
+  function.
+- For a single event, handlers registered for its exact type run before
+  `"*"` handlers. A handler is never called twice for one event.
+- A handler may return anything. Only a returned promise is awaited, so
+  `(e) => received.push(e)` is a valid handler.
+- Events emitted today: `enrollment.enrolled`, `enrollment.dropped`,
+  `grading.gradePosted`, `content.published`,
+  `assessment.submissionReceived`, `scheduling.occurrenceCancelled` and
+  `scheduling.occurrenceRescheduled`. Services that emit take the bus as an
+  optional trailing constructor argument (`AssessmentService` as its 4th,
+  `SchedulingService` as its 3rd).
 
 Passing an `EventBus` to a service is always optional — omit it and the
 service behaves exactly as if events didn't exist, with zero overhead.

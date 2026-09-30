@@ -19,7 +19,14 @@
  * every service a host app constructs, can dispatch all of them through
  * one `on`/`emit` surface — no per-module bus, no separate wiring per
  * feature.
+ *
+ * Listening: `on(type, handler)` for one event type, `on('*', handler)` to
+ * receive every event (useful for logging, audit trails, or bridging the
+ * bus into another system — see `services/communication/event-bridge.ts`),
+ * and `once(...)` for either form when a handler should fire a single time.
  */
+
+import type { Timestamp } from './types.js';
 
 // --- enrollment events ---
 export interface EnrolledEvent {
@@ -55,23 +62,65 @@ export interface ContentPublishedEvent {
   version: number;
 }
 
+// --- assessment events ---
+export interface SubmissionReceivedEvent {
+  type: 'assessment.submissionReceived';
+  submissionId: string;
+  contentId: string;
+  userId: string;
+  attemptNumber: number;
+}
+
+// --- scheduling events ---
+export interface OccurrenceCancelledEvent {
+  type: 'scheduling.occurrenceCancelled';
+  occurrenceId: string;
+  templateId: string;
+  note?: string;
+}
+/** Carries the occurrence's values AFTER the move, not the patch that was applied. */
+export interface OccurrenceRescheduledEvent {
+  type: 'scheduling.occurrenceRescheduled';
+  occurrenceId: string;
+  templateId: string;
+  date: Timestamp;
+  roomId?: string;
+  startTime?: string;
+  endTime?: string;
+}
+
 /**
  * Every event any module can emit. Extending this in the future (a new
  * module, a new event on an existing module) is additive — add a variant,
  * add it to this union. Existing handlers registered for other event
  * types are unaffected.
  */
-export type LmsEvent = EnrolledEvent | DroppedEvent | GradePostedEvent | ContentPublishedEvent;
+export type LmsEvent =
+  | EnrolledEvent
+  | DroppedEvent
+  | GradePostedEvent
+  | ContentPublishedEvent
+  | SubmissionReceivedEvent
+  | OccurrenceCancelledEvent
+  | OccurrenceRescheduledEvent;
 
 /** Narrows LmsEvent to just the variant(s) matching a given `type` literal. */
 export type LmsEventOfType<T extends LmsEvent['type']> = Extract<LmsEvent, { type: T }>;
 
-type Handler<T extends LmsEvent['type']> = (event: LmsEventOfType<T>) => void | Promise<void>;
+/**
+ * Handlers may return anything: only a returned promise is awaited, any other
+ * value is ignored. Typing this as `void | Promise<void>` would reject
+ * perfectly reasonable one-liners like `(e) => received.push(e)`.
+ */
+export type Handler<T extends LmsEvent['type']> = (event: LmsEventOfType<T>) => unknown;
+
+/** Receives every event regardless of type. Register with `on('*', ...)`. */
+export type WildcardHandler = (event: LmsEvent) => unknown;
 
 /** Internal storage type — deliberately erased since a single Map can't express
  * "handler type varies per key" natively. The public `on`/`emit` API stays
  * fully typed; this cast is confined to this one file. */
-type ErasedHandler = (event: LmsEvent) => void | Promise<void>;
+type ErasedHandler = (event: LmsEvent) => unknown;
 
 export interface EventBusOptions {
   /**
@@ -99,30 +148,60 @@ export interface EventBusOptions {
  * down by however long handlers take to run.
  */
 export class EventBus {
-  private handlers = new Map<LmsEvent['type'], Set<ErasedHandler>>();
+  private handlers = new Map<LmsEvent['type'] | '*', Set<ErasedHandler>>();
 
   constructor(private readonly options: EventBusOptions = {}) {}
 
-  on<T extends LmsEvent['type']>(type: T, handler: Handler<T>): () => void {
-    const set = this.handlers.get(type) ?? new Set();
-    const erased = handler as unknown as ErasedHandler;
-    set.add(erased);
+  /**
+   * Registers a handler for one event type, or for every event with `'*'`.
+   * Returns an unsubscribe function. Registering the same function twice
+   * registers it twice.
+   */
+  on<T extends LmsEvent['type']>(type: T, handler: Handler<T>): () => void;
+  on(type: '*', handler: WildcardHandler): () => void;
+  on(type: LmsEvent['type'] | '*', handler: ErasedHandler): () => void {
+    const set = this.handlers.get(type) ?? new Set<ErasedHandler>();
+    set.add(handler);
     this.handlers.set(type, set);
-    return () => set.delete(erased);
+    return () => {
+      set.delete(handler);
+    };
   }
 
+  /**
+   * Like `on`, but the handler is removed before it runs, so it fires for at
+   * most one event even if it (or something it calls) emits re-entrantly.
+   * The returned function cancels it if it hasn't fired yet.
+   */
+  once<T extends LmsEvent['type']>(type: T, handler: Handler<T>): () => void;
+  once(type: '*', handler: WildcardHandler): () => void;
+  once(type: LmsEvent['type'] | '*', handler: ErasedHandler): () => void {
+    const off = this.on(type as '*', (event) => {
+      off();
+      return handler(event);
+    });
+    return off;
+  }
+
+  /**
+   * Delivers to handlers registered for the event's exact type first, then
+   * to wildcard handlers, each group in registration order.
+   */
   async emit(event: LmsEvent): Promise<void> {
-    const set = this.handlers.get(event.type);
-    if (!set || set.size === 0) return;
+    const specific = this.handlers.get(event.type);
+    const wildcard = this.handlers.get('*');
+    if (!specific?.size && !wildcard?.size) return;
+
+    // Snapshot before iterating so a handler that subscribes/unsubscribes
+    // (once() does) can't change who receives THIS event.
+    const targets = [...(specific ?? []), ...(wildcard ?? [])];
 
     // Wrap each call so a handler that throws SYNCHRONOUSLY (not just one
     // that returns a rejected promise) still becomes a rejected promise
     // here, rather than throwing immediately while this array is being
     // built — which would happen before Promise.allSettled even runs and
     // would break the failure-isolation guarantee for every other handler.
-    const results = await Promise.allSettled(
-      [...set].map(async (handler) => handler(event)),
-    );
+    const results = await Promise.allSettled(targets.map(async (handler) => handler(event)));
     for (const result of results) {
       if (result.status === 'rejected' && this.options.onHandlerError) {
         this.options.onHandlerError(result.reason, event);

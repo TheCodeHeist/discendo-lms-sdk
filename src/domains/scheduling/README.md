@@ -90,3 +90,18 @@ skip everything else.
   with no `TeacherQualification` record is treated as qualified for
   everything. A single tutor never has to declare any of this, and an
   institution that wants enforcement adds the records.
+
+## Events
+
+Pass an `EventBus` (see `core/README.md`) as the third constructor argument
+to `SchedulingService` and it emits, after the change has been saved:
+
+- `scheduling.occurrenceCancelled` from `cancelOccurrence` (carries `note`
+  only if one was set).
+- `scheduling.occurrenceRescheduled` from `rescheduleOccurrence`, carrying
+  the occurrence's values after the move (`date`, and `roomId` /
+  `startTime` / `endTime` where set), not the patch that was applied.
+
+Emission is fire-and-forget: a listener that throws or is slow never fails
+or delays the cancel/reschedule. Materializing occurrences and the
+auto-scheduler do not emit.
