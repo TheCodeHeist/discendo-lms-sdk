@@ -1,5 +1,5 @@
 # Stupid backup zip files
-*.zip
+# *.zip
 
 # Logs
 logs
