@@ -1,6 +1,7 @@
 import type { RepositoryContext } from '../../core/repositories.js';
-import type { Enrollment } from '../../core/types.js';
+import type { Enrollment, CourseSection } from '../../core/types.js';
 import type { EventBus } from '../../core/events.js';
+import { assertSameOrg } from '../../core/tenancy.js';
 import type { EnrollOptions, BatchEnrollRow, BatchReport } from './types.js';
 
 export class EnrollmentService {
@@ -20,6 +21,8 @@ export class EnrollmentService {
 
     const section = await this.repos.courses.findSection(opts.sectionId);
     if (!section) throw new Error(`Section ${opts.sectionId} not found`);
+
+    await this.assertSameTenant(opts.userId, section);
 
     let status: Enrollment['status'] = 'active';
     if (section.capacity !== undefined) {
@@ -51,6 +54,26 @@ export class EnrollmentService {
     });
 
     return enrollment;
+  }
+
+  /**
+   * A section belongs to the organization of its course. If that course is
+   * org-scoped, only a member of the same organization may join it. An
+   * unscoped course (or one the repository can't find) is not checked, and
+   * then the user isn't even loaded.
+   */
+  private async assertSameTenant(userId: string, section: CourseSection): Promise<void> {
+    const courseOrgId = await this.orgIdOfSection(section);
+    if (courseOrgId === undefined) return;
+
+    const user = await this.repos.users.findById(userId);
+    if (!user) throw new Error(`User ${userId} not found`);
+    assertSameOrg(courseOrgId, user.orgId, 'User does not belong to this course\'s organization');
+  }
+
+  private async orgIdOfSection(section: CourseSection): Promise<string | undefined> {
+    const course = await this.repos.courses.findCourse(section.courseId);
+    return course?.orgId;
   }
 
   async drop(enrollmentId: string): Promise<Enrollment> {
@@ -85,8 +108,14 @@ export class EnrollmentService {
   async bulkEnroll(sectionId: string, rows: BatchEnrollRow[]): Promise<BatchReport> {
     const report: BatchReport = { succeeded: 0, failed: [] };
 
+    // Resolve the section's organization once for the whole batch so each
+    // external reference is looked up inside the right tenant. A missing
+    // section is left for enroll() to report per row, as before.
+    const section = await this.repos.courses.findSection(sectionId);
+    const orgId = section ? await this.orgIdOfSection(section) : undefined;
+
     for (const row of rows) {
-      const user = await this.repos.users.findByExternalRef(row.userExternalRef);
+      const user = await this.repos.users.findByExternalRef(row.userExternalRef, orgId);
       if (!user) {
         report.failed.push({ row, reason: 'user not found' });
         continue;

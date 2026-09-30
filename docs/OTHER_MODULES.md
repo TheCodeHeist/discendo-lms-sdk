@@ -23,6 +23,13 @@ interface Identity {
   id: Id;
   externalRef?: string; // reference back to the host app's own user record
   roles: Role[];
+  orgId?: Id; // the organization this person belongs to (multi-tenant only)
+}
+
+interface Organization {
+  // one tenant: an institution, school or company
+  id: Id;
+  name: string;
 }
 ```
 
@@ -35,7 +42,7 @@ interface Course {
   id: Id;
   title: string;
   description?: string;
-  orgId?: Id;
+  orgId?: Id; // owning organization; see "Tenancy" below
 }
 
 interface CourseSection {
@@ -79,15 +86,46 @@ interface AcademicTerm {
   name: string;
   startsAt: Timestamp;
   endsAt: Timestamp;
+  orgId?: Id;
 }
 ```
+
+### Tenancy (organizations)
+
+Everything about organizations is optional. If no `orgId` is set anywhere,
+no tenant check ever runs and a single-institution deployment behaves
+exactly as before, apart from one extra `findCourse` lookup per enrollment.
+
+- A **course** may carry an `orgId`. Sections, enrollments and content
+  inherit their tenant through the course and don't repeat it.
+- An org-scoped course can only be joined by an identity with the **same**
+  `orgId`. A person with no `orgId` is rejected too (fail closed): "no
+  organization" only matches "no organization".
+- A course **without** an `orgId` is unscoped: nothing is checked, and the
+  user isn't even loaded.
+- Mismatches throw `TenantMismatchError`, which carries `expectedOrgId` and
+  `actualOrgId` for your own logs. Its message is generic on purpose, so it
+  can be shown to callers without revealing which organization owns a course.
+- Helpers in `core`: `sameOrg(a, b)`, `assertSameOrg(expected, actual, message)`.
+
+Today only `EnrollmentService.enroll` (and so `bulkEnroll`) enforces this.
+Other modules, such as rooms and scheduling groups, don't yet.
+
+Two organizations may reuse the same external reference, so
+`UserRepository.findByExternalRef(ref, orgId?)` takes an optional `orgId`.
+`bulkEnroll` passes the course's `orgId` (resolved once per batch), and your
+implementation should then return only an identity from that organization.
+Implementations that ignore the hint are still safe: `enroll` rejects a
+cross-tenant match with `TenantMismatchError`. The difference is that the
+right person then can't be found, because the wrong one was returned first.
+For an unscoped course no `orgId` is passed.
 
 ### Repository interfaces
 
 ```ts
 interface UserRepository {
   findById(id: Id): Promise<Identity | null>;
-  findByExternalRef(ref: string): Promise<Identity | null>;
+  findByExternalRef(ref: string, orgId?: Id): Promise<Identity | null>; // orgId: only match within this organization
 }
 
 interface CourseRepository {
@@ -118,6 +156,10 @@ interface ContentRepository {
 interface TermRepository {
   findById(id: Id): Promise<AcademicTerm | null>;
 }
+
+interface OrganizationRepository {
+  findById(id: Id): Promise<Organization | null>;
+}
 ```
 
 ### `RepositoryContext`
@@ -129,6 +171,7 @@ interface RepositoryContext {
   enrollments: EnrollmentRepository;
   content: ContentRepository;
   terms: TermRepository;
+  organizations?: OrganizationRepository; // optional; nothing in the SDK requires it yet
 }
 ```
 
@@ -169,16 +212,20 @@ Constructed with a `RepositoryContext`.
 - **`enroll(opts: EnrollOptions): Promise<Enrollment>`** — Idempotent:
   calling twice for the same user+section returns the existing (non-dropped)
   enrollment rather than duplicating it. If the section has a `capacity` and
-  is full, either throws or waitlists depending on `waitlistIfFull`.
+  is full, either throws or waitlists depending on `waitlistIfFull`. If the
+  section's course has an `orgId`, the user must belong to that
+  organization or a `TenantMismatchError` is thrown before anything is
+  created (see "Tenancy" above).
 - **`drop(enrollmentId: string): Promise<Enrollment>`** — Never hard-deletes;
   sets `status: 'dropped'` and `droppedAt` to preserve history.
 - **`listRoster(sectionId, status?): Promise<Enrollment[]>`**
 - **`bulkEnroll(sectionId, rows: BatchEnrollRow[]): Promise<BatchReport>`** —
-  Resolves each row's `userExternalRef` via `UserRepository` (so the host
+  Resolves each row's `userExternalRef` via `UserRepository`, scoped to the
+  section's organization when its course has one (so the host
   app's internal user IDs never need to leak into the import feed), then
   calls `enroll(..., waitlistIfFull: true)` for each. Failures (user not
-  found, or any thrown error) are collected per-row in the report rather
-  than aborting the whole batch.
+  found, a tenant mismatch, or any thrown error) are collected per-row in
+  the report rather than aborting the whole batch.
 
 ---
 

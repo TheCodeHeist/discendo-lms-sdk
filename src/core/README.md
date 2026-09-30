@@ -7,11 +7,15 @@ depend on directly.
 
 ## What's here
 
-- **`types.ts`** — `Id`, `Timestamp`, `Role`, `Course`/`CourseSection`
-  (the template-vs-running-instance split), `Enrollment`, `ContentNode`,
-  `AcademicTerm`.
+- **`types.ts`** — `Id`, `Timestamp`, `Role`, `Organization`,
+  `Course`/`CourseSection` (the template-vs-running-instance split),
+  `Enrollment`, `ContentNode`, `AcademicTerm`.
 - **`repositories.ts`** — the repository interfaces `enrollment` and
   `content` are built against, bundled as `RepositoryContext`.
+- **`tenancy.ts`** — `sameOrg`, `assertSameOrg` and `TenantMismatchError`,
+  the shared vocabulary for multi-tenant checks. A course's `orgId` is the
+  source of truth; sections, enrollments and content inherit it. Unset
+  everywhere means no checks run. Details: `docs/OTHER_MODULES.md`.
 - **`events.ts`** — `EventBus`, the SDK's cross-cutting event/hook system.
   Read on if you're wondering "where do event handlers live" — that's
   answered below.
