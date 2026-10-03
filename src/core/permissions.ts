@@ -49,7 +49,6 @@ export const DEFAULT_RULES = {
   'enrollment.grantRole.instructor': { roles: ['admin'] },
   'enrollment.grantRole.ta': { roles: ['admin', 'instructor'] },
   'enrollment.grantRole.student': { roles: ['admin', 'instructor'] },
-  'enrollment.grantRole.guardian': { roles: ['admin', 'instructor'] },
   // content
   'content.view': { roles: ['admin', 'instructor', 'ta', 'student'] },
   'content.manage': { roles: ['admin', 'instructor'] },

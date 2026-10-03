@@ -13,6 +13,7 @@ import type {
   AcademicTerm,
   Organization,
   GuardianLink,
+  Department,
 } from './types.js';
 
 export interface UserRepository {
@@ -59,6 +60,12 @@ export interface OrganizationRepository {
   findById(id: Id): Promise<Organization | null>;
 }
 
+export interface DepartmentRepository {
+  findById(id: Id): Promise<Department | null>;
+  /** The departments of one organization (`undefined` = those that belong to no organization). */
+  listByOrg(orgId: Id | undefined): Promise<Department[]>;
+}
+
 export interface GuardianLinkRepository {
   /**
    * The active link from this guardian to this ward, or null. Enforcement
@@ -80,6 +87,8 @@ export interface RepositoryContext {
   terms: TermRepository;
   /** Only needed by hosts that use organizations. Nothing in the SDK requires it yet. */
   organizations?: OrganizationRepository;
+  /** Only needed by hosts that group courses into departments. Nothing in the SDK requires it. */
+  departments?: DepartmentRepository;
   /** Only needed by hosts with guardians. Without it a guardian can read nothing. */
   guardianLinks?: GuardianLinkRepository;
 }

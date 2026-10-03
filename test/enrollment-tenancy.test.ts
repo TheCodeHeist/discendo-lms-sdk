@@ -83,6 +83,29 @@ const carol: Identity = { id: 'carol', roles: ['student'] }; // belongs to no or
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
+describe('EnrollmentService across departments of one organization', () => {
+  // Departments only sort courses inside an organization: they are not a tenant boundary,
+  // so a student can major in one department and minor in another.
+  const scienceCourse: Course = { id: 'course-sci', title: 'Physics', orgId: 'org-a', departmentId: 'dept-sci' };
+  const musicCourse: Course = { id: 'course-mus', title: 'Harmony', orgId: 'org-a', departmentId: 'dept-music' };
+  const secSci: CourseSection = { id: 'sec-sci', courseId: 'course-sci', status: 'published' };
+  const secMus: CourseSection = { id: 'sec-mus', courseId: 'course-mus', status: 'published' };
+
+  it('lets one student enroll in sections owned by different departments', async () => {
+    const { repos } = makeRepos({ courses: [scienceCourse, musicCourse], users: [alice], sections: [secSci, secMus] });
+    const service = new EnrollmentService(repos);
+    await expect(service.enroll({ userId: 'alice', sectionId: 'sec-sci', role: 'student' })).resolves.toMatchObject({ status: 'active' });
+    await expect(service.enroll({ userId: 'alice', sectionId: 'sec-mus', role: 'student' })).resolves.toMatchObject({ status: 'active' });
+  });
+
+  it('still refuses a student of another organization', async () => {
+    const { repos, enrollments } = makeRepos({ courses: [musicCourse], users: [bob], sections: [secMus] });
+    const service = new EnrollmentService(repos);
+    await expect(service.enroll({ userId: 'bob', sectionId: 'sec-mus', role: 'student' })).rejects.toBeInstanceOf(TenantMismatchError);
+    expect(enrollments.size).toBe(0);
+  });
+});
+
 describe('EnrollmentService tenant checks', () => {
   it('enrolls a member of the same organization', async () => {
     const { repos } = makeRepos({ courses: [orgACourse], users: [alice], sections: [sectionA] });

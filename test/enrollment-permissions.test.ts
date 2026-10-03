@@ -296,6 +296,15 @@ describe('EnrollmentService permissions: role escalation', () => {
     ).rejects.not.toBeInstanceOf(PermissionDeniedError); // allowed to try; fails later for an unrelated reason (unknown user)
   });
 
+  it('refuses the removed "guardian" enrollment role for everyone, even an admin (untyped data)', async () => {
+    const w = await buildWorld();
+    const legacy = { ...NEWBIE, role: 'guardian' as Role };
+    for (const who of ['root', 'teacher']) {
+      await expect(w.service.enroll(legacy, as(who))).rejects.toBeInstanceOf(PermissionDeniedError);
+    }
+    expect(w.calls.create).toBe(0);
+  });
+
   it.each(['admin', 'instructor'] as const)('refuses an instructor granting %s, and creates nothing', async (role) => {
     const w = await buildWorld();
     await expect(w.service.enroll({ ...NEWBIE, role }, as('teacher'))).rejects.toMatchObject({

@@ -55,11 +55,13 @@ describe('role policy: section-scoped actions', () => {
     expect(policy.can('enrollment.bulkEnroll', inSection(admin, 'student'))).toBe(true); // still admin
   });
 
-  it('gives nothing to a guardian by default', () => {
-    const parent = person('parent-1', ['guardian']);
+  it('gives nothing to a leftover "guardian" role string from older data (guardians use GuardianLink now)', () => {
+    const legacy = 'guardian' as Role;
+    const parent = person('parent-1', [legacy]);
     for (const action of Object.keys(DEFAULT_RULES)) {
-      expect(policy.can(action, inSection(parent, 'guardian', { resourceOwnerId: 'parent-1' }))).toBe(false);
+      expect(policy.can(action, inSection(parent, legacy, { resourceOwnerId: 'parent-1' })), action).toBe(false);
     }
+    expect(Object.keys(DEFAULT_RULES)).not.toContain('enrollment.grantRole.guardian');
   });
 
   it('keeps students out of teacher-only actions', () => {
@@ -302,14 +304,14 @@ describe('default role-grant rules', () => {
     expect(grant(teacher, 'instructor', 'instructor')).toBe(false);
   });
 
-  it('lets an instructor grant ta, student and guardian', () => {
-    for (const role of ['ta', 'student', 'guardian'] as const) {
+  it('lets an instructor grant ta and student', () => {
+    for (const role of ['ta', 'student'] as const) {
       expect(grant(teacher, role, 'instructor')).toBe(true);
     }
   });
 
   it('lets no TA or student grant any role', () => {
-    for (const role of ['admin', 'instructor', 'ta', 'student', 'guardian'] as const) {
+    for (const role of ['admin', 'instructor', 'ta', 'student'] as const) {
       expect(grant(person('ta-1', ['ta']), role, 'ta')).toBe(false);
       expect(grant(stu, role, 'student')).toBe(false);
     }
@@ -318,7 +320,7 @@ describe('default role-grant rules', () => {
   it('has a grant rule for every role, so no role can be handed out unchecked', () => {
     // Record<Role, true> makes tsc fail here if a role is ever added to `Role`
     // without being listed, so this test can't silently go stale.
-    const allRoles: Record<Role, true> = { admin: true, instructor: true, ta: true, student: true, guardian: true };
+    const allRoles: Record<Role, true> = { admin: true, instructor: true, ta: true, student: true };
     for (const role of Object.keys(allRoles) as Role[]) {
       expect(Object.keys(DEFAULT_RULES)).toContain(`enrollment.grantRole.${role}`);
     }
@@ -328,7 +330,7 @@ describe('default role-grant rules', () => {
 
 describe('guardian access (a verified link to a ward)', () => {
   const policy = createRolePolicy();
-  const parent = person('parent-1', ['guardian'], 'org-a');
+  const parent = person('parent-1', ['student'], 'org-a'); // a guardian has no role of their own: the link is the proof
   const link = (scopes: GuardianScope[], wardId = 'kid') => ({ wardId, scopes });
   const ctxFor = (guardian: PermissionContext['guardian'], extra: Partial<PermissionContext> = {}): PermissionContext => ({
     actor: parent,

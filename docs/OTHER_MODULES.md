@@ -17,7 +17,7 @@ Shared primitives every other module is built on. Two files:
 ```ts
 type Id = string;
 type Timestamp = Date;
-type Role = "student" | "instructor" | "ta" | "admin" | "guardian";
+type Role = "student" | "instructor" | "ta" | "admin";
 
 interface Identity {
   id: Id;
@@ -101,12 +101,28 @@ exactly as before, apart from one extra `findCourse` lookup per enrollment.
 - An org-scoped course can only be joined by an identity with the **same**
   `orgId`. A person with no `orgId` is rejected too (fail closed): "no
   organization" only matches "no organization".
-- A course **without** an `orgId` is unscoped: nothing is checked, and the
-  user isn't even loaded.
+- A course **without** an `orgId` belongs to no organization. Enrollment's user
+  check skips it (the user isn't even loaded), but permission checks admit only
+  actors who also have no organization (see "Permissions").
 - Mismatches throw `TenantMismatchError`, which carries `expectedOrgId` and
   `actualOrgId` for your own logs. Its message is generic on purpose, so it
   can be shown to callers without revealing which organization owns a course.
 - Helpers in `core`: `sameOrg(a, b)`, `assertSameOrg(expected, actual, message)`.
+
+**Organization means institution.** It is the hard wall between separate
+universities or schools sharing one deployment. Inside one organization a
+student can take courses from any department, so nothing here gets in the way of
+a major in one department and a minor in another.
+
+**Departments (optional).** `Department { id, orgId?, name }` groups courses
+inside one organization, and a course names its department with
+`Course.departmentId`. It is only for sorting and reporting, not a boundary.
+Schools never need to set it. Supply `departments: { findById, listByOrg }` in
+your repositories if you use it, and call
+`assertCourseDepartment(course, await repos.departments.findById(course.departmentId))`
+when you create or edit a course: it throws `UnknownDepartmentError` if the
+department isn't found, and `TenantMismatchError` if it belongs to another
+organization. Department-level administrators are not built yet.
 
 Today only `EnrollmentService.enroll` (and so `bulkEnroll`) enforces this.
 Other modules, such as rooms and scheduling groups, don't yet.
@@ -171,15 +187,16 @@ rule) are denied.
 | Role | Can |
 | --- | --- |
 | admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog`, and granting any role |
-| instructor | `enrollment.enroll` (granting `ta`, `student` or `guardian` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
+| instructor | `enrollment.enroll` (granting `ta` or `student` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
-| guardian | nothing by role. Read-only access to a ward's records through a `GuardianLink` (see below) |
+| guardian | not a role. Read-only access to a ward's records through a `GuardianLink` (see below) |
 
 **Guardians.** A `GuardianLink` ties a guardian to one ward, with `scopes` that
 say what they may read: `grades` (`grading.view`), `attendance`
 (`reporting.view`) and `schedule` (`scheduling.view`). A guardian never writes
-anything and needs no enrollment in the ward's section. Supply
+anything and needs no enrollment of their own: their access follows the ward's,
+so it only works in a section where the ward is currently an active student. Supply
 `guardianLinks: { findActive(guardianId, wardId) }` in your repositories; without
 it a guardian can read nothing. When someone asks about another person's
 resource, `authorizeInSection` looks the link up and re-checks it (right
@@ -192,7 +209,7 @@ for now the host writes them through its own repository.)
 **Granting roles.** Enrolling someone with a role needs a second permission,
 `enrollment.grantRole.<role>`, so nobody can hand out a role beyond what they
 may grant. By default only `admin` may grant `admin` and `instructor`;
-instructors may grant `ta`, `student` and `guardian`. Override these per
+instructors may grant `ta` and `student`. Override these per
 institution like any other action.
 
 **Customizing.** `overrides` replace an action's rule entirely (they are not

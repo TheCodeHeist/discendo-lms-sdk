@@ -37,8 +37,8 @@ async function buildWorld(
   add('root-b', ['admin'], 'org-b');
   add('admin-free', ['admin'], 'org-a'); // same-org admin with no enrollments at all
   users.set('admin-no-org', { id: 'admin-no-org', roles: ['admin'] }); // belongs to no organization
-  add('parent', ['guardian'], 'org-a'); // not enrolled anywhere; linked to a ward via `links`
-  add('parent-b', ['guardian'], 'org-b');
+  add('parent', ['student'], 'org-a'); // not enrolled anywhere; linked to a ward via `links`
+  add('parent-b', ['student'], 'org-b');
 
   const store = new Map<string, Enrollment>();
   let en = 0;
@@ -535,6 +535,51 @@ describe('GradingService permissions: guardians', () => {
     await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
       PermissionDeniedError,
     );
+  });
+
+  describe('follows the ward\'s enrollment in the section', () => {
+    const setWard = (w: Awaited<ReturnType<typeof withGrades>>, patch: Partial<Enrollment>) => {
+      const e = [...w.enrollments.values()].find((x) => x.userId === 'stu' && x.sectionId === 'sec-1')!;
+      w.enrollments.set(e.id, { ...e, ...patch });
+    };
+    const view = (w: Awaited<ReturnType<typeof withGrades>>, sectionId = 'sec-1') =>
+      w.service.computeFinalGradeForUser('stu', sectionId, scheme, as('parent'));
+
+    it('allows an active student ward', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      await expect(view(w)).resolves.toBeCloseTo(80);
+    });
+
+    it.each(['dropped', 'waitlisted', 'completed'] as const)('refuses once the ward is %s', async (status) => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      setWard(w, { status });
+      await expect(view(w)).rejects.toBeInstanceOf(PermissionDeniedError);
+    });
+
+    it('refuses in a section the ward is not enrolled in', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      await expect(view(w, 'sec-2')).rejects.toBeInstanceOf(PermissionDeniedError);
+    });
+
+    it('refuses when the ward holds a different role in the section', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      setWard(w, { role: 'ta' });
+      await expect(view(w)).rejects.toBeInstanceOf(PermissionDeniedError);
+    });
+
+    it('hands a custom policy no guardian context when the ward is not an active student there', async () => {
+      const seen: Array<unknown> = [];
+      const spy: PermissionPolicy = { can: (_a, ctx) => (seen.push(ctx.guardian), false) };
+      const w = await buildWorld(spy);
+      w.link('parent', 'stu', ['grades']);
+      await w.service.computeFinalGradeForUser('stu', 'sec-2', scheme, as('parent')).catch(() => {});
+      await w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent')).catch(() => {});
+      expect(seen).toEqual([undefined, { wardId: 'stu', scopes: ['grades'] }]);
+    });
   });
 
   it('hands a custom policy no guardian context unless the link checks out for this actor and ward', async () => {

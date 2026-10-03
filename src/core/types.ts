@@ -6,7 +6,7 @@
 export type Id = string;
 export type Timestamp = Date;
 
-export type Role = 'student' | 'instructor' | 'ta' | 'admin' | 'guardian';
+export type Role = 'student' | 'instructor' | 'ta' | 'admin';
 
 /**
  * A tenant: one institution, school, or company inside a shared deployment.
@@ -44,6 +44,20 @@ export interface GuardianLink {
   revokedAt?: Timestamp;
 }
 
+/**
+ * An optional grouping of courses inside ONE organization: a department, a
+ * faculty, a subject area. It is for sorting and reporting, not a tenant
+ * boundary: a student can take courses from several departments of the same
+ * organization. Schools and other hosts that don't need it never set
+ * `Course.departmentId`. `orgId` must match the organization of the courses
+ * placed in it (see `assertCourseDepartment`).
+ */
+export interface Department {
+  id: Id;
+  orgId?: Id;
+  name: string;
+}
+
 export interface Identity {
   id: Id;
   /** Reference back to the host app's own user record, if different. */
@@ -64,11 +78,15 @@ export interface Course {
   description?: string;
   /**
    * The organization that owns this course. A course with an `orgId` can only
-   * be joined by identities of the same organization; a course without one
-   * is unscoped and no tenant checks apply to it. Sections, enrollments and
+   * be joined by identities of the same organization, and only people of that
+   * organization can act on it. A course without one belongs to no
+   * organization: permission checks only admit actors who have none either,
+   * while enrollment's user check still skips it. Sections, enrollments and
    * content inherit their tenant from here rather than repeating it.
    */
   orgId?: Id;
+  /** Optional grouping inside the organization (see `Department`). */
+  departmentId?: Id;
 }
 
 export interface CourseSection {

@@ -8,9 +8,13 @@
  *
  * Rule: an id only matches the *same* id. "No organization" (`undefined`)
  * only matches "no organization", so a person with no org can't slip into an
- * org-scoped course by omission.
+ * org-scoped course by omission. Permission checks (permissions.ts) apply the
+ * same rule in both directions and never skip it.
+ *
+ * Departments (`Department`) group courses inside one organization. They are
+ * not a tenant boundary: only the organization is.
  */
-import type { Id } from './types.js';
+import type { Id, Course, Department } from './types.js';
 
 export function sameOrg(a: Id | undefined, b: Id | undefined): boolean {
   return a === b;
@@ -43,4 +47,29 @@ export function assertSameOrg(
   if (!sameOrg(expectedOrgId, actualOrgId)) {
     throw new TenantMismatchError(message, expectedOrgId, actualOrgId);
   }
+}
+
+/** A course names a department that was not found, or the wrong one was supplied. */
+export class UnknownDepartmentError extends Error {
+  constructor(readonly departmentId: Id) {
+    // Generic on purpose, like TenantMismatchError: the id is a property for host-side logging.
+    super('Unknown department');
+    this.name = 'UnknownDepartmentError';
+  }
+}
+
+/**
+ * For a host that creates or edits courses: throws unless the department the
+ * course names exists and belongs to the course's organization. A course with
+ * no `departmentId` always passes. Pass what `departments.findById` returned.
+ */
+export function assertCourseDepartment(
+  course: Pick<Course, 'orgId' | 'departmentId'>,
+  department: Department | null | undefined,
+): void {
+  if (course.departmentId === undefined) return;
+  if (!department || department.id !== course.departmentId) {
+    throw new UnknownDepartmentError(course.departmentId);
+  }
+  assertSameOrg(course.orgId, department.orgId, 'Department belongs to a different organization');
 }

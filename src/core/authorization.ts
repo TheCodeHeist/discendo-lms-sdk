@@ -58,7 +58,7 @@ export async function authorizeInSection(
     section: { role: activeSectionRole(membership) },
     resourceOrgId: course.orgId,
     resourceOwnerId: target.ownerId,
-    guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, course.orgId),
+    guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, target.sectionId, course.orgId),
   };
   await authorize(policy, action, ctx);
   return { policy, ctx };
@@ -70,11 +70,13 @@ export async function authorizeInSection(
  * resource and the host configured a link repository. Whatever the repository
  * returns is re-checked here (right guardian, right ward, still active, same
  * organization as the course), so a wrong or stale link can't grant anything.
+ * The ward must also be an active student in this section.
  */
 async function verifiedGuardianLink(
   repos: AuthorizationRepos,
   actorId: string,
   ownerId: string | undefined,
+  sectionId: string,
   courseOrgId: string | undefined,
 ): Promise<PermissionContext['guardian']> {
   if (!repos.guardianLinks || ownerId === undefined || ownerId === actorId) return undefined;
@@ -88,5 +90,9 @@ async function verifiedGuardianLink(
   ) {
     return undefined;
   }
+  // A guardian's access follows the ward's own enrollment: only in a section where the
+  // ward is currently an active student.
+  const wardEnrollment = await repos.enrollments.findByUserAndSection(ownerId, sectionId);
+  if (activeSectionRole(wardEnrollment) !== 'student') return undefined;
   return { wardId: link.wardId, scopes: link.scopes };
 }
