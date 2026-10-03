@@ -5,6 +5,7 @@ import {
   activeSectionRole,
   effectiveRoles,
   PermissionDeniedError,
+  ActorRequiredError,
   DEFAULT_RULES,
 } from '../src/core/index.js';
 import type { Identity, PermissionContext, PermissionPolicy, Role } from '../src/core/index.js';
@@ -137,7 +138,7 @@ describe('role policy: deny by default', () => {
   it('defines a rule for every built-in action that grants someone something', () => {
     for (const [action, rule] of Object.entries(DEFAULT_RULES) as Array<[string, { roles?: readonly Role[]; ownRoles?: readonly Role[] }]>) {
       expect((rule.roles?.length ?? 0) + (rule.ownRoles?.length ?? 0)).toBeGreaterThan(0);
-      expect(action).toMatch(/^[a-z]+\.[A-Za-z]+$/);
+      expect(action).toMatch(/^[a-z]+(\.[A-Za-z]+)+$/);
     }
   });
 });
@@ -229,3 +230,69 @@ describe('effectiveRoles', () => {
     expect(effectiveRoles(inSection(admin, 'admin'))).toEqual(['admin']);
   });
 });
+
+describe('authorize is strict about what counts as "allowed"', () => {
+  it.each([[undefined], [null], ['true'], [1], [{}], [[]]])('denies a policy answer of %p', async (answer) => {
+    const sloppy = { can: () => answer } as unknown as PermissionPolicy;
+    await expect(authorize(sloppy, 'anything', { actor: admin })).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it('allows only an exact true, including from an async policy', async () => {
+    await expect(authorize({ can: () => true }, 'anything', { actor: stu })).resolves.toBeUndefined();
+    await expect(authorize({ can: async () => true }, 'anything', { actor: stu })).resolves.toBeUndefined();
+  });
+
+  it('lets an error thrown by the policy propagate instead of allowing or swallowing it', async () => {
+    const broken: PermissionPolicy = {
+      can: () => {
+        throw new Error('backend down');
+      },
+    };
+    await expect(authorize(broken, 'anything', { actor: admin })).rejects.toThrow('backend down');
+  });
+});
+
+describe('ActorRequiredError', () => {
+  it('is its own error, distinct from a permission denial', () => {
+    const err = new ActorRequiredError('enrollment.enroll');
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(PermissionDeniedError);
+    expect(err.name).toBe('ActorRequiredError');
+    expect(err.action).toBe('enrollment.enroll');
+  });
+});
+
+describe('default role-grant rules', () => {
+  const grant = (actor: Identity, role: Role, sectionRole: Role | undefined) =>
+    policy.can(`enrollment.grantRole.${role}`, inSection(actor, sectionRole));
+
+  it('lets only an admin grant admin and instructor', () => {
+    expect(grant(admin, 'admin', undefined)).toBe(true);
+    expect(grant(admin, 'instructor', undefined)).toBe(true);
+    expect(grant(teacher, 'admin', 'instructor')).toBe(false);
+    expect(grant(teacher, 'instructor', 'instructor')).toBe(false);
+  });
+
+  it('lets an instructor grant ta, student and guardian', () => {
+    for (const role of ['ta', 'student', 'guardian'] as const) {
+      expect(grant(teacher, role, 'instructor')).toBe(true);
+    }
+  });
+
+  it('lets no TA or student grant any role', () => {
+    for (const role of ['admin', 'instructor', 'ta', 'student', 'guardian'] as const) {
+      expect(grant(person('ta-1', ['ta']), role, 'ta')).toBe(false);
+      expect(grant(stu, role, 'student')).toBe(false);
+    }
+  });
+
+  it('has a grant rule for every role, so no role can be handed out unchecked', () => {
+    // Record<Role, true> makes tsc fail here if a role is ever added to `Role`
+    // without being listed, so this test can't silently go stale.
+    const allRoles: Record<Role, true> = { admin: true, instructor: true, ta: true, student: true, guardian: true };
+    for (const role of Object.keys(allRoles) as Role[]) {
+      expect(Object.keys(DEFAULT_RULES)).toContain(`enrollment.grantRole.${role}`);
+    }
+  });
+});
+

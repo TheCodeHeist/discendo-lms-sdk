@@ -14,6 +14,7 @@ function makeGradeRepo(): GradeRepository {
       entries.set(entry.id, entry);
       return entry;
     },
+    findById: async (id) => entries.get(id) ?? null,
     markSuperseded: async (id, byId) => {
       const existing = entries.get(id);
       if (existing) entries.set(id, { ...existing, supersededBy: byId });

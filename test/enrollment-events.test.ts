@@ -33,6 +33,7 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
         enrollments.set(id, updated);
         return updated;
       },
+      findById: async (id) => enrollments.get(id) ?? null,
       findByUserAndSection: async (userId, sectionId) =>
         [...enrollments.values()].find((e) => e.userId === userId && e.sectionId === sectionId) ?? null,
       listBySection: async (sectionId) => [...enrollments.values()].filter((e) => e.sectionId === sectionId),

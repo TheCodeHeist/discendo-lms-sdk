@@ -38,6 +38,13 @@ export const DEFAULT_RULES = {
   'enrollment.bulkEnroll': { roles: ['admin'] },
   'enrollment.drop': { roles: ['admin', 'instructor'], ownRoles: ['student'] },
   'enrollment.viewRoster': { roles: ['admin', 'instructor', 'ta'] },
+  // Enrolling someone with a role ALSO requires the matching grantRole action,
+  // so nobody can hand out a role beyond what they are allowed to grant.
+  'enrollment.grantRole.admin': { roles: ['admin'] },
+  'enrollment.grantRole.instructor': { roles: ['admin'] },
+  'enrollment.grantRole.ta': { roles: ['admin', 'instructor'] },
+  'enrollment.grantRole.student': { roles: ['admin', 'instructor'] },
+  'enrollment.grantRole.guardian': { roles: ['admin', 'instructor'] },
   // content
   'content.view': { roles: ['admin', 'instructor', 'ta', 'student'] },
   'content.manage': { roles: ['admin', 'instructor'] },
@@ -81,6 +88,15 @@ export interface PermissionPolicy {
   can(action: Action, ctx: PermissionContext): boolean | Promise<boolean>;
 }
 
+/**
+ * Identifies who is making a service call. Services that are given a
+ * `PermissionPolicy` require it on every call and load the actor from their
+ * repository by id, so roles and organization are never taken from the caller.
+ */
+export interface ActorContext {
+  actorId: Id;
+}
+
 export class PermissionDeniedError extends Error {
   constructor(readonly action: Action) {
     super(`Not permitted: ${action}`);
@@ -88,13 +104,32 @@ export class PermissionDeniedError extends Error {
   }
 }
 
-/** Throws PermissionDeniedError unless the policy allows the action. */
+/**
+ * A service has a permission policy but the call didn't say who is acting.
+ * This is a bug in the calling code, not a refusal, so it is a different
+ * error from PermissionDeniedError (think HTTP 500, not 403). The call is
+ * never allowed through without an actor.
+ */
+export class ActorRequiredError extends Error {
+  constructor(readonly action: Action) {
+    super(`An actor is required for ${action} because a permission policy is configured`);
+    this.name = 'ActorRequiredError';
+  }
+}
+
+/**
+ * Throws PermissionDeniedError unless the policy allows the action. Only an
+ * exact `true` allows: a policy that returns anything else (a truthy string
+ * from untyped code, `undefined` from a forgotten return) is a denial. If the
+ * policy itself throws, that error propagates and the action does not happen.
+ */
 export async function authorize(
   policy: PermissionPolicy,
   action: Action,
   ctx: PermissionContext,
 ): Promise<void> {
-  if (!(await policy.can(action, ctx))) throw new PermissionDeniedError(action);
+  const allowed = await policy.can(action, ctx);
+  if (allowed !== true) throw new PermissionDeniedError(action);
 }
 
 /**

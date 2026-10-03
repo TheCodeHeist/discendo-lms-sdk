@@ -35,6 +35,7 @@ export interface CourseRepository {
 
 export interface EnrollmentRepository {
   create(enrollment: Omit<Enrollment, 'id'>): Promise<Enrollment>;
+  findById(id: Id): Promise<Enrollment | null>;
   update(id: Id, patch: Partial<Enrollment>): Promise<Enrollment>;
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(sectionId: Id, status?: Enrollment['status']): Promise<Enrollment[]>;

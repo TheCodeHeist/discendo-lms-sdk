@@ -14,8 +14,13 @@ depend on directly.
   `content` are built against, bundled as `RepositoryContext`.
 - **`permissions.ts`** — a pluggable, role-based `PermissionPolicy`
   (`createRolePolicy`, `authorize`, `activeSectionRole`, `DEFAULT_RULES`).
-  Pure functions; a host calls them at its API boundary. Details:
+  Pure functions, used by services that enforce permissions (enrollment
+  and grading today) and callable directly by hosts. Details:
   `docs/OTHER_MODULES.md`.
+- **`authorization.ts`** — `authorizeInSection`, the single shared place
+  that turns "actor X wants to do Y in section Z" into a policy decision
+  (fail closed, actor read from the repository). Services that enforce
+  permissions call it instead of each re-implementing the rules.
 - **`tenancy.ts`** — `sameOrg`, `assertSameOrg` and `TenantMismatchError`,
   the shared vocabulary for multi-tenant checks. A course's `orgId` is the
   source of truth; sections, enrollments and content inherit it. Unset

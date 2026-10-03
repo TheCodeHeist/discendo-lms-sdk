@@ -122,10 +122,17 @@ For an unscoped course no `orgId` is passed.
 
 ### Permissions
 
-Role-based checks that a host calls at its own API boundary, before it calls
-a service. The SDK does not authenticate anyone, and its services don't yet
-take an "acting user", so nothing is enforced automatically. All functions
-are pure and do no I/O.
+Role-based checks, in two ways:
+
+1. **Inside a service (recommended).** Construct a service with a policy and
+   it enforces permissions itself; see "Enforcement" below. Today
+   `EnrollmentService` and `GradingService` support this. The other modules
+   are next.
+2. **At your own API boundary.** Call the functions below yourself before you
+   call a service. This is what you use for modules that don't enforce yet.
+
+The SDK does not authenticate anyone: your app says who is acting. The
+functions in this section are pure and do no I/O.
 
 ```ts
 import { createRolePolicy, authorize, activeSectionRole } from "discendo-sdk/core";
@@ -158,16 +165,65 @@ rule) are denied.
 
 | Role | Can |
 | --- | --- |
-| admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog` |
-| instructor | `enrollment.enroll`, `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
+| admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog`, and granting any role |
+| instructor | `enrollment.enroll` (granting `ta`, `student` or `guardian` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
 | guardian | nothing (a parent-to-student relationship isn't modelled yet) |
+
+**Granting roles.** Enrolling someone with a role needs a second permission,
+`enrollment.grantRole.<role>`, so nobody can hand out a role beyond what they
+may grant. By default only `admin` may grant `admin` and `instructor`;
+instructors may grant `ta`, `student` and `guardian`. Override these per
+institution like any other action.
 
 **Customizing.** `overrides` replace an action's rule entirely (they are not
 merged), can add actions of your own, and `{}` denies everyone. For
 attribute-based rules, implement `PermissionPolicy` yourself; `can` may be
 async, and `authorize` accepts any policy.
+
+### Enforcement inside a service
+
+```ts
+const enrollment = new EnrollmentService(repos, bus, { policy: createRolePolicy() });
+
+await enrollment.enroll({ userId, sectionId, role: "student" }, { actorId: currentUser.id });
+await enrollment.drop(enrollmentId, { actorId: currentUser.id });
+await enrollment.listRoster(sectionId, undefined, { actorId: currentUser.id });
+await enrollment.bulkEnroll(sectionId, rows, { actorId: currentUser.id });
+```
+
+Without a `policy` a service behaves as it always has. **With one, every
+public method requires `{ actorId }` and refuses to run without it**
+(`ActorRequiredError`: a bug in the calling code, think HTTP 500, not a
+refusal). What the service guarantees once enforcement is on:
+
+- **The actor is read from your repository by id.** Roles and organization
+  are never taken from the caller, so a stale or forged claim can't grant
+  access, and a demotion or removal takes effect on the next call.
+- **Authorization happens first**, before any result is revealed. For
+  example `enroll` checks permission before its "already enrolled" shortcut,
+  so nobody can use it to find out who is in a section.
+- **A missing target is a denial, not "not found",** for every actor, admins
+  included (`PermissionDeniedError`). A section whose course can't be found
+  is denied too, because its organization is unknown. This means nobody can
+  probe which sections or enrollments exist.
+- **Only an exact `true` from the policy allows.** Any other answer is a
+  denial, and a policy that throws stops the action (in `bulkEnroll` it fails
+  just that row).
+- **Role escalation is blocked** by the `enrollment.grantRole.<role>` check.
+  In `bulkEnroll` each row's role is checked, and a refused row is reported as
+  `not permitted` while the rest continue.
+- **A refusal leaves no trace:** nothing is created or changed and no event is
+  emitted.
+
+The checks live in one shared function, `authorizeInSection`
+(`core/authorization.ts`), so every module that enforces behaves identically
+and the rules can't drift apart.
+
+One limit to know about: the check and the action are separate steps, so a
+change made by someone else in between can slip through. If that matters for
+you, make the underlying repository calls transactional.
 
 ### Repository interfaces
 
@@ -185,6 +241,7 @@ interface CourseRepository {
 
 interface EnrollmentRepository {
   create(enrollment: Omit<Enrollment, "id">): Promise<Enrollment>;
+  findById(id: Id): Promise<Enrollment | null>; // needed so drop() can be authorized
   update(id: Id, patch: Partial<Enrollment>): Promise<Enrollment>;
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(
@@ -256,19 +313,26 @@ interface BatchReport {
 
 ### `EnrollmentService`
 
-Constructed with a `RepositoryContext`.
+Constructed with a `RepositoryContext`, an optional `EventBus`, and optional
+`{ policy }` to turn on permission enforcement (see "Enforcement inside a
+service" above). Every method below takes a trailing `actor?: { actorId }`,
+which is required when a policy is set and ignored otherwise.
 
-- **`enroll(opts: EnrollOptions): Promise<Enrollment>`** — Idempotent:
+- **`enroll(opts: EnrollOptions, actor?): Promise<Enrollment>`** — Idempotent:
   calling twice for the same user+section returns the existing (non-dropped)
   enrollment rather than duplicating it. If the section has a `capacity` and
   is full, either throws or waitlists depending on `waitlistIfFull`. If the
   section's course has an `orgId`, the user must belong to that
   organization or a `TenantMismatchError` is thrown before anything is
-  created (see "Tenancy" above).
-- **`drop(enrollmentId: string): Promise<Enrollment>`** — Never hard-deletes;
-  sets `status: 'dropped'` and `droppedAt` to preserve history.
-- **`listRoster(sectionId, status?): Promise<Enrollment[]>`**
-- **`bulkEnroll(sectionId, rows: BatchEnrollRow[]): Promise<BatchReport>`** —
+  created (see "Tenancy" above). With a policy it needs `enrollment.enroll`
+  plus `enrollment.grantRole.<role>`.
+- **`drop(enrollmentId, actor?): Promise<Enrollment>`** — Never hard-deletes;
+  sets `status: 'dropped'` and `droppedAt` to preserve history. Needs
+  `enrollment.drop` (students may drop only themselves).
+- **`listRoster(sectionId, status?, actor?): Promise<Enrollment[]>`** — Needs
+  `enrollment.viewRoster`.
+- **`bulkEnroll(sectionId, rows: BatchEnrollRow[], actor?): Promise<BatchReport>`** —
+  Needs `enrollment.bulkEnroll`, and each row's role is checked.
   Resolves each row's `userExternalRef` via `UserRepository`, scoped to the
   section's organization when its course has one (so the host
   app's internal user IDs never need to leak into the import feed), then
@@ -456,6 +520,7 @@ before committing it.
 ```ts
 interface GradeRepository {
   create(entry: Omit<GradeEntry, "id">): Promise<GradeEntry>;
+  findById(id: string): Promise<GradeEntry | null>; // used to validate previousEntryId
   markSuperseded(id: string, byId: string): Promise<void>;
   listForUserInSection(
     userId: string,
@@ -464,18 +529,62 @@ interface GradeRepository {
 }
 ```
 
-Constructed with a single `GradeRepository`.
+Constructed with a `GradeRepository`, an optional `EventBus`, and optional
+`GradingEnforcement` to turn on permission enforcement (see below). Every
+method takes a trailing `actor?: { actorId }`, which is required when
+enforcement is on and ignored otherwise.
 
 - **`recordGrade(submissionId, userId, score, maxScore, graderId,
-previousEntryId?): Promise<GradeEntry>`** — **Never overwrites.** Always
-  creates a new entry; if `previousEntryId` is given, marks that old entry
-  superseded. This gives a full audit trail with no extra effort from
-  callers.
-- **`computeFinalGradeForUser(userId, sectionId, scheme): Promise<number>`**
+previousEntryId?, actor?): Promise<GradeEntry>`** — **Never overwrites.**
+  Always creates a new entry; if `previousEntryId` is given, marks that old
+  entry superseded. This gives a full audit trail with no extra effort from
+  callers. `previousEntryId` must be the current entry **for the same
+  submission**: an entry that doesn't exist, belongs to another submission, or
+  was already superseded is refused (`Error`) before anything is written.
+  Superseding another submission's entry would silently erase that grade from
+  the gradebook, and superseding twice would fork the history. This check
+  applies whether or not enforcement is on.
+- **`computeFinalGradeForUser(userId, sectionId, scheme, actor?): Promise<number>`**
   — Fetches entries, filters out any that are superseded, groups by
   category, and delegates to `computeFinalGrade`.
-- **`computeLetterGradeForUser(userId, sectionId, scheme, scale):
+- **`computeLetterGradeForUser(userId, sectionId, scheme, scale, actor?):
 Promise<string>`**
+
+#### Enforcing permissions
+
+```ts
+const grading = new GradingService(grades, bus, {
+  policy: createRolePolicy(),
+  repos,                                   // users, courses and enrollments
+  submissions: {
+    // Which section a submission is in, and who submitted it. Usually:
+    // submission -> content node -> section.
+    locate: async (submissionId) => { /* return { sectionId, userId } | null */ },
+  },
+});
+
+await grading.recordGrade(subId, studentId, 80, 100, teacher.id, undefined, { actorId: teacher.id });
+await grading.computeFinalGradeForUser(studentId, sectionId, scheme, { actorId: student.id });
+```
+
+This follows the same rules as enrollment (see "Enforcement inside a
+service" under Permissions): the actor is read from your repository, a
+missing target is a denial, and only an exact `true` from the policy allows.
+Grading adds:
+
+- **The section comes from the submission**, via your `locate` function,
+  never from the caller. Grading can't look submissions up itself because
+  modules may only depend on `core`.
+- **`recordGrade` needs `grading.record` in that section**, and in addition
+  `graderId` must be the acting user (nobody records a grade under someone
+  else's name), `userId` must be whoever submitted the work, and **nobody may
+  grade their own submission**, admins included.
+- **The order protects you:** permission is checked before the submission is
+  compared with the arguments you passed, so an unauthorized caller can't use
+  a mismatch to learn who submitted what.
+- **Viewing needs `grading.view`:** instructors and TAs for anyone in the
+  section, students for their own grades only. Nothing is read from the
+  repository until the check passes.
 
 ---
 

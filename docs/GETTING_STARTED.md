@@ -43,6 +43,9 @@ class PrismaGradeRepository implements GradeRepository {
   async create(entry: Omit<GradeEntry, "id">): Promise<GradeEntry> {
     return this.prisma.gradeEntry.create({ data: entry });
   }
+  async findById(id: string): Promise<GradeEntry | null> {
+    return this.prisma.gradeEntry.findUnique({ where: { id } });
+  }
   async markSuperseded(id: string, byId: string): Promise<void> {
     await this.prisma.gradeEntry.update({
       where: { id },
