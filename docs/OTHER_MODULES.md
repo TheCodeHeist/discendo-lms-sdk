@@ -142,8 +142,8 @@ Role-based checks, in two ways:
 
 1. **Inside a service (recommended).** Construct a service with a policy and
    it enforces permissions itself; see "Enforcement" below. Today
-   `EnrollmentService` and `GradingService` support this. The other modules
-   are next.
+   `EnrollmentService`, `GradingService` and `AssessmentService` support this.
+   The other modules are next.
 2. **At your own API boundary.** Call the functions below yourself before you
    call a service. This is what you use for modules that don't enforce yet.
 
@@ -187,9 +187,9 @@ rule) are denied.
 | Role | Can |
 | --- | --- |
 | admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog`, and granting any role; `delegation.grant`, `delegation.revoke` and `delegation.view` |
-| instructor | `enrollment.enroll` (granting `ta` or `student` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`, `delegation.grant`, `delegation.revoke`, `delegation.view` |
-| ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`; plus whatever an instructor has delegated to them (see below); own only: `delegation.view` |
-| student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
+| instructor | `enrollment.enroll` (granting `ta` or `student` only), `enrollment.drop`, `enrollment.viewRoster`, `assessment.viewAttempts`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`, `delegation.grant`, `delegation.revoke`, `delegation.view` |
+| ta | `enrollment.viewRoster`, `assessment.viewAttempts`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`; plus whatever an instructor has delegated to them (see below); own only: `delegation.view` |
+| student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `assessment.startAttempt`, `assessment.viewAttempts`, `enrollment.drop`, `grading.view`, `reporting.view` |
 | guardian | not a role. Read-only access to a ward's records through a `GuardianLink` (see below) |
 
 **Delegation to TAs.** An instructor or admin can hand some of their own
@@ -503,17 +503,53 @@ interface QuizRepository {
 }
 ```
 
-Constructed with `(submissions, quizzes, plagiarismHook?)`.
+Constructed with `(submissions, quizzes, plagiarismHook?, events?, enforcement?)`.
+Every method takes a trailing `actor?: { actorId }`, which is required when
+enforcement is on and ignored otherwise.
 
-- **`submit(contentId, userId, payload, maxAttempts?): Promise<Submission>`**
+- **`submit(contentId, userId, payload, maxAttempts?, actor?): Promise<Submission>`**
   — Throws `'No attempts remaining'` if `maxAttempts` is set and already
   reached. If a `plagiarismHook` was supplied, it's invoked **fire-and-forget**
   (`void this.plagiarismHook(...)`) — submission is never blocked waiting on
   a potentially slow external check.
-- **`attemptsRemaining(contentId, userId, maxAttempts): Promise<number>`**
-- **`generateAttempt(quizId, userId, randomize = true): Promise<QuizAttempt>`**
+- **`attemptsRemaining(contentId, userId, maxAttempts, actor?): Promise<number>`**
+- **`generateAttempt(quizId, userId, randomize = true, actor?): Promise<QuizAttempt>`**
   — Fetches the quiz's questions, optionally Fisher-Yates shuffles the
   question order (per-attempt, not stored globally), and records the attempt.
+
+#### Enforcing permissions
+
+```ts
+const assessment = new AssessmentService(submissions, quizzes, plagiarismHook, bus, {
+  policy: createRolePolicy(),
+  repos,   // users, courses, enrollments and content (and optionally guardianLinks, delegations)
+});
+
+await assessment.submit(contentId, student.id, payload, undefined, { actorId: student.id });
+await assessment.attemptsRemaining(contentId, student.id, 3, { actorId: teacher.id });
+await assessment.generateAttempt(quizContentId, student.id, true, { actorId: student.id });
+```
+
+This follows the same rules as enrollment (see "Enforcement inside a
+service" under Permissions). Assessment adds:
+
+- **The section comes from the content node** (`repos.content`), never from
+  the caller. For a quiz, `quizId` has to be the id of the quiz's content node.
+- **Only the student themselves** can `submit` (`assessment.submit`) or start
+  an attempt (`assessment.startAttempt`), for their own work, in a section
+  where they are an active student. Teachers, TAs, admins and guardians
+  cannot, even for a student in their own section.
+- **`attemptsRemaining`** (`assessment.viewAttempts`) can be read by the
+  student for themselves and by staff for anyone.
+- **Unpublished content is invisible to non-staff:** a student is refused on
+  a draft assignment or quiz, while staff are not.
+- **The permission check comes before the attempt limit,** so nobody learns how
+  many attempts someone else has used, and nothing is looked up before the actor
+  is known.
+- **Not checked here:** prerequisite gating and due dates (use
+  `ContentService.isUnlocked` and the calendar), and that the content is an
+  assignment or a quiz. Staff also cannot record an offline (`kind: 'none'`)
+  submission on a student's behalf yet.
 
 ---
 

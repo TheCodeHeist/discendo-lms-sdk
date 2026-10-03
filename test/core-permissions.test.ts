@@ -472,3 +472,41 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     expect(policy.can('delegation.view', inSec(stu, 'student', { resourceOwnerId: stu.id }))).toBe(false);
   });
 });
+
+describe('assessment rules', () => {
+  const policy = createRolePolicy();
+  const ctx = (actor: Identity, role: Role | undefined, ownerId?: string): PermissionContext => ({
+    actor,
+    section: { role },
+    resourceOrgId: undefined,
+    resourceOwnerId: ownerId,
+  });
+  const ta = person('ta-1', ['ta']);
+
+  it.each(['assessment.submit', 'assessment.startAttempt'])('%s is for a student acting on their own work only', (action) => {
+    expect(policy.can(action, ctx(stu, 'student', stu.id))).toBe(true);
+    expect(policy.can(action, ctx(stu, 'student', 'someone-else'))).toBe(false);
+    expect(policy.can(action, ctx(stu, 'student', undefined))).toBe(false);
+    for (const [who, role] of [[teacher, 'instructor'], [ta, 'ta'], [admin, undefined]] as const) {
+      expect(policy.can(action, ctx(who, role, who.id)), `${who.id} as self`).toBe(false);
+      expect(policy.can(action, ctx(who, role, stu.id)), `${who.id} for a student`).toBe(false);
+    }
+  });
+
+  it('assessment.viewAttempts is open to staff for anyone and to a student for themselves', () => {
+    for (const [who, role] of [[teacher, 'instructor'], [ta, 'ta'], [admin, undefined]] as const) {
+      expect(policy.can('assessment.viewAttempts', ctx(who, role, stu.id)), who.id).toBe(true);
+    }
+    expect(policy.can('assessment.viewAttempts', ctx(stu, 'student', stu.id))).toBe(true);
+    expect(policy.can('assessment.viewAttempts', ctx(stu, 'student', 'someone-else'))).toBe(false);
+  });
+
+  it('gives a guardian nothing here, whatever the link allows', () => {
+    const parent = person('parent-1', ['student'], 'org-a');
+    const guardian = { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule'] as GuardianScope[] };
+    for (const action of ['assessment.submit', 'assessment.startAttempt', 'assessment.viewAttempts']) {
+      const c: PermissionContext = { actor: parent, section: {}, resourceOrgId: 'org-a', resourceOwnerId: 'kid', guardian };
+      expect(policy.can(action, c), action).toBe(false);
+    }
+  });
+});

@@ -60,6 +60,8 @@ export const DEFAULT_RULES = {
   'content.manage': { roles: ['admin', 'instructor'], delegable: true },
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
+  'assessment.startAttempt': { ownRoles: ['student'] },
+  'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' },
   // communication
