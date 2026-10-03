@@ -77,8 +77,15 @@ export interface PermissionContext {
    * are not enrolled.
    */
   section?: { role?: Role | undefined };
-  /** Organization that owns the target. Set it whenever the target is org-scoped. */
-  resourceOrgId?: Id | undefined;
+  /**
+   * Organization that owns the target, or `undefined` when the target belongs
+   * to no organization. Always compared with the actor's organization, and
+   * "no organization" only matches "no organization": an actor who belongs to
+   * an organization cannot act on an un-owned resource, and vice versa. The
+   * key is required so a caller can't forget it; an untyped caller that omits
+   * it is treated as saying "no organization" and fails closed.
+   */
+  resourceOrgId: Id | undefined;
   /** Whose resource this is (e.g. the student a grade belongs to), for `ownRoles` rules. */
   resourceOwnerId?: Id | undefined;
 }
@@ -170,8 +177,9 @@ export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPol
 
   return {
     can(action, ctx) {
-      // Tenant first: not even an admin acts across organizations. "No org" only matches "no org".
-      if (ctx.resourceOrgId !== undefined && !sameOrg(ctx.actor.orgId, ctx.resourceOrgId)) return false;
+      // Tenant first: not even an admin acts across organizations. "No org" only matches
+      // "no org", in both directions, and the check is never skipped.
+      if (!sameOrg(ctx.actor.orgId, ctx.resourceOrgId)) return false;
 
       const rule = rules.get(action);
       if (!rule) return false;

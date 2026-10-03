@@ -31,6 +31,7 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
   add('root', ['admin'], 'org-a'); // an admin who is ALSO enrolled as a student in sec-1
   add('root-b', ['admin'], 'org-b');
   add('admin-free', ['admin'], 'org-a'); // same-org admin with no enrollments at all
+  users.set('admin-no-org', { id: 'admin-no-org', roles: ['admin'] }); // belongs to no organization
 
   const store = new Map<string, Enrollment>();
   let en = 0;
@@ -40,9 +41,14 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
       findByExternalRef: async () => null,
     },
     courses: {
-      findCourse: async (id) => (id === 'course-a' ? { id, title: 'A', orgId: 'org-a' } : null),
+      findCourse: async (id) =>
+        id === 'course-a' ? { id, title: 'A', orgId: 'org-a' } : id === 'course-open' ? { id, title: 'Open' } : null,
       findSection: async (id) =>
-        ['sec-1', 'sec-2'].includes(id) ? { id, courseId: 'course-a', status: 'published' as const } : null,
+        ['sec-1', 'sec-2'].includes(id)
+          ? { id, courseId: 'course-a', status: 'published' as const }
+          : id === 'sec-open'
+            ? { id, courseId: 'course-open', status: 'published' as const }
+            : null,
       listSections: async () => [],
     },
     enrollments: {
@@ -73,6 +79,7 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
     ['sub-2', { sectionId: 'sec-1', userId: 'stu-2' }],
     ['sub-root', { sectionId: 'sec-1', userId: 'root' }],
     ['sub-other-section', { sectionId: 'sec-2', userId: 'stu-2' }],
+    ['sub-open', { sectionId: 'sec-open', userId: 'stu' }],
   ]);
 
   const entries = new Map<string, GradeEntry>();
@@ -230,6 +237,33 @@ describe('GradingService permissions: recordGrade', () => {
     await expect(w.service.recordGrade('sub-2', 'stu-2', 80, 100, 'admin-free', undefined, as('admin-free'))).rejects.toBeInstanceOf(
       PermissionDeniedError,
     );
+  });
+});
+
+describe('GradingService permissions: a section whose course has no organization', () => {
+  it('refuses an admin who belongs to an organization, for recording and for viewing', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordGrade('sub-open', 'stu', 80, 100, 'admin-free', undefined, as('admin-free'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    expect(w.calls.create).toBe(0);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-open', scheme, as('admin-free'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('lets an admin with no organization record a grade there', async () => {
+    const w = await buildWorld();
+    await expect(
+      w.service.recordGrade('sub-open', 'stu', 80, 100, 'admin-no-org', undefined, as('admin-no-org')),
+    ).resolves.toMatchObject({ graderId: 'admin-no-org' });
+  });
+
+  it('refuses an admin with no organization on an organization\'s section', async () => {
+    const w = await buildWorld();
+    await expect(
+      w.service.recordGrade('sub-1', 'stu', 80, 100, 'admin-no-org', undefined, as('admin-no-org')),
+    ).rejects.toBeInstanceOf(PermissionDeniedError);
   });
 });
 

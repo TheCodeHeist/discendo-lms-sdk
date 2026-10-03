@@ -198,8 +198,32 @@ describe('EnrollmentService permissions: enroll', () => {
     const open = { userId: 'newbie', sectionId: 'sec-open', role: 'student' as Role };
     await expect(w.service.enroll(open, as('nobody'))).rejects.toBeInstanceOf(PermissionDeniedError);
     expect(w.calls.create).toBe(0);
-    // ...while a real admin can use the same unscoped course.
-    await expect(w.service.enroll(open, as('root'))).resolves.toMatchObject({ status: 'active' });
+  });
+
+  describe('a course with no organization', () => {
+    // "No organization" only matches an actor with no organization, so an admin of
+    // org-a cannot manage a course that belongs to nobody (it could be anyone's).
+    const open = { userId: 'newbie', sectionId: 'sec-open', role: 'student' as Role };
+
+    it('refuses an admin who belongs to an organization', async () => {
+      const w = await buildWorld();
+      await expect(w.service.enroll(open, as('root'))).rejects.toBeInstanceOf(PermissionDeniedError);
+      await expect(w.service.listRoster('sec-open', undefined, as('root'))).rejects.toBeInstanceOf(PermissionDeniedError);
+      await expect(w.service.bulkEnroll('sec-open', [], as('root'))).rejects.toBeInstanceOf(PermissionDeniedError);
+      expect(w.calls.create).toBe(0);
+    });
+
+    it('lets an admin with no organization manage it', async () => {
+      const w = await buildWorld();
+      w.users.set('root-free', { id: 'root-free', roles: ['admin'] });
+      await expect(w.service.enroll(open, as('root-free'))).resolves.toMatchObject({ status: 'active' });
+    });
+
+    it('refuses a no-organization admin on an organization\'s course (the other direction)', async () => {
+      const w = await buildWorld();
+      w.users.set('root-free', { id: 'root-free', roles: ['admin'] });
+      await expect(w.service.enroll(NEWBIE, as('root-free'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    });
   });
 
   it('still applies the target-user tenant check to an authorized actor', async () => {

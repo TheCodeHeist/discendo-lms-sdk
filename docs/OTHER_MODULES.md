@@ -143,7 +143,7 @@ const enrollment = await repos.enrollments.findByUserAndSection(actor.id, sectio
 await authorize(policy, "grading.record", {
   actor,                                        // Identity
   section: { role: activeSectionRole(enrollment) },
-  resourceOrgId: course.orgId,                  // when the target is org-scoped
+  resourceOrgId: course.orgId,                  // required; undefined = "belongs to no organization"
   resourceOwnerId: studentId,                   // for "own" rules
 }); // throws PermissionDeniedError if not allowed
 ```
@@ -157,7 +157,12 @@ as an instructor. Actions with no `section` in the context use
 `active` enrollment, so waitlisted, dropped and completed ones grant nothing.
 
 **Order of checks.** Tenant first (the same rule as `Tenancy` above, so not
-even an admin acts across organizations), then the action's rule. Unknown
+even an admin acts across organizations), then the action's rule. The tenant
+check always runs, and "no organization" only matches "no organization": an
+actor who belongs to an organization cannot act on a resource that has none,
+and the other way round. `resourceOrgId` is a required key, so a caller has to
+state it, and an untyped caller that leaves it out fails closed. Single-institution
+deployments (no `orgId` on users or courses) are unaffected. Unknown
 actions and missing context (for example no `resourceOwnerId` on an "own"
 rule) are denied.
 

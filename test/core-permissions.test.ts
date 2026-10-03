@@ -23,6 +23,7 @@ const stu = person('stu-1', ['student']);
 const inSection = (actor: Identity, role?: Role, extra: Partial<PermissionContext> = {}): PermissionContext => ({
   actor,
   section: { role },
+  resourceOrgId: undefined, // these tests use no-organization actors unless they say otherwise
   ...extra,
 });
 
@@ -99,8 +100,8 @@ describe('role policy: own-resource rules', () => {
 
 describe('role policy: no section in context', () => {
   it('uses account-wide roles', () => {
-    expect(policy.can('admin.viewAuditLog', { actor: admin })).toBe(true);
-    expect(policy.can('admin.viewAuditLog', { actor: teacher })).toBe(false);
+    expect(policy.can('admin.viewAuditLog', { actor: admin, resourceOrgId: undefined })).toBe(true);
+    expect(policy.can('admin.viewAuditLog', { actor: teacher, resourceOrgId: undefined })).toBe(false);
   });
 });
 
@@ -119,19 +120,47 @@ describe('role policy: tenancy', () => {
     expect(policy.can('scheduling.manage', inSection(admin, undefined, { resourceOrgId: 'org-a' }))).toBe(false);
   });
 
-  it('applies no tenant check to an unscoped resource', () => {
-    expect(policy.can('scheduling.manage', inSection(orgAAdmin, undefined))).toBe(true);
+  describe('a resource with no organization', () => {
+    // "No organization" is a value like any other: it matches only an actor with no organization.
+    it('refuses an actor who belongs to an organization, even an admin', () => {
+      expect(policy.can('scheduling.manage', inSection(orgAAdmin, undefined, { resourceOrgId: undefined }))).toBe(false);
+    });
+
+    it('refuses when the caller leaves resourceOrgId out entirely (untyped callers fail closed)', () => {
+      const omitted = { actor: orgAAdmin, section: {} } as PermissionContext;
+      expect(policy.can('scheduling.manage', omitted)).toBe(false);
+    });
+
+    it('allows an actor with no organization (single-institution deployments)', () => {
+      expect(policy.can('scheduling.manage', inSection(admin, undefined, { resourceOrgId: undefined }))).toBe(true);
+    });
+
+    it('also refuses the own-resource path (a student viewing their own grade)', () => {
+      const s = person('s-a', ['student'], 'org-a');
+      const ctx = inSection(s, 'student', { resourceOrgId: undefined, resourceOwnerId: 's-a' });
+      expect(policy.can('grading.view', ctx)).toBe(false);
+      expect(policy.can('grading.view', { ...ctx, resourceOrgId: 'org-a' })).toBe(true);
+    });
+
+    it('also refuses actions with no section in the context', () => {
+      expect(policy.can('admin.viewAuditLog', { actor: orgAAdmin, resourceOrgId: undefined })).toBe(false);
+      expect(policy.can('admin.viewAuditLog', { actor: admin, resourceOrgId: undefined })).toBe(true);
+    });
+
+    it('still refuses a no-org actor on an org resource (the other direction)', () => {
+      expect(policy.can('admin.viewAuditLog', { actor: admin, resourceOrgId: 'org-a' })).toBe(false);
+    });
   });
 });
 
 describe('role policy: deny by default', () => {
   it('refuses an unknown action', () => {
-    expect(policy.can('nope.nothing', { actor: admin })).toBe(false);
+    expect(policy.can('nope.nothing', { actor: admin, resourceOrgId: undefined })).toBe(false);
   });
 
   it('treats action names that match object prototype members as unknown actions', () => {
     for (const name of ['constructor', 'toString', '__proto__', 'hasOwnProperty']) {
-      expect(policy.can(name, { actor: admin })).toBe(false);
+      expect(policy.can(name, { actor: admin, resourceOrgId: undefined })).toBe(false);
     }
   });
 
@@ -158,7 +187,7 @@ describe('role policy: institution overrides', () => {
 
   it('treats an empty rule as deny-everyone, admins included', () => {
     const locked = createRolePolicy({ overrides: { 'scheduling.manage': {} } });
-    expect(locked.can('scheduling.manage', { actor: admin })).toBe(false);
+    expect(locked.can('scheduling.manage', { actor: admin, resourceOrgId: undefined })).toBe(false);
   });
 
   it('supports host-defined actions', () => {
@@ -176,11 +205,11 @@ describe('role policy: institution overrides', () => {
 
 describe('authorize / PermissionDeniedError', () => {
   it('resolves when allowed', async () => {
-    await expect(authorize(policy, 'admin.viewAuditLog', { actor: admin })).resolves.toBeUndefined();
+    await expect(authorize(policy, 'admin.viewAuditLog', { actor: admin, resourceOrgId: undefined })).resolves.toBeUndefined();
   });
 
   it('rejects with PermissionDeniedError carrying the action', async () => {
-    const err = (await authorize(policy, 'admin.viewAuditLog', { actor: stu }).catch((e: unknown) => e)) as PermissionDeniedError;
+    const err = (await authorize(policy, 'admin.viewAuditLog', { actor: stu, resourceOrgId: undefined }).catch((e: unknown) => e)) as PermissionDeniedError;
     expect(err).toBeInstanceOf(PermissionDeniedError);
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('PermissionDeniedError');
@@ -192,8 +221,8 @@ describe('authorize / PermissionDeniedError', () => {
     const onlyDuringOfficeHours: PermissionPolicy = {
       can: async (_action, ctx) => ctx.actor.id === 'allowed-user',
     };
-    await expect(authorize(onlyDuringOfficeHours, 'anything', { actor: person('allowed-user', []) })).resolves.toBeUndefined();
-    await expect(authorize(onlyDuringOfficeHours, 'anything', { actor: stu })).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(authorize(onlyDuringOfficeHours, 'anything', { actor: person('allowed-user', []), resourceOrgId: undefined })).resolves.toBeUndefined();
+    await expect(authorize(onlyDuringOfficeHours, 'anything', { actor: stu, resourceOrgId: undefined })).rejects.toBeInstanceOf(PermissionDeniedError);
   });
 });
 
@@ -219,7 +248,7 @@ describe('activeSectionRole', () => {
 
 describe('effectiveRoles', () => {
   it('returns account roles when no section is targeted', () => {
-    expect(effectiveRoles({ actor: person('x', ['instructor', 'ta']) })).toEqual(['instructor', 'ta']);
+    expect(effectiveRoles({ actor: person('x', ['instructor', 'ta']), resourceOrgId: undefined })).toEqual(['instructor', 'ta']);
   });
 
   it('returns the section role plus admin, and drops other account roles, for a section', () => {
@@ -234,12 +263,12 @@ describe('effectiveRoles', () => {
 describe('authorize is strict about what counts as "allowed"', () => {
   it.each([[undefined], [null], ['true'], [1], [{}], [[]]])('denies a policy answer of %p', async (answer) => {
     const sloppy = { can: () => answer } as unknown as PermissionPolicy;
-    await expect(authorize(sloppy, 'anything', { actor: admin })).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(authorize(sloppy, 'anything', { actor: admin, resourceOrgId: undefined })).rejects.toBeInstanceOf(PermissionDeniedError);
   });
 
   it('allows only an exact true, including from an async policy', async () => {
-    await expect(authorize({ can: () => true }, 'anything', { actor: stu })).resolves.toBeUndefined();
-    await expect(authorize({ can: async () => true }, 'anything', { actor: stu })).resolves.toBeUndefined();
+    await expect(authorize({ can: () => true }, 'anything', { actor: stu, resourceOrgId: undefined })).resolves.toBeUndefined();
+    await expect(authorize({ can: async () => true }, 'anything', { actor: stu, resourceOrgId: undefined })).resolves.toBeUndefined();
   });
 
   it('lets an error thrown by the policy propagate instead of allowing or swallowing it', async () => {
@@ -248,7 +277,7 @@ describe('authorize is strict about what counts as "allowed"', () => {
         throw new Error('backend down');
       },
     };
-    await expect(authorize(broken, 'anything', { actor: admin })).rejects.toThrow('backend down');
+    await expect(authorize(broken, 'anything', { actor: admin, resourceOrgId: undefined })).rejects.toThrow('backend down');
   });
 });
 
