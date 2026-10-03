@@ -12,6 +12,7 @@ import type {
   ContentNode,
   AcademicTerm,
   Organization,
+  GuardianLink,
 } from './types.js';
 
 export interface UserRepository {
@@ -58,6 +59,15 @@ export interface OrganizationRepository {
   findById(id: Id): Promise<Organization | null>;
 }
 
+export interface GuardianLinkRepository {
+  /**
+   * The active link from this guardian to this ward, or null. Enforcement
+   * re-checks what comes back (ids, status, organization), so a repository
+   * that returns the wrong link still can't widen anyone's access.
+   */
+  findActive(guardianId: Id, wardId: Id): Promise<GuardianLink | null>;
+}
+
 /**
  * Bundle of repositories the SDK's service classes are constructed with.
  * Host app wires up real implementations once at startup.
@@ -70,4 +80,6 @@ export interface RepositoryContext {
   terms: TermRepository;
   /** Only needed by hosts that use organizations. Nothing in the SDK requires it yet. */
   organizations?: OrganizationRepository;
+  /** Only needed by hosts with guardians. Without it a guardian can read nothing. */
+  guardianLinks?: GuardianLinkRepository;
 }

@@ -18,7 +18,7 @@
  * Deny by default: an unknown action, or a context that can't prove the
  * needed relationship, is refused.
  */
-import type { Id, Identity, Role, Enrollment } from './types.js';
+import type { Id, Identity, Role, Enrollment, GuardianScope } from './types.js';
 import { sameOrg } from './tenancy.js';
 
 /**
@@ -29,6 +29,11 @@ import { sameOrg } from './tenancy.js';
 export interface ActionRule {
   roles?: readonly Role[];
   ownRoles?: readonly Role[];
+  /**
+   * A guardian whose verified link to the resource's owner includes this scope
+   * may do it (read-only actions only). Without it a rule never admits a guardian.
+   */
+  guardianScope?: GuardianScope;
 }
 
 /** Built-in defaults. Deliberately conservative; every one is overridable. */
@@ -51,16 +56,16 @@ export const DEFAULT_RULES = {
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
-  'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
+  'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' },
   // communication
   'communication.postAnnouncement': { roles: ['admin', 'instructor'] },
   'communication.participate': { roles: ['admin', 'instructor', 'ta', 'student'] },
   // scheduling
-  'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'] },
+  'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'], guardianScope: 'schedule' },
   'scheduling.manage': { roles: ['admin'] },
   // reporting and administration
   'reporting.recordAttendance': { roles: ['admin', 'instructor', 'ta'] },
-  'reporting.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
+  'reporting.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'attendance' },
   'admin.viewAuditLog': { roles: ['admin'] },
 } as const satisfies Record<string, ActionRule>;
 
@@ -88,6 +93,13 @@ export interface PermissionContext {
   resourceOrgId: Id | undefined;
   /** Whose resource this is (e.g. the student a grade belongs to), for `ownRoles` rules. */
   resourceOwnerId?: Id | undefined;
+  /**
+   * A guardian link that has ALREADY been verified for this actor and this
+   * resource (see `authorizeInSection`): the ward and what the link allows. The
+   * policy still requires `wardId` to be the resource's owner, and never lets a
+   * guardian act on their own resource this way.
+   */
+  guardian?: { wardId: Id; scopes: readonly GuardianScope[] } | undefined;
 }
 
 /** May be async so a host's own policy can look things up (attribute-based rules). */
@@ -188,7 +200,17 @@ export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPol
       if (rule.roles?.some((r) => roles.includes(r))) return true;
 
       const isOwner = ctx.resourceOwnerId !== undefined && ctx.resourceOwnerId === ctx.actor.id;
-      return isOwner && (rule.ownRoles?.some((r) => roles.includes(r)) ?? false);
+      if (isOwner && (rule.ownRoles?.some((r) => roles.includes(r)) ?? false)) return true;
+
+      const g = ctx.guardian;
+      return (
+        rule.guardianScope !== undefined &&
+        g !== undefined &&
+        ctx.resourceOwnerId !== undefined &&
+        g.wardId === ctx.resourceOwnerId &&
+        g.wardId !== ctx.actor.id &&
+        g.scopes.includes(rule.guardianScope)
+      );
     },
   };
 }

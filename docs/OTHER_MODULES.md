@@ -174,7 +174,20 @@ rule) are denied.
 | instructor | `enrollment.enroll` (granting `ta`, `student` or `guardian` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
 | student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
-| guardian | nothing (a parent-to-student relationship isn't modelled yet) |
+| guardian | nothing by role. Read-only access to a ward's records through a `GuardianLink` (see below) |
+
+**Guardians.** A `GuardianLink` ties a guardian to one ward, with `scopes` that
+say what they may read: `grades` (`grading.view`), `attendance`
+(`reporting.view`) and `schedule` (`scheduling.view`). A guardian never writes
+anything and needs no enrollment in the ward's section. Supply
+`guardianLinks: { findActive(guardianId, wardId) }` in your repositories; without
+it a guardian can read nothing. When someone asks about another person's
+resource, `authorizeInSection` looks the link up and re-checks it (right
+guardian, right ward, `active`, same organization as the course) before the
+policy sees it, so a repository that returns the wrong link grants nothing.
+Rules opt in with `guardianScope`; an override that leaves it out removes
+guardian access to that action. (Creating and revoking links is not built yet:
+for now the host writes them through its own repository.)
 
 **Granting roles.** Enrolling someone with a role needs a second permission,
 `enrollment.grantRole.<role>`, so nobody can hand out a role beyond what they

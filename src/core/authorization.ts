@@ -17,6 +17,7 @@
  */
 import type { RepositoryContext } from './repositories.js';
 import type { Action, ActorContext, PermissionContext, PermissionPolicy } from './permissions.js';
+import { sameOrg } from './tenancy.js';
 import {
   authorize,
   activeSectionRole,
@@ -25,7 +26,7 @@ import {
 } from './permissions.js';
 
 /** The repositories needed to work out who the actor is and what they are to a section. */
-export type AuthorizationRepos = Pick<RepositoryContext, 'users' | 'courses' | 'enrollments'>;
+export type AuthorizationRepos = Pick<RepositoryContext, 'users' | 'courses' | 'enrollments' | 'guardianLinks'>;
 
 /** A successful authorization, kept so later checks in the same call can reuse it. */
 export interface Authorized {
@@ -57,7 +58,35 @@ export async function authorizeInSection(
     section: { role: activeSectionRole(membership) },
     resourceOrgId: course.orgId,
     resourceOwnerId: target.ownerId,
+    guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, course.orgId),
   };
   await authorize(policy, action, ctx);
   return { policy, ctx };
+}
+
+/**
+ * The guardian relationship between the actor and the owner of the resource, or
+ * undefined. Looked up only when someone is asking about another person's
+ * resource and the host configured a link repository. Whatever the repository
+ * returns is re-checked here (right guardian, right ward, still active, same
+ * organization as the course), so a wrong or stale link can't grant anything.
+ */
+async function verifiedGuardianLink(
+  repos: AuthorizationRepos,
+  actorId: string,
+  ownerId: string | undefined,
+  courseOrgId: string | undefined,
+): Promise<PermissionContext['guardian']> {
+  if (!repos.guardianLinks || ownerId === undefined || ownerId === actorId) return undefined;
+  const link = await repos.guardianLinks.findActive(actorId, ownerId);
+  if (
+    !link ||
+    link.status !== 'active' ||
+    link.guardianId !== actorId ||
+    link.wardId !== ownerId ||
+    !sameOrg(link.orgId, courseOrgId)
+  ) {
+    return undefined;
+  }
+  return { wardId: link.wardId, scopes: link.scopes };
 }

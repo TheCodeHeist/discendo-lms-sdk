@@ -8,7 +8,7 @@ import {
   ActorRequiredError,
   DEFAULT_RULES,
 } from '../src/core/index.js';
-import type { Identity, PermissionContext, PermissionPolicy, Role } from '../src/core/index.js';
+import type { GuardianScope, Identity, PermissionContext, PermissionPolicy, Role } from '../src/core/index.js';
 
 const policy = createRolePolicy();
 
@@ -325,3 +325,73 @@ describe('default role-grant rules', () => {
   });
 });
 
+
+describe('guardian access (a verified link to a ward)', () => {
+  const policy = createRolePolicy();
+  const parent = person('parent-1', ['guardian'], 'org-a');
+  const link = (scopes: GuardianScope[], wardId = 'kid') => ({ wardId, scopes });
+  const ctxFor = (guardian: PermissionContext['guardian'], extra: Partial<PermissionContext> = {}): PermissionContext => ({
+    actor: parent,
+    section: {},
+    resourceOrgId: 'org-a',
+    resourceOwnerId: 'kid',
+    guardian,
+    ...extra,
+  });
+
+  it('lets a guardian view the ward\'s grades with the grades scope, and nothing else', () => {
+    const g = link(['grades']);
+    expect(policy.can('grading.view', ctxFor(g))).toBe(true);
+    for (const action of ['grading.record', 'content.view', 'content.manage', 'enrollment.drop', 'enrollment.viewRoster', 'assessment.submit', 'reporting.view', 'scheduling.view', 'admin.viewAuditLog']) {
+      expect(policy.can(action, ctxFor(g)), action).toBe(false);
+    }
+  });
+
+  it('maps each scope to its own action', () => {
+    expect(policy.can('reporting.view', ctxFor(link(['attendance'])))).toBe(true);
+    expect(policy.can('grading.view', ctxFor(link(['attendance'])))).toBe(false);
+    expect(policy.can('scheduling.view', ctxFor(link(['schedule'])))).toBe(true);
+    expect(policy.can('reporting.view', ctxFor(link(['schedule'])))).toBe(false);
+  });
+
+  it('refuses a link with no scopes', () => {
+    expect(policy.can('grading.view', ctxFor(link([])))).toBe(false);
+  });
+
+  it('refuses when the resource belongs to someone other than the linked ward', () => {
+    expect(policy.can('grading.view', ctxFor(link(['grades']), { resourceOwnerId: 'other-kid' }))).toBe(false);
+    expect(policy.can('grading.view', ctxFor(link(['grades']), { resourceOwnerId: undefined }))).toBe(false);
+  });
+
+  it('gives nothing for a link from someone to themselves', () => {
+    const self = { wardId: 'parent-1', scopes: ['grades', 'attendance', 'schedule'] as GuardianScope[] };
+    expect(policy.can('grading.view', ctxFor(self, { resourceOwnerId: 'parent-1' }))).toBe(false);
+  });
+
+  it('refuses when there is no verified link in the context', () => {
+    expect(policy.can('grading.view', ctxFor(undefined))).toBe(false);
+  });
+
+  it('is still behind the tenant check', () => {
+    expect(policy.can('grading.view', ctxFor(link(['grades']), { resourceOrgId: 'org-b' }))).toBe(false);
+    expect(policy.can('grading.view', ctxFor(link(['grades']), { resourceOrgId: undefined }))).toBe(false);
+  });
+
+  it('only applies to rules that opt in, so an override that drops the scope removes guardian access', () => {
+    const custom = createRolePolicy({ overrides: { 'grading.view': { roles: ['admin', 'instructor'] } } });
+    expect(custom.can('grading.view', ctxFor(link(['grades'])))).toBe(false);
+  });
+
+  it('never gives a guardian a write action, whatever scopes the link has', () => {
+    const all = link(['grades', 'attendance', 'schedule']);
+    for (const [action, rule] of Object.entries(DEFAULT_RULES)) {
+      const allowed = policy.can(action, ctxFor(all));
+      expect(allowed, action).toBe('guardianScope' in rule);
+    }
+    expect(Object.keys(DEFAULT_RULES).filter((a) => 'guardianScope' in DEFAULT_RULES[a as keyof typeof DEFAULT_RULES]).sort()).toEqual([
+      'grading.view',
+      'reporting.view',
+      'scheduling.view',
+    ]);
+  });
+});

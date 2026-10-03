@@ -10,6 +10,8 @@ import {
 import type {
   RepositoryContext,
   Enrollment,
+  GuardianLink,
+  GuardianScope,
   Identity,
   Role,
   PermissionPolicy,
@@ -20,7 +22,10 @@ const flush = () => new Promise((r) => setTimeout(r, 0));
 const as = (actorId: string) => ({ actorId });
 
 /** Two organizations; sec-1 and sec-2 belong to org-a. */
-async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) {
+async function buildWorld(
+  policy: PermissionPolicy | null = createRolePolicy(),
+  opts: { guardianRepo?: boolean } = {},
+) {
   const users = new Map<string, Identity>();
   const add = (id: string, roles: Role[], orgId: string) => users.set(id, { id, roles, orgId });
   add('teacher', ['instructor'], 'org-a'); // instructor in sec-1
@@ -32,10 +37,16 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
   add('root-b', ['admin'], 'org-b');
   add('admin-free', ['admin'], 'org-a'); // same-org admin with no enrollments at all
   users.set('admin-no-org', { id: 'admin-no-org', roles: ['admin'] }); // belongs to no organization
+  add('parent', ['guardian'], 'org-a'); // not enrolled anywhere; linked to a ward via `links`
+  add('parent-b', ['guardian'], 'org-b');
 
   const store = new Map<string, Enrollment>();
   let en = 0;
-  const repos: Pick<RepositoryContext, 'users' | 'courses' | 'enrollments'> = {
+  const links: GuardianLink[] = [];
+  // A test can replace the lookup to make the repository misbehave (return the wrong link).
+  let lookup: (guardianId: string, wardId: string) => GuardianLink | null = (g, w) =>
+    links.find((l) => l.guardianId === g && l.wardId === w && l.status === 'active') ?? null;
+  const repos: Pick<RepositoryContext, 'users' | 'courses' | 'enrollments' | 'guardianLinks'> = {
     users: {
       findById: async (id) => users.get(id) ?? null,
       findByExternalRef: async () => null,
@@ -64,6 +75,23 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
       listBySection: async () => [],
       countActive: async () => 0,
     },
+  };
+  if (opts.guardianRepo !== false) {
+    repos.guardianLinks = { findActive: async (guardianId, wardId) => lookup(guardianId, wardId) };
+  }
+  const link = (guardianId: string, wardId: string, scopes: GuardianScope[], extra: Partial<GuardianLink> = {}) => {
+    const l: GuardianLink = {
+      id: `link-${links.length + 1}`,
+      guardianId,
+      wardId,
+      orgId: 'org-a',
+      scopes,
+      status: 'active',
+      createdAt: new Date(),
+      ...extra,
+    };
+    links.push(l);
+    return l;
   };
   const seed = (userId: string, sectionId: string, role: Role) =>
     repos.enrollments.create({ userId, sectionId, role, status: 'active', enrolledAt: new Date() });
@@ -119,7 +147,19 @@ async function buildWorld(policy: PermissionPolicy | null = createRolePolicy()) 
     bus,
     policy ? { policy, repos, submissions: locator } : undefined,
   );
-  return { service, grades, entries, calls, events, users, enrollments: store };
+  return {
+    service,
+    grades,
+    entries,
+    calls,
+    events,
+    users,
+    enrollments: store,
+    link,
+    setLookup: (fn: typeof lookup) => {
+      lookup = fn;
+    },
+  };
 }
 
 const scheme = { categories: [{ name: 'default', weight: 1 }] };
@@ -399,5 +439,142 @@ describe('GradingService permissions: a misbehaving policy never opens the door'
       'policy backend down',
     );
     expect(w.calls.create).toBe(0);
+  });
+});
+
+describe('GradingService permissions: guardians', () => {
+  async function withGrades() {
+    const w = await buildWorld();
+    await w.service.recordGrade('sub-1', 'stu', 80, 100, 'teacher', undefined, as('teacher'));
+    await w.service.recordGrade('sub-2', 'stu-2', 95, 100, 'teacher', undefined, as('teacher'));
+    return w;
+  }
+
+  it('lets a linked guardian view their ward\'s grade, and only their ward\'s', async () => {
+    const w = await withGrades();
+    w.link('parent', 'stu', ['grades']);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).resolves.toBeCloseTo(80);
+    await expect(w.service.computeFinalGradeForUser('stu-2', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('works without the guardian being enrolled in the section', async () => {
+    const w = await withGrades();
+    w.link('parent', 'stu', ['grades']);
+    expect(w.enrollments.size).toBeGreaterThan(0);
+    expect([...w.enrollments.values()].some((e) => e.userId === 'parent')).toBe(false);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).resolves.toBeCloseTo(80);
+  });
+
+  it('never lets a guardian record or change a grade', async () => {
+    const w = await withGrades();
+    w.link('parent', 'stu', ['grades', 'attendance', 'schedule']);
+    const before = w.calls.create;
+    await expect(w.service.recordGrade('sub-1', 'stu', 100, 100, 'parent', undefined, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    expect(w.calls.create).toBe(before);
+  });
+
+  it('refuses with no link, a link without the grades scope, or a revoked link', async () => {
+    const w = await withGrades();
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    w.link('parent', 'stu', ['attendance', 'schedule']);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    const w2 = await withGrades();
+    w2.link('parent', 'stu', ['grades'], { status: 'revoked', revokedAt: new Date() });
+    await expect(w2.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('refuses a link from another organization or one with no organization', async () => {
+    const w = await withGrades();
+    w.link('parent', 'stu', ['grades'], { orgId: 'org-b' });
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    const w2 = await withGrades();
+    const { orgId: _drop, ...noOrg } = w2.link('parent', 'stu', ['grades']);
+    w2.setLookup(() => noOrg as GuardianLink);
+    await expect(w2.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('refuses a guardian in another organization even with a link in the right one', async () => {
+    const w = await withGrades();
+    w.link('parent-b', 'stu', ['grades'], { orgId: 'org-a' });
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent-b'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('does not trust a repository that returns the wrong, a revoked, or someone else\'s link', async () => {
+    const w = await withGrades();
+    const good = w.link('parent', 'stu-2', ['grades']);
+    // asked about stu, the repo hands back the link for stu-2
+    w.setLookup(() => good);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    // asked about parent, the repo hands back someone else's link
+    const others = w.link('parent-b', 'stu', ['grades'], { orgId: 'org-a' });
+    w.setLookup(() => others);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    // a link that says it is revoked
+    const revoked = w.link('parent', 'stu', ['grades'], { status: 'revoked' });
+    w.setLookup(() => revoked);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('hands a custom policy no guardian context unless the link checks out for this actor and ward', async () => {
+    const seen: Array<unknown> = [];
+    const spy: PermissionPolicy = {
+      can: (_action, ctx) => {
+        seen.push(ctx.guardian);
+        return false;
+      },
+    };
+    const w = await buildWorld(spy);
+    const forOtherWard = w.link('parent', 'stu-2', ['grades']);
+    w.setLookup(() => forOtherWard); // asked about stu, the repo answers with the link for stu-2
+    await w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent')).catch(() => {});
+    expect(seen).toEqual([undefined]);
+
+    seen.length = 0;
+    const good = w.link('parent', 'stu', ['grades']);
+    w.setLookup(() => good);
+    await w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent')).catch(() => {});
+    expect(seen).toEqual([{ wardId: 'stu', scopes: ['grades'] }]);
+  });
+
+  it('fails closed when the host has not configured a guardian link repository', async () => {
+    const w = await buildWorld(createRolePolicy(), { guardianRepo: false });
+    await w.service.recordGrade('sub-1', 'stu', 80, 100, 'teacher', undefined, as('teacher'));
+    w.link('parent', 'stu', ['grades']);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('does not look links up when the actor is asking about their own resource', async () => {
+    const w = await withGrades();
+    let lookups = 0;
+    w.setLookup(() => {
+      lookups++;
+      return null;
+    });
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu'))).resolves.toBeCloseTo(80);
+    expect(lookups).toBe(0);
   });
 });

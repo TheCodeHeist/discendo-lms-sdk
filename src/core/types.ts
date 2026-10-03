@@ -19,6 +19,31 @@ export interface Organization {
   name: string;
 }
 
+/**
+ * What a guardian may see of their ward's records. Each scope opens exactly one
+ * read-only built-in action (see `guardianScope` on the rules in `permissions.ts`):
+ * `grades` -> `grading.view`, `attendance` -> `reporting.view`,
+ * `schedule` -> `scheduling.view`. A guardian can never write anything.
+ */
+export type GuardianScope = 'grades' | 'attendance' | 'schedule';
+
+/**
+ * A parent-or-guardian to student relationship: the guardian may read the ward's
+ * records within `scopes` and nothing else. Only an `active` link counts.
+ * `orgId` is the organization the link is valid in (unset in single-tenant use)
+ * and has to match the organization of what is being read.
+ */
+export interface GuardianLink {
+  id: Id;
+  guardianId: Id;
+  wardId: Id;
+  orgId?: Id;
+  scopes: GuardianScope[];
+  status: 'active' | 'revoked';
+  createdAt: Timestamp;
+  revokedAt?: Timestamp;
+}
+
 export interface Identity {
   id: Id;
   /** Reference back to the host app's own user record, if different. */
