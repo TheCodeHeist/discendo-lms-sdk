@@ -186,11 +186,35 @@ rule) are denied.
 
 | Role | Can |
 | --- | --- |
-| admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog`, and granting any role |
-| instructor | `enrollment.enroll` (granting `ta` or `student` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
-| ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view` |
+| admin | everything below, plus `enrollment.bulkEnroll`, `scheduling.manage`, `admin.viewAuditLog`, and granting any role; `delegation.grant`, `delegation.revoke` and `delegation.view` |
+| instructor | `enrollment.enroll` (granting `ta` or `student` only), `enrollment.drop`, `enrollment.viewRoster`, `content.view`, `content.manage`, `grading.record`, `grading.view`, `communication.postAnnouncement`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`, `delegation.grant`, `delegation.revoke`, `delegation.view` |
+| ta | `enrollment.viewRoster`, `content.view`, `grading.record`, `grading.view`, `communication.participate`, `scheduling.view`, `reporting.recordAttendance`, `reporting.view`; plus whatever an instructor has delegated to them (see below); own only: `delegation.view` |
 | student | `content.view`, `communication.participate`, `scheduling.view`; own only: `assessment.submit`, `enrollment.drop`, `grading.view`, `reporting.view` |
 | guardian | not a role. Read-only access to a ward's records through a `GuardianLink` (see below) |
+
+**Delegation to TAs.** An instructor or admin can hand some of their own
+permissions to one TA in one section, and take them back at any time. Four
+built-in actions are `delegable`: `content.manage`,
+`communication.postAnnouncement`, `enrollment.enroll` and
+`enrollment.grantRole.student` (a TA given both of the last two can enroll
+students, never TAs or instructors). Everything else, such as `bulkEnroll`,
+`scheduling.manage` and the delegation actions themselves, can never be
+delegated. A rule opts in with `delegable: true`, and `createRolePolicy(...)`
+reports the result as `delegableActions`.
+
+`DelegationService(repos, { policy })` has `grant(sectionId, taUserId, action, actor)`,
+`revoke(grantId, actor)` and `list(sectionId, taUserId, actor)`, and every call
+needs an actor. `grant` refuses an action that isn't delegable, an action the
+grantor doesn't hold themselves in that section, and a target who isn't an
+active TA there. Granting the same action twice returns the first grant. A grant
+(`TaGrant`) belongs to the TA's **enrollment**, so it ends with it: a TA who is
+dropped and enrolled again starts with nothing. Supply
+`delegations: { create, findById, listActiveForEnrollment, revoke }` in your
+repositories; without it a TA only has the defaults above. Before the policy
+sees them, `authorizeInSection` re-checks what the repository returns (this
+enrollment, this section, not revoked) and only looks them up for an active TA.
+Note that `enrollments.findByUserAndSection` must return the most recent record
+when a person has several for one section.
 
 **Guardians.** A `GuardianLink` ties a guardian to one ward, with `scopes` that
 say what they may read: `grades` (`grading.view`), `attendance`

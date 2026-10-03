@@ -397,3 +397,78 @@ describe('guardian access (a verified link to a ward)', () => {
     ]);
   });
 });
+
+describe('delegated actions (grants an instructor gave a TA)', () => {
+  const policy = createRolePolicy();
+  const ta = person('ta-1', ['ta'], 'org-a');
+  const DELEGABLE = ['communication.postAnnouncement', 'content.manage', 'enrollment.enroll', 'enrollment.grantRole.student'];
+  const asTa = (delegated: string[] | undefined, extra: Partial<PermissionContext> = {}): PermissionContext => ({
+    actor: ta,
+    section: { role: 'ta', delegated },
+    resourceOrgId: 'org-a',
+    ...extra,
+  });
+
+  it('marks exactly four built-in actions as delegable, and the policy lists them', () => {
+    expect(
+      Object.entries(DEFAULT_RULES)
+        .filter(([, rule]) => 'delegable' in rule)
+        .map(([action]) => action)
+        .sort(),
+    ).toEqual(DELEGABLE);
+    expect([...policy.delegableActions].sort()).toEqual(DELEGABLE);
+  });
+
+  it('lets a TA do exactly the delegable actions they were given', () => {
+    expect(policy.can('content.manage', asTa(['content.manage']))).toBe(true);
+    expect(policy.can('communication.postAnnouncement', asTa(['content.manage']))).toBe(false);
+    expect(policy.can('content.manage', asTa([]))).toBe(false);
+    expect(policy.can('content.manage', asTa(undefined))).toBe(false);
+  });
+
+  it('ignores a grant for an action that is not delegable, however it got there', () => {
+    const notDelegable = ['enrollment.bulkEnroll', 'enrollment.grantRole.ta', 'enrollment.grantRole.instructor', 'scheduling.manage', 'admin.viewAuditLog', 'delegation.grant', 'delegation.revoke'];
+    for (const action of notDelegable) {
+      expect(policy.can(action, asTa(notDelegable)), action).toBe(false);
+    }
+  });
+
+  it('only counts for someone whose role in the section is ta', () => {
+    for (const role of ['student', 'instructor', undefined] as const) {
+      const ctx: PermissionContext = { actor: ta, section: { role, delegated: DELEGABLE }, resourceOrgId: 'org-a' };
+      expect(policy.can('content.manage', ctx), String(role)).toBe(role === 'instructor');
+    }
+    const noSection: PermissionContext = { actor: person('x', ['ta'], 'org-a'), resourceOrgId: 'org-a' };
+    expect(policy.can('content.manage', noSection)).toBe(false);
+  });
+
+  it('is still behind the tenant check', () => {
+    expect(policy.can('content.manage', asTa(['content.manage'], { resourceOrgId: 'org-b' }))).toBe(false);
+    expect(policy.can('content.manage', asTa(['content.manage'], { resourceOrgId: undefined }))).toBe(false);
+  });
+
+  it('follows the rule table: an override that drops delegable removes it, one that adds it enables it', () => {
+    const dropped = createRolePolicy({ overrides: { 'content.manage': { roles: ['admin', 'instructor'] } } });
+    expect(dropped.can('content.manage', asTa(['content.manage']))).toBe(false);
+    expect(dropped.delegableActions).not.toContain('content.manage');
+    const added = createRolePolicy({ overrides: { 'grading.amend': { roles: ['instructor'], delegable: true } } });
+    expect(added.can('grading.amend', asTa(['grading.amend']))).toBe(true);
+    expect(added.delegableActions).toContain('grading.amend');
+  });
+
+  it('has rules for managing delegation: instructors and admins grant and revoke, a TA only sees their own', () => {
+    const inSec = (actor: Identity, role: Role | undefined, extra: Partial<PermissionContext> = {}) =>
+      ({ actor, section: { role }, resourceOrgId: undefined, ...extra }) as PermissionContext;
+    expect(policy.can('delegation.grant', inSec(teacher, 'instructor'))).toBe(true);
+    expect(policy.can('delegation.revoke', inSec(teacher, 'instructor'))).toBe(true);
+    expect(policy.can('delegation.grant', inSec(admin, undefined))).toBe(true);
+    for (const action of ['delegation.grant', 'delegation.revoke']) {
+      expect(policy.can(action, inSec(person('t', ['ta']), 'ta')), action).toBe(false);
+      expect(policy.can(action, inSec(stu, 'student')), action).toBe(false);
+    }
+    const t = person('t', ['ta']);
+    expect(policy.can('delegation.view', inSec(t, 'ta', { resourceOwnerId: 't' }))).toBe(true);
+    expect(policy.can('delegation.view', inSec(t, 'ta', { resourceOwnerId: 'other-ta' }))).toBe(false);
+    expect(policy.can('delegation.view', inSec(stu, 'student', { resourceOwnerId: stu.id }))).toBe(false);
+  });
+});

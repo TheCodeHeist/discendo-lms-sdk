@@ -21,6 +21,9 @@ summarizes what domain modules already produced, it belongs in
 - **`grading/`** — grade entries and the calculations built on them:
   weighted categories, late penalties, letter grades, a full audit trail
   via `supersededBy` (grades are never overwritten, only superseded).
+- **`delegation/`** — grants an instructor hands to a teaching assistant in
+  one section (`TaGrant`): the TA may then do specific delegable actions,
+  until the instructor revokes them or the TA's enrollment ends.
 - **`scheduling/`** — by far the largest domain module: recurring class
   routines (`ClassSessionTemplate`), materialized calendar occurrences,
   conflict detection, resource availability, room matching, teacher

@@ -34,12 +34,18 @@ export interface ActionRule {
    * may do it (read-only actions only). Without it a rule never admits a guardian.
    */
   guardianScope?: GuardianScope;
+  /**
+   * An instructor or admin may hand this action to a teaching assistant, one
+   * section at a time (see `TaGrant` and `DelegationService`). Without it a
+   * grant for the action has no effect.
+   */
+  delegable?: boolean;
 }
 
 /** Built-in defaults. Deliberately conservative; every one is overridable. */
 export const DEFAULT_RULES = {
   // enrollment
-  'enrollment.enroll': { roles: ['admin', 'instructor'] },
+  'enrollment.enroll': { roles: ['admin', 'instructor'], delegable: true },
   'enrollment.bulkEnroll': { roles: ['admin'] },
   'enrollment.drop': { roles: ['admin', 'instructor'], ownRoles: ['student'] },
   'enrollment.viewRoster': { roles: ['admin', 'instructor', 'ta'] },
@@ -48,20 +54,24 @@ export const DEFAULT_RULES = {
   'enrollment.grantRole.admin': { roles: ['admin'] },
   'enrollment.grantRole.instructor': { roles: ['admin'] },
   'enrollment.grantRole.ta': { roles: ['admin', 'instructor'] },
-  'enrollment.grantRole.student': { roles: ['admin', 'instructor'] },
+  'enrollment.grantRole.student': { roles: ['admin', 'instructor'], delegable: true },
   // content
   'content.view': { roles: ['admin', 'instructor', 'ta', 'student'] },
-  'content.manage': { roles: ['admin', 'instructor'] },
+  'content.manage': { roles: ['admin', 'instructor'], delegable: true },
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' },
   // communication
-  'communication.postAnnouncement': { roles: ['admin', 'instructor'] },
+  'communication.postAnnouncement': { roles: ['admin', 'instructor'], delegable: true },
   'communication.participate': { roles: ['admin', 'instructor', 'ta', 'student'] },
   // scheduling
   'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'], guardianScope: 'schedule' },
   'scheduling.manage': { roles: ['admin'] },
+  // delegation: instructors hand delegable actions to their TAs; a TA can see their own
+  'delegation.grant': { roles: ['admin', 'instructor'] },
+  'delegation.revoke': { roles: ['admin', 'instructor'] },
+  'delegation.view': { roles: ['admin', 'instructor'], ownRoles: ['ta'] },
   // reporting and administration
   'reporting.recordAttendance': { roles: ['admin', 'instructor', 'ta'] },
   'reporting.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'attendance' },
@@ -78,9 +88,11 @@ export interface PermissionContext {
   /**
    * Include when the action targets a section. `role` is the actor's role in
    * that section (see `activeSectionRole`); omit or leave undefined when they
-   * are not enrolled.
+   * are not enrolled. `delegated` are the grants an instructor gave this actor
+   * as a TA in the section, ALREADY verified (see `authorizeInSection`); they
+   * only count for a `ta` and only for actions whose rule is `delegable`.
    */
-  section?: { role?: Role | undefined };
+  section?: { role?: Role | undefined; delegated?: readonly Action[] | undefined };
   /**
    * Organization that owns the target, or `undefined` when the target belongs
    * to no organization. Always compared with the actor's organization, and
@@ -181,12 +193,17 @@ export interface RolePolicyOptions {
 /** The default policy: the rule table above, applied after a tenant check. */
 export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPolicy & {
   can(action: Action, ctx: PermissionContext): boolean;
+  /** The actions whose rule is `delegable`, for `DelegationService`. */
+  readonly delegableActions: readonly string[];
 } {
   // A Map, so action names like "constructor" or "__proto__" can't hit prototype members.
   const rules = new Map<string, ActionRule>(Object.entries(DEFAULT_RULES));
   for (const [action, rule] of Object.entries(options.overrides ?? {})) rules.set(action, rule);
 
+  const delegableActions = [...rules].filter(([, rule]) => rule.delegable === true).map(([action]) => action);
+
   return {
+    delegableActions,
     can(action, ctx) {
       // Tenant first: not even an admin acts across organizations. "No org" only matches
       // "no org", in both directions, and the check is never skipped.
@@ -200,6 +217,14 @@ export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPol
 
       const isOwner = ctx.resourceOwnerId !== undefined && ctx.resourceOwnerId === ctx.actor.id;
       if (isOwner && (rule.ownRoles?.some((r) => roles.includes(r)) ?? false)) return true;
+
+      if (
+        rule.delegable === true &&
+        ctx.section?.role === 'ta' &&
+        ctx.section.delegated?.includes(action) === true
+      ) {
+        return true;
+      }
 
       const g = ctx.guardian;
       return (

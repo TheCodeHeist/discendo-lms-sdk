@@ -26,7 +26,10 @@ import {
 } from './permissions.js';
 
 /** The repositories needed to work out who the actor is and what they are to a section. */
-export type AuthorizationRepos = Pick<RepositoryContext, 'users' | 'courses' | 'enrollments' | 'guardianLinks'>;
+export type AuthorizationRepos = Pick<
+  RepositoryContext,
+  'users' | 'courses' | 'enrollments' | 'guardianLinks' | 'delegations'
+>;
 
 /** A successful authorization, kept so later checks in the same call can reuse it. */
 export interface Authorized {
@@ -53,9 +56,13 @@ export async function authorizeInSection(
   if (!course) throw new PermissionDeniedError(action);
 
   const membership = await repos.enrollments.findByUserAndSection(user.id, target.sectionId);
+  const role = activeSectionRole(membership);
   const ctx: PermissionContext = {
     actor: user,
-    section: { role: activeSectionRole(membership) },
+    section: {
+      role,
+      delegated: role === 'ta' && membership ? await verifiedGrants(repos, membership.id, target.sectionId) : undefined,
+    },
     resourceOrgId: course.orgId,
     resourceOwnerId: target.ownerId,
     guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, target.sectionId, course.orgId),
@@ -95,4 +102,22 @@ async function verifiedGuardianLink(
   const wardEnrollment = await repos.enrollments.findByUserAndSection(ownerId, sectionId);
   if (activeSectionRole(wardEnrollment) !== 'student') return undefined;
   return { wardId: link.wardId, scopes: link.scopes };
+}
+
+/**
+ * The actions delegated to this TA enrollment in this section, or undefined.
+ * Looked up only for an active TA and only when the host configured a
+ * delegation repository. Whatever the repository returns is re-checked (this
+ * enrollment, this section, not revoked), so a wrong or stale grant can't count.
+ */
+async function verifiedGrants(
+  repos: AuthorizationRepos,
+  enrollmentId: string,
+  sectionId: string,
+): Promise<string[] | undefined> {
+  if (!repos.delegations) return undefined;
+  const grants = await repos.delegations.listActiveForEnrollment(enrollmentId);
+  return grants
+    .filter((g) => g.enrollmentId === enrollmentId && g.sectionId === sectionId && g.revokedAt === undefined)
+    .map((g) => g.action);
 }

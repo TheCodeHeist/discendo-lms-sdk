@@ -58,6 +58,23 @@ export interface Department {
   name: string;
 }
 
+/**
+ * One action an instructor (or admin) handed to ONE teaching assistant in ONE
+ * section. It belongs to the TA's enrollment, not to the person: when that
+ * enrollment ends and the person is enrolled again, the new enrollment starts
+ * with no grants. Only an action a rule marks `delegable` has any effect, and
+ * only while `revokedAt` is unset.
+ */
+export interface TaGrant {
+  id: Id;
+  enrollmentId: Id;
+  sectionId: Id;
+  action: string;
+  grantedBy: Id;
+  grantedAt: Timestamp;
+  revokedAt?: Timestamp;
+}
+
 export interface Identity {
   id: Id;
   /** Reference back to the host app's own user record, if different. */

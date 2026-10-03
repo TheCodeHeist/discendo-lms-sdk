@@ -14,6 +14,7 @@ import type {
   Organization,
   GuardianLink,
   Department,
+  TaGrant,
 } from './types.js';
 
 export interface UserRepository {
@@ -39,6 +40,11 @@ export interface EnrollmentRepository {
   create(enrollment: Omit<Enrollment, 'id'>): Promise<Enrollment>;
   findById(id: Id): Promise<Enrollment | null>;
   update(id: Id, patch: Partial<Enrollment>): Promise<Enrollment>;
+  /**
+   * A person can have several records for one section (for example a dropped
+   * one and a later active one). Return the MOST RECENT: permission checks and
+   * delegated grants depend on it being the current enrollment.
+   */
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(sectionId: Id, status?: Enrollment['status']): Promise<Enrollment[]>;
   countActive(sectionId: Id): Promise<number>;
@@ -66,6 +72,14 @@ export interface DepartmentRepository {
   listByOrg(orgId: Id | undefined): Promise<Department[]>;
 }
 
+export interface DelegationRepository {
+  create(grant: Omit<TaGrant, 'id'>): Promise<TaGrant>;
+  findById(id: Id): Promise<TaGrant | null>;
+  /** The grants of this enrollment that have not been revoked. */
+  listActiveForEnrollment(enrollmentId: Id): Promise<TaGrant[]>;
+  revoke(id: Id, at: Date): Promise<TaGrant>;
+}
+
 export interface GuardianLinkRepository {
   /**
    * The active link from this guardian to this ward, or null. Enforcement
@@ -89,6 +103,8 @@ export interface RepositoryContext {
   organizations?: OrganizationRepository;
   /** Only needed by hosts that group courses into departments. Nothing in the SDK requires it. */
   departments?: DepartmentRepository;
+  /** Only needed by hosts whose instructors delegate actions to TAs. Without it a TA only has the TA defaults. */
+  delegations?: DelegationRepository;
   /** Only needed by hosts with guardians. Without it a guardian can read nothing. */
   guardianLinks?: GuardianLinkRepository;
 }
