@@ -64,6 +64,8 @@ export const DEFAULT_RULES = {
   'assessment.submit': { ownRoles: ['student'] },
   'assessment.startAttempt': { ownRoles: ['student'] },
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
+  // staff record work a student did offline (a "none" submission) so it can be graded
+  'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' },
   // communication

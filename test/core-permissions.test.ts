@@ -401,7 +401,13 @@ describe('guardian access (a verified link to a ward)', () => {
 describe('delegated actions (grants an instructor gave a TA)', () => {
   const policy = createRolePolicy();
   const ta = person('ta-1', ['ta'], 'org-a');
-  const DELEGABLE = ['communication.postAnnouncement', 'content.manage', 'enrollment.enroll', 'enrollment.grantRole.student'];
+  const DELEGABLE = [
+    'assessment.recordOffline',
+    'communication.postAnnouncement',
+    'content.manage',
+    'enrollment.enroll',
+    'enrollment.grantRole.student',
+  ];
   const asTa = (delegated: string[] | undefined, extra: Partial<PermissionContext> = {}): PermissionContext => ({
     actor: ta,
     section: { role: 'ta', delegated },
@@ -409,7 +415,7 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     ...extra,
   });
 
-  it('marks exactly four built-in actions as delegable, and the policy lists them', () => {
+  it('marks exactly five built-in actions as delegable, and the policy lists them', () => {
     expect(
       Object.entries(DEFAULT_RULES)
         .filter(([, rule]) => 'delegable' in rule)
@@ -501,10 +507,18 @@ describe('assessment rules', () => {
     expect(policy.can('assessment.viewAttempts', ctx(stu, 'student', 'someone-else'))).toBe(false);
   });
 
+  it('assessment.recordOffline is for admins and instructors only, never a student, even for their own work', () => {
+    for (const [who, role] of [[teacher, 'instructor'], [admin, undefined]] as const) {
+      expect(policy.can('assessment.recordOffline', ctx(who, role, stu.id)), who.id).toBe(true);
+    }
+    expect(policy.can('assessment.recordOffline', ctx(ta, 'ta', stu.id))).toBe(false);
+    expect(policy.can('assessment.recordOffline', ctx(stu, 'student', stu.id))).toBe(false);
+  });
+
   it('gives a guardian nothing here, whatever the link allows', () => {
     const parent = person('parent-1', ['student'], 'org-a');
     const guardian = { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule'] as GuardianScope[] };
-    for (const action of ['assessment.submit', 'assessment.startAttempt', 'assessment.viewAttempts']) {
+    for (const action of ['assessment.submit', 'assessment.startAttempt', 'assessment.viewAttempts', 'assessment.recordOffline']) {
       const c: PermissionContext = { actor: parent, section: {}, resourceOrgId: 'org-a', resourceOwnerId: 'kid', guardian };
       expect(policy.can(action, c), action).toBe(false);
     }

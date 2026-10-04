@@ -1,7 +1,7 @@
 import type { EventBus } from '../../core/events.js';
 import type { RepositoryContext } from '../../core/repositories.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { PermissionDeniedError, effectiveRoles } from '../../core/permissions.js';
+import { PermissionDeniedError, effectiveRoles, activeSectionRole } from '../../core/permissions.js';
 import { authorizeInSection } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
 import type {
@@ -113,6 +113,33 @@ export class AssessmentService {
   }
 
   /**
+   * Records work a student did offline, so it can be graded. Stores a `{ kind: 'none' }`
+   * submission for the student, tagged with `recordedBy`, and numbers it after the attempts
+   * already stored. With enforcement on (`actor` required) the actor needs
+   * `assessment.recordOffline` (admins and instructors; a TA only if it was delegated to them),
+   * and the student must currently be an *active student* of the content's section: a dropped,
+   * waitlisted or completed student, or anyone who is not a student there, is refused exactly
+   * like a forbidden call. Not limited by `maxAttempts`, it starts no plagiarism check and emits
+   * no event (events are added in one round, later).
+   */
+  async recordOffline(contentId: string, userId: string, actor?: ActorContext): Promise<Submission> {
+    const authorized = await this.authorizeOn('assessment.recordOffline', actor, contentId, userId);
+    if (authorized) {
+      const membership = await this.enforcement!.repos.enrollments.findByUserAndSection(userId, authorized.sectionId);
+      if (activeSectionRole(membership) !== 'student') throw new PermissionDeniedError('assessment.recordOffline');
+    }
+    const attemptNumber = (await this.submissions.countAttempts(contentId, userId)) + 1;
+    return this.submissions.create({
+      contentId,
+      userId,
+      payload: { kind: 'none' },
+      submittedAt: new Date(),
+      attemptNumber,
+      ...(actor ? { recordedBy: actor.actorId } : {}),
+    });
+  }
+
+  /**
    * Generates a per-user quiz attempt, handling randomization at generation time. With
    * enforcement on, only the student themselves may start one (`assessment.startAttempt`),
    * on a published quiz of a section where they are an active student.
@@ -137,7 +164,7 @@ export class AssessmentService {
   }
 
   /**
-   * A no-op without enforcement. With it: finds the section from the content node (an unknown
+   * A no-op without enforcement (returns undefined). With it: finds the section from the content node (an unknown
    * node is refused exactly like a forbidden one), asks the policy, and keeps anyone who is not
    * staff away from content that is not published yet.
    */
@@ -146,9 +173,9 @@ export class AssessmentService {
     actor: ActorContext | undefined,
     contentId: string,
     ownerId: string,
-  ): Promise<void> {
+  ): Promise<{ sectionId: string } | undefined> {
     const e = this.enforcement;
-    if (!e) return;
+    if (!e) return undefined;
     // Only needed to find out which section this is about; skipped without an actor so the
     // caller gets "actor required" before anything about the content is looked up.
     const node = actor ? await e.repos.content.findById(contentId) : null;
@@ -158,6 +185,8 @@ export class AssessmentService {
     });
     const isStaff = effectiveRoles(auth.ctx).some((r) => r === 'admin' || r === 'instructor' || r === 'ta');
     if (node && !node.published && !isStaff) throw new PermissionDeniedError(action);
+    // authorizeInSection has already refused a missing node, so there is a section here.
+    return { sectionId: node!.sectionId };
   }
 }
 

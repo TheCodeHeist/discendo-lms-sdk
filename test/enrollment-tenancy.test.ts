@@ -256,17 +256,29 @@ describe('EnrollmentService tenant checks', () => {
       expect(enrollments.size).toBe(1);
     });
 
-    it('treats a section whose course cannot be found as having no organization', async () => {
+    it('fails with "course not found" when the section\'s course is missing, whoever the person is', async () => {
       const orphan: CourseSection = { id: 'sec-orphan', courseId: 'missing-course', status: 'published' };
-      const { repos } = makeRepos({ users: [alice, carol], sections: [orphan] });
+      const { repos, enrollments } = makeRepos({ users: [alice, carol], sections: [orphan] });
       const service = new EnrollmentService(repos);
 
-      await expect(service.enroll({ userId: 'carol', sectionId: 'sec-orphan', role: 'student' })).resolves.toMatchObject({
-        status: 'active',
-      });
-      await expect(service.enroll({ userId: 'alice', sectionId: 'sec-orphan', role: 'student' })).rejects.toBeInstanceOf(
-        TenantMismatchError,
-      );
+      for (const userId of ['alice', 'carol']) {
+        const err = await service.enroll({ userId, sectionId: 'sec-orphan', role: 'student' }).catch((e: unknown) => e);
+        expect(err).toBeInstanceOf(Error);
+        expect(err).not.toBeInstanceOf(TenantMismatchError);
+        expect((err as Error).message).toBe('Course missing-course not found');
+      }
+      expect(enrollments.size).toBe(0);
+    });
+
+    it('checks the course before it loads the person, and before any capacity logic', async () => {
+      const orphan: CourseSection = { id: 'sec-orphan', courseId: 'missing-course', status: 'published', capacity: 0 };
+      const { repos, calls } = makeRepos({ users: [carol], sections: [orphan] });
+      const service = new EnrollmentService(repos);
+
+      await expect(
+        service.enroll({ userId: 'carol', sectionId: 'sec-orphan', role: 'student', waitlistIfFull: true }),
+      ).rejects.toThrow('Course missing-course not found');
+      expect(calls.findUserById).toBe(0);
     });
 
     it('a deployment where nobody has an organization works as before', async () => {
@@ -388,6 +400,19 @@ describe('EnrollmentService tenant checks', () => {
       expect(report.failed[0]!.row.userExternalRef).toBe('ext-dana');
       expect(report.failed[0]!.reason).toContain('organization');
       expect([...enrollments.values()].map((e) => e.userId)).toEqual(['eve']);
+    });
+
+    it('fails every row of a section whose course is missing, as "course not found"', async () => {
+      const orphan: CourseSection = { id: 'sec-orphan', courseId: 'missing-course', status: 'published' };
+      const dana: Identity = { id: 'dana', externalRef: 'ext-dana', roles: ['student'] };
+      const { repos, enrollments } = makeRepos({ users: [dana], sections: [orphan] });
+      const service = new EnrollmentService(repos);
+
+      const report = await service.bulkEnroll('sec-orphan', [{ userExternalRef: 'ext-dana', role: 'student' }]);
+
+      expect(report.succeeded).toBe(0);
+      expect(report.failed[0]!.reason).toContain('Course missing-course not found');
+      expect(enrollments.size).toBe(0);
     });
 
     it('reports a missing section per row, without an organization hint', async () => {

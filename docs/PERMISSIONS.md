@@ -109,6 +109,7 @@ policy.
 | `assessment.submit` | — | student | — | — |
 | `assessment.startAttempt` | — | student | — | — |
 | `assessment.viewAttempts` | admin, instructor, ta | student | — | — |
+| `assessment.recordOffline` | admin, instructor | — | — | yes |
 | `grading.record` | admin, instructor, ta | — | — | — |
 | `grading.view` | admin, instructor, ta | student | grades | — |
 | `communication.postAnnouncement` | admin, instructor | — | — | yes |

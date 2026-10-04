@@ -173,10 +173,6 @@ permission check.
 
 - **The check is also skipped on the idempotent path.** If the person is already
   enrolled, `enroll` returns the existing record before any tenant logic.
-- **A section whose course cannot be found counts as having no organization for
-  the enrollment check** (so a person with an organization is refused with
-  `TenantMismatchError`, which is a misleading error for what is really a missing
-  course), though every permission check refuses it.
 - **No department-scoped administrators.** An admin is an admin of the whole
   organization. Department-level administration is not built.
 - **`OrganizationRepository` and `AcademicTerm.orgId` are not read by any

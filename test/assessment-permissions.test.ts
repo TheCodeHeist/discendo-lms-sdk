@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'bun:test';
 import { AssessmentService } from '../src/domains/assessment/index.js';
-import type { SubmissionRepository, QuizRepository, Submission } from '../src/domains/assessment/index.js';
+import type {
+  SubmissionRepository,
+  QuizRepository,
+  Submission,
+  PlagiarismCheckHook,
+} from '../src/domains/assessment/index.js';
 import { createRolePolicy, EventBus, PermissionDeniedError, ActorRequiredError } from '../src/core/index.js';
 import type {
   ContentNode,
@@ -11,6 +16,7 @@ import type {
   PermissionPolicy,
   RepositoryContext,
   Role,
+  TaGrant,
 } from '../src/core/index.js';
 
 const as = (actorId: string) => ({ actorId });
@@ -20,7 +26,7 @@ const text = { kind: 'text', content: 'my answer' } as const;
  * Sections sec-1 and sec-2 belong to org-a, sec-open belongs to a course with no organization.
  * Content: assign-1 and quiz-1 are published, the *-draft ones are not.
  */
-async function buildWorld(opts: { policy?: PermissionPolicy } = {}) {
+async function buildWorld(opts: { policy?: PermissionPolicy; grants?: TaGrant[]; hook?: PlagiarismCheckHook } = {}) {
   const users = new Map<string, Identity>();
   const add = (id: string, roles: Role[], orgId = 'org-a') => users.set(id, { id, roles, orgId });
   add('teacher', ['instructor']);
@@ -80,7 +86,7 @@ async function buildWorld(opts: { policy?: PermissionPolicy } = {}) {
     },
   ];
 
-  const repos: Pick<RepositoryContext, 'users' | 'courses' | 'enrollments' | 'content' | 'guardianLinks'> = {
+  const repos: Pick<RepositoryContext, 'users' | 'courses' | 'enrollments' | 'content' | 'guardianLinks' | 'delegations'> = {
     users: { findById: async (id) => users.get(id) ?? null, findByExternalRef: async () => null },
     courses: {
       findCourse: async (id) =>
@@ -116,6 +122,13 @@ async function buildWorld(opts: { policy?: PermissionPolicy } = {}) {
     guardianLinks: {
       findActive: async (g, w) => links.find((l) => l.guardianId === g && l.wardId === w && l.status === 'active') ?? null,
     },
+    delegations: {
+      create: async (g) => ({ ...g, id: 'grant-x' }),
+      findById: async (id) => (opts.grants ?? []).find((g) => g.id === id) ?? null,
+      listActiveForEnrollment: async (enrollmentId) =>
+        (opts.grants ?? []).filter((g) => g.enrollmentId === enrollmentId && g.revokedAt === undefined),
+      revoke: async (id, at) => ({ ...(opts.grants ?? []).find((g) => g.id === id)!, revokedAt: at }),
+    },
   };
 
   const store: Submission[] = [];
@@ -141,7 +154,7 @@ async function buildWorld(opts: { policy?: PermissionPolicy } = {}) {
   const received: string[] = [];
   bus.on('assessment.submissionReceived', (e) => received.push(e.userId));
   const policy = opts.policy ?? createRolePolicy();
-  const service = new AssessmentService(submissions, quizzes, undefined, bus, { policy, repos });
+  const service = new AssessmentService(submissions, quizzes, opts.hook, bus, { policy, repos });
   return { service, calls, received, store, links, users };
 }
 
@@ -358,5 +371,137 @@ describe('AssessmentService without enforcement', () => {
     await expect(plain.attemptsRemaining('anything', 'anyone', 2)).resolves.toBe(2);
     await expect(plain.generateAttempt('anything', 'anyone')).resolves.toMatchObject({ userId: 'anyone' });
     expect(w.calls.create).toBe(0);
+  });
+});
+
+describe('AssessmentService.recordOffline (staff record work done offline)', () => {
+  const sleep = () => new Promise((r) => setTimeout(r, 0));
+  // enr-3 is the TA's enrollment in sec-1 (see the seed order in buildWorld)
+  const grant = (over: Partial<TaGrant> = {}): TaGrant => ({
+    id: 'g1',
+    enrollmentId: 'enr-3',
+    sectionId: 'sec-1',
+    action: 'assessment.recordOffline',
+    grantedBy: 'teacher',
+    grantedAt: new Date(),
+    ...over,
+  });
+
+  it('lets the section\'s instructor record a "none" submission for an active student, tagged with who recorded it', async () => {
+    const w = await buildWorld();
+    const sub = await w.service.recordOffline('assign-1', 'stu', as('teacher'));
+    expect(sub).toMatchObject({
+      contentId: 'assign-1',
+      userId: 'stu',
+      payload: { kind: 'none' },
+      attemptNumber: 1,
+      recordedBy: 'teacher',
+    });
+    expect(w.store).toHaveLength(1);
+  });
+
+  it('lets an admin of the same organization do it', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordOffline('assign-1', 'stu', as('root'))).resolves.toMatchObject({ recordedBy: 'root' });
+  });
+
+  it('numbers it after the attempts already stored for that student', async () => {
+    const w = await buildWorld();
+    await w.service.submit('assign-1', 'stu', text, undefined, as('stu'));
+    const sub = await w.service.recordOffline('assign-1', 'stu', as('teacher'));
+    expect(sub.attemptNumber).toBe(2);
+    expect(await w.service.attemptsRemaining('assign-1', 'stu', 3, as('teacher'))).toBe(1);
+  });
+
+  it.each(['stu', 'stu-2', 'parent', 'nobody', 'root-b', 'teacher-2', 'stu-b'])(
+    'refuses %s, and creates nothing',
+    async (who) => {
+      const w = await buildWorld();
+      await expect(w.service.recordOffline('assign-1', 'stu', as(who))).rejects.toBeInstanceOf(PermissionDeniedError);
+      expect(w.calls.create).toBe(0);
+    },
+  );
+
+  it('refuses a TA who was not given the action', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordOffline('assign-1', 'stu', as('ta'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    expect(w.calls.create).toBe(0);
+  });
+
+  it('lets a TA do it once an instructor has delegated it, in that section only', async () => {
+    const w = await buildWorld({ grants: [grant()] });
+    await expect(w.service.recordOffline('assign-1', 'stu', as('ta'))).resolves.toMatchObject({ recordedBy: 'ta' });
+    const other = await buildWorld({ grants: [grant({ sectionId: 'sec-2' })] });
+    await expect(other.service.recordOffline('assign-1', 'stu', as('ta'))).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it('ignores a revoked delegation', async () => {
+    const w = await buildWorld({ grants: [grant({ revokedAt: new Date() })] });
+    await expect(w.service.recordOffline('assign-1', 'stu', as('ta'))).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it.each(['stu-dropped', 'stu-wait', 'stu-done', 'stu-sec2', 'teacher', 'ta', 'root', 'ghost'])(
+    'refuses to record work for %s, who is not an active student of that section',
+    async (target) => {
+      const w = await buildWorld();
+      await expect(w.service.recordOffline('assign-1', target, as('teacher'))).rejects.toBeInstanceOf(PermissionDeniedError);
+      expect(w.calls.create).toBe(0);
+    },
+  );
+
+  it('refuses unknown content, like any forbidden call', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordOffline('no-such-node', 'stu', as('teacher'))).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it('cannot reach into another section: the section is the content\'s, never the caller\'s', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordOffline('assign-2', 'stu-sec2', as('teacher'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(w.service.recordOffline('assign-2', 'stu-sec2', as('teacher-2'))).resolves.toMatchObject({ userId: 'stu-sec2' });
+  });
+
+  it('requires an actor, and looks nothing up without one', async () => {
+    const w = await buildWorld();
+    await expect(w.service.recordOffline('assign-1', 'stu')).rejects.toBeInstanceOf(ActorRequiredError);
+    expect(w.calls.contentLookups).toBe(0);
+    expect(w.calls.create).toBe(0);
+  });
+
+  it('asks the policy about assessment.recordOffline, in the content\'s section, about the student', async () => {
+    const seen: Array<{ action: string; ctx: PermissionContext }> = [];
+    const spy: PermissionPolicy = { can: (action, ctx) => (seen.push({ action, ctx }), false) };
+    const w = await buildWorld({ policy: spy });
+    await w.service.recordOffline('assign-1', 'stu', as('teacher')).catch(() => {});
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.action).toBe('assessment.recordOffline');
+    expect(seen[0]!.ctx.resourceOwnerId).toBe('stu');
+    expect(seen[0]!.ctx.resourceOrgId).toBe('org-a');
+    expect(seen[0]!.ctx.section?.role).toBe('instructor');
+  });
+
+  it('does not start the plagiarism check, and emits no event (events come in one round, later)', async () => {
+    const hooked: Submission[] = [];
+    const w = await buildWorld({ hook: async (s) => (hooked.push(s), { flagged: false }) });
+    await w.service.recordOffline('assign-1', 'stu', as('teacher'));
+    await sleep();
+    expect(hooked).toEqual([]);
+    expect(w.received).toEqual([]);
+  });
+
+  it('never gives the recording person\'s id to a normal submission', async () => {
+    const w = await buildWorld();
+    const sub = await w.service.submit('assign-1', 'stu', text, undefined, as('stu'));
+    expect('recordedBy' in sub).toBe(false);
+  });
+
+  it('without enforcement it records as before, with no actor to tag it', async () => {
+    const stored: Array<Omit<Submission, 'id'>> = [];
+    const plain = new AssessmentService(
+      { create: async (s) => (stored.push(s), { ...s, id: 's1' }), countAttempts: async () => 2 },
+      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }) },
+    );
+    const sub = await plain.recordOffline('anything', 'anyone');
+    expect(sub).toMatchObject({ userId: 'anyone', payload: { kind: 'none' }, attemptNumber: 3 });
+    expect('recordedBy' in sub).toBe(false);
   });
 });

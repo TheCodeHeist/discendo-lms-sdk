@@ -17,7 +17,7 @@ this module created.
 | **You implement** | `SubmissionRepository` and `QuizRepository` (defined here), plus, to enforce permissions, the `core` repositories `users`, `courses`, `enrollments`, `content` |
 | **Optional seams** | a `PlagiarismCheckHook`; an `EventBus` |
 | **Emits events** | `assessment.submissionReceived` |
-| **Permission actions** | `assessment.submit`, `assessment.startAttempt`, `assessment.viewAttempts` |
+| **Permission actions** | `assessment.submit`, `assessment.startAttempt`, `assessment.viewAttempts`, `assessment.recordOffline` |
 | **Enforcement** | opt-in: the fifth constructor argument, `{ policy, repos }` |
 
 ## Types (`types.ts`)
@@ -36,6 +36,7 @@ interface Submission {
   payload: SubmissionPayload;
   submittedAt: Date;
   attemptNumber: number; // 1 for the first attempt
+  recordedBy?: string;   // set only when staff recorded it with recordOffline
 }
 
 interface QuizQuestion {
@@ -121,6 +122,36 @@ await assessment.submit(
 
 `max(0, maxAttempts - attempts used)`.
 
+### `recordOffline(contentId, userId, actor?): Promise<Submission>`
+
+Records work a student did **offline** (on paper, in a lab, in person), so it has a
+submission that can be graded.
+
+1. **(Enforcement on)** authorizes `assessment.recordOffline` for this content, then
+   checks that `userId` is currently an **active student** of the content's section. A
+   dropped, waitlisted or completed student, or anyone who is not a student there, is
+   refused exactly like a forbidden call.
+2. Counts the student's prior attempts and stores a `{ kind: 'none' }` submission with
+   `attemptNumber = prior attempts + 1` and `recordedBy` set to the actor's id.
+
+```ts
+const sub = await assessment.recordOffline('assign-1', student.id, { actorId: teacher.id });
+await grading.record(/* ... */ sub.id /* ... */);
+```
+
+- **Who may:** admins and instructors of the section. A TA only if an instructor
+  delegated `assessment.recordOffline` to them (see [DELEGATION.md](./DELEGATION.md)).
+  Students may not, even for themselves.
+- **`kind: 'none'` only.** The method takes no payload, so it cannot be used to store
+  text, a file or a URL on someone's behalf.
+- **`recordedBy`** is the actor's id, and is **absent on a submission the student made
+  themselves**, so the two can be told apart. Your `SubmissionRepository` must persist
+  it; without enforcement and without an actor it is simply not set.
+- **Not limited by `maxAttempts`**, it starts **no plagiarism check** and emits
+  **no event** (events are being added in one round, later). Like the other methods, it
+  works on unpublished content when the actor is staff.
+- Without enforcement it needs no actor and checks nothing, as with the other methods.
+
 ### `generateAttempt(quizId, userId, randomize = true, actor?): Promise<QuizAttempt>`
 
 Reads the quiz's questions, takes their ids, shuffles that order when `randomize` is
@@ -172,6 +203,7 @@ specifics.
 | `submit` | `assessment.submit` | the student themselves, for their own work only |
 | `generateAttempt` | `assessment.startAttempt` | the student themselves, for their own attempt only |
 | `attemptsRemaining` | `assessment.viewAttempts` | staff (admin, instructor, TA) for anyone; a student for themselves |
+| `recordOffline` | `assessment.recordOffline` | admins and instructors; a TA only when delegated. The student must be an active student of the section |
 
 - **The section comes from the content node** (`repos.content`), never from the
   caller. For a quiz, `quizId` has to be the **id of the quiz's content node**. An
@@ -179,7 +211,7 @@ specifics.
 - **Only students submit.** Teachers, TAs, admins and guardians cannot submit or start
   attempts, even for a student in their own section, and a student must be an *active*
   student in that section (dropped, waitlisted and completed students are refused).
-  See the limitations below for offline work.
+  Staff record offline work with `recordOffline`.
 - **Unpublished content is invisible to non-staff.** A student is refused on a draft
   assignment or quiz, while staff are not.
 - **The permission check comes first.** It runs before the attempt limit, so nobody
@@ -199,10 +231,10 @@ after each stored submission. A failing listener never fails the submission. See
 
 ## Known limitations
 
-- **Staff cannot record a submission on a student's behalf under enforcement.** That
-  matters for offline work (`kind: 'none'`) that an instructor grades by hand: grading
-  needs a submission id, and with enforcement on only the student can create one. A
-  dedicated, restricted action for this is planned.
+- **A student can still submit `{ kind: 'none' }` themselves.** `submit` accepts any
+  payload, so a student can store an empty submission for their own work. It is harmless
+  (it only uses up an attempt). It has no `recordedBy`, which tells it apart from one
+  staff recorded, but it is not refused.
 - **The attempt limit is not atomic.** `countAttempts` and `create` are separate calls,
   so two simultaneous submissions can both pass the check. If the limit is strict,
   enforce it in your repository as well.
@@ -224,7 +256,7 @@ after each stored submission. A failing listener never fails the submission. See
 
 | File | Covers |
 | --- | --- |
-| `test/assessment-permissions.test.ts` | all three methods with enforcement on: own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
+| `test/assessment-permissions.test.ts` | all four methods with enforcement on, including `recordOffline` (who may, delegation, active-student target, numbering, no hook or event): own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/assessment-plagiarism.test.ts` | the hook receives the stored submission, is not awaited, and a rejecting or synchronously throwing hook neither fails the submission, leaks an unhandled rejection, nor stops the event |
 | `test/core-permissions.test.ts` | the three assessment rules ("assessment rules") |

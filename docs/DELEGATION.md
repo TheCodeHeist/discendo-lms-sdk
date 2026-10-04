@@ -52,6 +52,7 @@ there. The built-in delegable actions are:
 | `communication.postAnnouncement` | post announcements |
 | `enrollment.enroll` | enroll people (see below) |
 | `enrollment.grantRole.student` | grant the `student` role |
+| `assessment.recordOffline` | record work a student did offline (see [ASSESSMENT.md](./ASSESSMENT.md)) |
 
 Enrolling someone needs **both** `enrollment.enroll` *and* the grant for the role
 being given, so a TA given both of the last two can enroll **students** and nothing
@@ -188,7 +189,7 @@ override one of the built-in delegable actions.
 
 ## Known limitations
 
-- **Two of the four built-in delegable actions are not enforced by a service yet.**
+- **Two of the five built-in delegable actions are not enforced by a service yet.**
   `content.manage` and `communication.postAnnouncement` take effect when
   `ContentService` and `CommunicationService` enforce permissions. Until then the
   grant is stored correctly but there is nothing to apply it to, unless you call the

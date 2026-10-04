@@ -16,7 +16,8 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
       findByExternalRef: async () => null,
     },
     courses: {
-      findCourse: async () => null,
+      // The tenant check needs the section's course to exist (no organization here).
+      findCourse: async (id) => ({ id, title: 'Course' }),
       findSection: async (id) => sections.get(id) ?? null,
       listSections: async () => [],
     },

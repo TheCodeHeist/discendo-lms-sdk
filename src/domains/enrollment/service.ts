@@ -206,15 +206,21 @@ export class EnrollmentService {
    * organization may join it. This is strict in both directions: "no organization" matches
    * only "no organization", so a person who has an organization cannot join a course that
    * has none, and vice versa. The user is therefore always loaded. A section whose course
-   * the repository cannot find counts as having no organization.
+   * the repository cannot find is a data problem, reported as `Course <id> not found` before
+   * the person is loaded.
    */
   private async assertSameTenant(userId: string, section: CourseSection): Promise<void> {
-    const courseOrgId = await this.orgIdOfSection(section);
+    const course = await this.repos.courses.findCourse(section.courseId);
+    if (!course) throw new Error(`Course ${section.courseId} not found`);
     const user = await this.repos.users.findById(userId);
     if (!user) throw new Error(`User ${userId} not found`);
-    assertSameOrg(courseOrgId, user.orgId, 'User does not belong to this course\'s organization');
+    assertSameOrg(course.orgId, user.orgId, 'User does not belong to this course\'s organization');
   }
 
+  /**
+   * Used only to give a bulk import's reference lookups an organization hint. A missing
+   * course yields no hint; each row then fails with `Course <id> not found` from the check above.
+   */
   private async orgIdOfSection(section: CourseSection): Promise<string | undefined> {
     const course = await this.repos.courses.findCourse(section.courseId);
     return course?.orgId;

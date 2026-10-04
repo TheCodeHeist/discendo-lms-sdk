@@ -82,10 +82,11 @@ Enrolls `opts.userId` into `opts.sectionId` with `opts.role`.
    returned and nothing else happens: no new record, no event. Authorization still
    comes first, so an unauthorized caller cannot use this to learn who is enrolled.
 3. Looks up the section; throws `Section <id> not found` if it does not exist.
-4. **Tenant check**: the person must belong to the course's organization (see
+4. **Tenant check**: the section's course must exist (otherwise `Course <id> not found`),
+   and the person must belong to the course's organization (see
    [TENANCY.md](./TENANCY.md)). This is strict in both directions: "no organization"
-   matches only "no organization". The person is always loaded (`users.findById`),
-   and an unknown person throws `User <id> not found`. A mismatch throws
+   matches only "no organization". The person is loaded (`users.findById`) after the
+   course, and an unknown person throws `User <id> not found`. A mismatch throws
    `TenantMismatchError` and creates nothing, *before* the capacity logic, so a
    cross-tenant person is not waitlisted.
 5. **Capacity.** If the section has a `capacity` and `countActive` has reached it:
@@ -124,7 +125,7 @@ enrolled with `waitlistIfFull: true`.
 - It **never throws for a bad row.** Each failure is reported with a reason and the
   rest continue: `'user not found'`, `'not permitted'` (enforcement: the actor may
   not grant that row's role), or the error message from the enrollment itself
-  (at capacity, tenant mismatch, section not found).
+  (at capacity, tenant mismatch, section not found, course not found).
 - Enforcement needs `enrollment.bulkEnroll` for the section (admin only by default),
   and checks `enrollment.grantRole.<role>` per row.
 - The batch resolves the course's organization once, so a missing section is reported
@@ -181,10 +182,6 @@ rejection. See [EVENTS.md](./EVENTS.md).
   `droppedAt` again and emits another event.
 - **Section status is not checked.** Nothing stops an enrollment into a `draft` or
   `archived` section.
-- **A section whose course cannot be found is treated as having no organization**
-  by the tenant check, so a person with an organization is refused with a
-  `TenantMismatchError` rather than a "course not found". See
-  [TENANCY.md](./TENANCY.md).
 - **No events for status changes** other than enroll and drop.
 
 ## Tests
