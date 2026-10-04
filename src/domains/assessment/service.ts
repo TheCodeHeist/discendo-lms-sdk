@@ -75,8 +75,14 @@ export class AssessmentService {
     });
 
     if (this.plagiarismHook) {
-      // Fire-and-forget by design — don't block submission on a slow external check.
-      void this.plagiarismHook(submission);
+      // Fire-and-forget by design — don't block submission on a slow external check. A hook
+      // that throws (synchronously) or rejects must never fail the already-stored submission
+      // or surface as an unhandled rejection, so both are swallowed here. The hook owns its
+      // own error reporting (see docs/ASSESSMENT.md).
+      const hook = this.plagiarismHook;
+      void Promise.resolve()
+        .then(() => hook(submission))
+        .catch(() => {});
     }
 
     // Fire-and-forget: a slow or failing listener must never delay or fail a submission.

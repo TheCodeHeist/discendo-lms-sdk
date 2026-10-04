@@ -101,8 +101,8 @@ Records a submission and returns it.
 2. Counts the person's prior attempts at this content. If `maxAttempts` is given and
    already reached, throws `No attempts remaining`.
 3. Stores the submission with `attemptNumber = prior attempts + 1`.
-4. If a plagiarism hook was supplied, calls it **without waiting** (see the warning
-   below).
+4. If a plagiarism hook was supplied, calls it **without waiting** (see
+   [the plagiarism hook](#the-plagiarism-hook-read-this)).
 5. Emits `assessment.submissionReceived`, also without waiting.
 
 Pass `undefined` for `maxAttempts` for no limit. The limit is a value your code passes
@@ -146,10 +146,11 @@ submission. Two consequences you must know:
 
 - **Its result is discarded.** The SDK does not store or act on `flagged`; if you want
   the outcome, persist it inside your hook.
-- **A hook that rejects is not caught.** The promise is not awaited and has no
-  `.catch`, so a rejection becomes an *unhandled promise rejection*, which can crash
-  the process under the default Node and Bun settings. **Catch your own errors inside
-  the hook**, as above.
+- **A hook that throws or rejects is swallowed, silently.** The submission is already
+  stored and is never failed by the hook, and the failure does not become an unhandled
+  promise rejection. But the SDK does **not** report it anywhere, so an outage of your
+  checker is invisible unless you log inside the hook, as above. The hook is started on
+  a following microtask, not synchronously inside `submit`.
 
 ## Permissions
 
@@ -205,8 +206,8 @@ after each stored submission. A failing listener never fails the submission. See
 - **The attempt limit is not atomic.** `countAttempts` and `create` are separate calls,
   so two simultaneous submissions can both pass the check. If the limit is strict,
   enforce it in your repository as well.
-- **A rejecting plagiarism hook is an unhandled rejection** (see above), and its
-  result is discarded.
+- **A failing plagiarism hook is swallowed without a trace** (see above), and its
+  result is discarded. The SDK has no error channel for it yet.
 - **Quiz answers are not handled.** The module generates attempts but does not record
   answers, mark them, or set `submittedAt`. Scoring a quiz is your application's job.
 - **Rubrics are types only.**
@@ -225,6 +226,5 @@ after each stored submission. A failing listener never fails the submission. See
 | --- | --- |
 | `test/assessment-permissions.test.ts` | all three methods with enforcement on: own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
+| `test/assessment-plagiarism.test.ts` | the hook receives the stored submission, is not awaited, and a rejecting or synchronously throwing hook neither fails the submission, leaks an unhandled rejection, nor stops the event |
 | `test/core-permissions.test.ts` | the three assessment rules ("assessment rules") |
-
-The plagiarism hook has no tests of its own.
