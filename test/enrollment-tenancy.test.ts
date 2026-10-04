@@ -182,35 +182,103 @@ describe('EnrollmentService tenant checks', () => {
     );
   });
 
-  describe('single-tenant / unscoped behavior', () => {
-    it('applies no check to an unscoped course, even for users that have an organization', async () => {
-      const { repos } = makeRepos({ courses: [unscopedCourse], users: [alice, bob, carol], sections: [sectionOpen] });
+  describe('courses with no organization (strict, in both directions)', () => {
+    it('lets a person with no organization join a course with no organization', async () => {
+      const { repos } = makeRepos({ courses: [unscopedCourse], users: [carol], sections: [sectionOpen] });
       const service = new EnrollmentService(repos);
 
-      for (const userId of ['alice', 'bob', 'carol']) {
-        const result = await service.enroll({ userId, sectionId: 'sec-open', role: 'student' });
-        expect(result.status).toBe('active');
-      }
-    });
-
-    it('does not even load the user for an unscoped course', async () => {
-      const { repos, calls } = makeRepos({ courses: [unscopedCourse], users: [alice], sections: [sectionOpen] });
-      const service = new EnrollmentService(repos);
-
-      await service.enroll({ userId: 'alice', sectionId: 'sec-open', role: 'student' });
-
-      expect(calls.findUserById).toBe(0);
-      expect(calls.findCourse).toBe(1); // the one extra lookup that tenancy costs
-    });
-
-    it('treats a section whose course cannot be found as unscoped', async () => {
-      const orphan: CourseSection = { id: 'sec-orphan', courseId: 'missing-course', status: 'published' };
-      const { repos } = makeRepos({ users: [alice], sections: [orphan] });
-      const service = new EnrollmentService(repos);
-
-      await expect(service.enroll({ userId: 'alice', sectionId: 'sec-orphan', role: 'student' })).resolves.toMatchObject({
+      await expect(service.enroll({ userId: 'carol', sectionId: 'sec-open', role: 'student' })).resolves.toMatchObject({
         status: 'active',
       });
+    });
+
+    it('refuses a person who has an organization: "no organization" only matches "no organization"', async () => {
+      const { repos, enrollments } = makeRepos({ courses: [unscopedCourse], users: [alice, bob], sections: [sectionOpen] });
+      const service = new EnrollmentService(repos);
+
+      for (const userId of ['alice', 'bob']) {
+        await expect(service.enroll({ userId, sectionId: 'sec-open', role: 'student' })).rejects.toBeInstanceOf(
+          TenantMismatchError,
+        );
+      }
+      expect(enrollments.size).toBe(0);
+    });
+
+    it('reports the mismatch with the right ids and does not leak them in the message', async () => {
+      const { repos } = makeRepos({ courses: [unscopedCourse], users: [alice], sections: [sectionOpen] });
+      const service = new EnrollmentService(repos);
+
+      const err = (await service
+        .enroll({ userId: 'alice', sectionId: 'sec-open', role: 'student' })
+        .catch((e: unknown) => e)) as TenantMismatchError;
+
+      expect(err).toBeInstanceOf(TenantMismatchError);
+      expect(err.expectedOrgId).toBeUndefined();
+      expect(err.actualOrgId).toBe('org-a');
+      expect(err.message).not.toContain('org-a');
+    });
+
+    it('rejects before the capacity logic, so a mismatched person is never waitlisted', async () => {
+      const full: CourseSection = { ...sectionOpen, capacity: 0 };
+      const { repos, enrollments } = makeRepos({ courses: [unscopedCourse], users: [alice], sections: [full] });
+      const service = new EnrollmentService(repos);
+
+      await expect(
+        service.enroll({ userId: 'alice', sectionId: 'sec-open', role: 'student', waitlistIfFull: true }),
+      ).rejects.toBeInstanceOf(TenantMismatchError);
+      expect(enrollments.size).toBe(0);
+    });
+
+    it('emits no event for a refused attempt on a course with no organization', async () => {
+      const { repos } = makeRepos({ courses: [unscopedCourse], users: [alice], sections: [sectionOpen] });
+      const bus = new EventBus();
+      const events: unknown[] = [];
+      bus.on('*', (e) => events.push(e));
+      const service = new EnrollmentService(repos, bus);
+
+      await service.enroll({ userId: 'alice', sectionId: 'sec-open', role: 'student' }).catch(() => {});
+      await flush();
+
+      expect(events).toEqual([]);
+    });
+
+    it('now loads the user even when the course has no organization, and reports an unknown user', async () => {
+      const { repos, calls, enrollments } = makeRepos({ courses: [unscopedCourse], users: [carol], sections: [sectionOpen] });
+      const service = new EnrollmentService(repos);
+
+      await service.enroll({ userId: 'carol', sectionId: 'sec-open', role: 'student' });
+      expect(calls.findUserById).toBe(1);
+      expect(calls.findCourse).toBe(1);
+
+      await expect(service.enroll({ userId: 'ghost', sectionId: 'sec-open', role: 'student' })).rejects.toThrow(
+        'User ghost not found',
+      );
+      expect(enrollments.size).toBe(1);
+    });
+
+    it('treats a section whose course cannot be found as having no organization', async () => {
+      const orphan: CourseSection = { id: 'sec-orphan', courseId: 'missing-course', status: 'published' };
+      const { repos } = makeRepos({ users: [alice, carol], sections: [orphan] });
+      const service = new EnrollmentService(repos);
+
+      await expect(service.enroll({ userId: 'carol', sectionId: 'sec-orphan', role: 'student' })).resolves.toMatchObject({
+        status: 'active',
+      });
+      await expect(service.enroll({ userId: 'alice', sectionId: 'sec-orphan', role: 'student' })).rejects.toBeInstanceOf(
+        TenantMismatchError,
+      );
+    });
+
+    it('a deployment where nobody has an organization works as before', async () => {
+      const dave: Identity = { id: 'dave', roles: ['student'] };
+      const { repos } = makeRepos({ courses: [unscopedCourse], users: [carol, dave], sections: [sectionOpen] });
+      const service = new EnrollmentService(repos);
+
+      for (const userId of ['carol', 'dave']) {
+        await expect(service.enroll({ userId, sectionId: 'sec-open', role: 'student' })).resolves.toMatchObject({
+          status: 'active',
+        });
+      }
     });
 
     it('skips the check entirely when the user is already enrolled (idempotent path)', async () => {
@@ -295,13 +363,31 @@ describe('EnrollmentService tenant checks', () => {
     });
 
     it('passes no organization for an unscoped course', async () => {
-      const dana: Identity = { id: 'dana', externalRef: 'ext-dana', roles: ['student'], orgId: 'org-a' };
+      const dana: Identity = { id: 'dana', externalRef: 'ext-dana', roles: ['student'] };
       const { repos, externalRefCalls } = makeRepos({ courses: [unscopedCourse], users: [dana], sections: [sectionOpen] });
       const service = new EnrollmentService(repos);
 
       await service.bulkEnroll('sec-open', [{ userExternalRef: 'ext-dana', role: 'student' }]);
 
       expect(externalRefCalls).toEqual([{ ref: 'ext-dana', orgId: undefined }]);
+    });
+
+    it('fails a row for a person with an organization on a course with no organization', async () => {
+      const dana: Identity = { id: 'dana', externalRef: 'ext-dana', roles: ['student'], orgId: 'org-a' };
+      const eve: Identity = { id: 'eve', externalRef: 'ext-eve', roles: ['student'] };
+      const { repos, enrollments } = makeRepos({ courses: [unscopedCourse], users: [dana, eve], sections: [sectionOpen] });
+      const service = new EnrollmentService(repos);
+
+      const report = await service.bulkEnroll('sec-open', [
+        { userExternalRef: 'ext-dana', role: 'student' },
+        { userExternalRef: 'ext-eve', role: 'student' },
+      ]);
+
+      expect(report.succeeded).toBe(1);
+      expect(report.failed).toHaveLength(1);
+      expect(report.failed[0]!.row.userExternalRef).toBe('ext-dana');
+      expect(report.failed[0]!.reason).toContain('organization');
+      expect([...enrollments.values()].map((e) => e.userId)).toEqual(['eve']);
     });
 
     it('reports a missing section per row, without an organization hint', async () => {

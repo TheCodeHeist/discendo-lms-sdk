@@ -11,7 +11,8 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
 
   const repos: RepositoryContext & { _sections: Map<string, CourseSection> } = {
     users: {
-      findById: async () => null,
+      // The tenant check always loads the person, so they must exist (no organization here).
+      findById: async (id) => ({ id, roles: ['student'] }),
       findByExternalRef: async () => null,
     },
     courses: {

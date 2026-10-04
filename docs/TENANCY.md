@@ -59,7 +59,7 @@ directions.
 | Check | Where | What it does |
 | --- | --- | --- |
 | **Permissions** | every enforcing service, through the policy | The actor's organization must equal the resource's organization before any rule is even consulted. Never skipped, so an admin of one organization cannot act in another's. See [PERMISSIONS.md](./PERMISSIONS.md) |
-| **Enrolling a user** | `EnrollmentService.enroll` and `bulkEnroll` | The person being enrolled must belong to the course's organization. A cross-tenant attempt is rejected before the capacity logic runs, so the person is not waitlisted either, and no event is emitted |
+| **Enrolling a user** | `EnrollmentService.enroll` and `bulkEnroll` | The person being enrolled must belong to the course's organization, strictly in both directions: a person with no organization can only join a course with none, and a person with an organization cannot join a course that has none. The person is always loaded to check this. A cross-tenant attempt is rejected before the capacity logic runs, so the person is not waitlisted either, and no event is emitted |
 | **Looking up by external reference** | `bulkEnroll` | The course's organization is passed to `UserRepository.findByExternalRef(ref, orgId)`, so two organizations can reuse the same external reference and each resolves to its own person |
 | **Guardian links** | guardian verification | A link's `orgId` must equal the course's organization. See [GUARDIANS.md](./GUARDIANS.md) |
 | **Course departments** | `assertCourseDepartment`, called by *your* code | A department must belong to the same organization as the course placed in it |
@@ -171,15 +171,12 @@ permission check.
 
 ## Known limitations
 
-- **Enrollment's user check skips courses that have no organization.** An
-  un-owned course is not tenant-checked when a person is *enrolled* into it
-  (and then the user is not even loaded). The permission check is the strict one:
-  a person with an organization cannot then act on that course. Both are covered
-  by tests; in a mixed deployment this is the one place the two disagree.
 - **The check is also skipped on the idempotent path.** If the person is already
   enrolled, `enroll` returns the existing record before any tenant logic.
-- **A section whose course cannot be found counts as un-owned for the
-  enrollment check**, though every permission check refuses it.
+- **A section whose course cannot be found counts as having no organization for
+  the enrollment check** (so a person with an organization is refused with
+  `TenantMismatchError`, which is a misleading error for what is really a missing
+  course), though every permission check refuses it.
 - **No department-scoped administrators.** An admin is an admin of the whole
   organization. Department-level administration is not built.
 - **`OrganizationRepository` and `AcademicTerm.orgId` are not read by any

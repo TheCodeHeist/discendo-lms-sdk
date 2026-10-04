@@ -83,8 +83,11 @@ Enrolls `opts.userId` into `opts.sectionId` with `opts.role`.
    comes first, so an unauthorized caller cannot use this to learn who is enrolled.
 3. Looks up the section; throws `Section <id> not found` if it does not exist.
 4. **Tenant check**: the person must belong to the course's organization (see
-   [TENANCY.md](./TENANCY.md)). A mismatch throws `TenantMismatchError` and creates
-   nothing, *before* the capacity logic, so a cross-tenant person is not waitlisted.
+   [TENANCY.md](./TENANCY.md)). This is strict in both directions: "no organization"
+   matches only "no organization". The person is always loaded (`users.findById`),
+   and an unknown person throws `User <id> not found`. A mismatch throws
+   `TenantMismatchError` and creates nothing, *before* the capacity logic, so a
+   cross-tenant person is not waitlisted.
 5. **Capacity.** If the section has a `capacity` and `countActive` has reached it:
    with `waitlistIfFull` the new enrollment is `waitlisted`, otherwise it throws
    `Section <id> is at capacity`. A section with no `capacity` is unlimited.
@@ -178,8 +181,10 @@ rejection. See [EVENTS.md](./EVENTS.md).
   `droppedAt` again and emits another event.
 - **Section status is not checked.** Nothing stops an enrollment into a `draft` or
   `archived` section.
-- **Enrollment's tenant check skips courses that have no organization**, while
-  permission checks do not. See [TENANCY.md](./TENANCY.md).
+- **A section whose course cannot be found is treated as having no organization**
+  by the tenant check, so a person with an organization is refused with a
+  `TenantMismatchError` rather than a "course not found". See
+  [TENANCY.md](./TENANCY.md).
 - **No events for status changes** other than enroll and drop.
 
 ## Tests
@@ -187,6 +192,6 @@ rejection. See [EVENTS.md](./EVENTS.md).
 | File | Covers |
 | --- | --- |
 | `test/enrollment-permissions.test.ts` | every method with enforcement on: who may do what, role escalation, bulk rows, courses with no organization |
-| `test/enrollment-tenancy.test.ts` | the tenant check, bulk import with organization hints, cross-department enrollment |
+| `test/enrollment-tenancy.test.ts` | the tenant check (including strict handling of courses with no organization), bulk import with organization hints, cross-department enrollment |
 | `test/enrollment-events.test.ts` | the two events, with and without a bus |
 | `test/delegation.test.ts` | a TA with delegated rights enrolling students through this service |

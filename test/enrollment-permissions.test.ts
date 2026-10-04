@@ -195,7 +195,8 @@ describe('EnrollmentService permissions: enroll', () => {
 
   it('refuses an unknown actor on an UNSCOPED course too, where no organization check can catch them', async () => {
     const w = await buildWorld();
-    const open = { userId: 'newbie', sectionId: 'sec-open', role: 'student' as Role };
+    // The person joining must have no organization either (strict tenant check).
+    const open = { userId: 'free-student', sectionId: 'sec-open', role: 'student' as Role };
     await expect(w.service.enroll(open, as('nobody'))).rejects.toBeInstanceOf(PermissionDeniedError);
     expect(w.calls.create).toBe(0);
   });
@@ -203,7 +204,8 @@ describe('EnrollmentService permissions: enroll', () => {
   describe('a course with no organization', () => {
     // "No organization" only matches an actor with no organization, so an admin of
     // org-a cannot manage a course that belongs to nobody (it could be anyone's).
-    const open = { userId: 'newbie', sectionId: 'sec-open', role: 'student' as Role };
+    // The person joining must have no organization either (strict tenant check).
+    const open = { userId: 'free-student', sectionId: 'sec-open', role: 'student' as Role };
 
     it('refuses an admin who belongs to an organization', async () => {
       const w = await buildWorld();
@@ -216,6 +218,7 @@ describe('EnrollmentService permissions: enroll', () => {
     it('lets an admin with no organization manage it', async () => {
       const w = await buildWorld();
       w.users.set('root-free', { id: 'root-free', roles: ['admin'] });
+      w.users.set('free-student', { id: 'free-student', roles: ['student'] });
       await expect(w.service.enroll(open, as('root-free'))).resolves.toMatchObject({ status: 'active' });
     });
 

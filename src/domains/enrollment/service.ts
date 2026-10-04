@@ -202,15 +202,14 @@ export class EnrollmentService {
   }
 
   /**
-   * A section belongs to the organization of its course. If that course is
-   * org-scoped, only a member of the same organization may join it. An
-   * unscoped course (or one the repository can't find) is not checked, and
-   * then the user isn't even loaded.
+   * A section belongs to the organization of its course, and only a member of that same
+   * organization may join it. This is strict in both directions: "no organization" matches
+   * only "no organization", so a person who has an organization cannot join a course that
+   * has none, and vice versa. The user is therefore always loaded. A section whose course
+   * the repository cannot find counts as having no organization.
    */
   private async assertSameTenant(userId: string, section: CourseSection): Promise<void> {
     const courseOrgId = await this.orgIdOfSection(section);
-    if (courseOrgId === undefined) return;
-
     const user = await this.repos.users.findById(userId);
     if (!user) throw new Error(`User ${userId} not found`);
     assertSameOrg(courseOrgId, user.orgId, 'User does not belong to this course\'s organization');
