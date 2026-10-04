@@ -2,9 +2,11 @@
  * Role-based permission checks, pluggable so a host can swap in richer
  * (attribute-based) rules without touching the SDK.
  *
- * The SDK does not authenticate anyone and its services don't yet take an
- * "acting user"; a host calls `policy.can(...)` / `authorize(...)` at its own
- * API boundary before calling a service. Nothing here does any I/O.
+ * The SDK does not authenticate anyone: the host decides who is calling and
+ * tells a service with an `{ actorId }`. A service built with a policy then
+ * requires that on every call (see `authorization.ts`), and a host can also call
+ * `policy.can(...)` / `authorize(...)` itself at its own API boundary. This file
+ * does no I/O; everything the policy needs is already in the context.
  *
  * Roles come from two places, and they mean different things:
  *  - `Enrollment.role` is a person's role INSIDE one section. Actions that

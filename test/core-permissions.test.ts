@@ -8,7 +8,7 @@ import {
   ActorRequiredError,
   DEFAULT_RULES,
 } from '../src/core/index.js';
-import type { GuardianScope, Identity, PermissionContext, PermissionPolicy, Role } from '../src/core/index.js';
+import type { ActionRule, GuardianScope, Identity, PermissionContext, PermissionPolicy, Role } from '../src/core/index.js';
 
 const policy = createRolePolicy();
 
@@ -508,5 +508,27 @@ describe('assessment rules', () => {
       const c: PermissionContext = { actor: parent, section: {}, resourceOrgId: 'org-a', resourceOwnerId: 'kid', guardian };
       expect(policy.can(action, c), action).toBe(false);
     }
+  });
+});
+
+describe('role hierarchy of the default rules', () => {
+  // student <= ta <= instructor <= admin: a higher role can always do what a lower one can.
+  // (Own-resource rights are a different thing and are not part of this ordering.)
+  const rules = Object.entries(DEFAULT_RULES) as Array<[string, ActionRule]>;
+  const grantedTo = (role: Role) => rules.filter(([, rule]) => rule.roles?.includes(role)).map(([action]) => action);
+  const missing = (lower: Role, higher: Role) => grantedTo(lower).filter((a) => !grantedTo(higher).includes(a));
+
+  it.each([
+    ['student', 'ta'],
+    ['ta', 'instructor'],
+    ['instructor', 'admin'],
+  ] as const)('everything %s may do by role, %s may do too', (lower, higher) => {
+    expect(missing(lower, higher)).toEqual([]);
+  });
+
+  it('is strict: each step up adds something', () => {
+    expect(grantedTo('ta').length).toBeGreaterThan(grantedTo('student').length);
+    expect(grantedTo('instructor').length).toBeGreaterThan(grantedTo('ta').length);
+    expect(grantedTo('admin').length).toBeGreaterThan(grantedTo('instructor').length);
   });
 });

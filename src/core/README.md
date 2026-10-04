@@ -7,27 +7,37 @@ depend on directly.
 
 ## What's here
 
-- **`types.ts`** — `Id`, `Timestamp`, `Role`, `Organization`,
-  `Course`/`CourseSection` (the template-vs-running-instance split),
-  `Enrollment`, `ContentNode`, `AcademicTerm`.
-- **`repositories.ts`** — the repository interfaces `enrollment` and
-  `content` are built against, bundled as `RepositoryContext`.
+Full documentation for everything here is in [`docs/`](../../docs/INDEX.md):
+[CORE.md](../../docs/CORE.md) for the types and repository interfaces, and one page each
+for [events](../../docs/EVENTS.md), [tenancy](../../docs/TENANCY.md),
+[permissions](../../docs/PERMISSIONS.md), [guardians](../../docs/GUARDIANS.md) and
+[delegation](../../docs/DELEGATION.md).
+
+- **`types.ts`** — `Id`, `Timestamp`, `Role`, `Identity`, `Organization`,
+  `Department`, `Course`/`CourseSection` (the template-vs-running-instance
+  split), `Enrollment`, `ContentNode`, `AcademicTerm`, `GuardianLink`, `TaGrant`.
+- **`repositories.ts`** — the repository interfaces (`UserRepository`,
+  `EnrollmentRepository`, ...) bundled as `RepositoryContext`, with optional
+  ones for organizations, departments, delegations and guardian links.
 - **`permissions.ts`** — a pluggable, role-based `PermissionPolicy`
   (`createRolePolicy`, `authorize`, `activeSectionRole`, `DEFAULT_RULES`).
-  Pure functions, used by services that enforce permissions (enrollment
-  and grading today) and callable directly by hosts. Details:
-  `docs/OTHER_MODULES.md`.
+  Pure functions, used by services that enforce permissions (enrollment,
+  grading, assessment and delegation today) and callable directly by hosts.
+  Details: [PERMISSIONS.md](../../docs/PERMISSIONS.md).
 - **`authorization.ts`** — `authorizeInSection`, the single shared place
   that turns "actor X wants to do Y in section Z" into a policy decision
-  (fail closed, actor read from the repository). Services that enforce
-  permissions call it instead of each re-implementing the rules.
-- **`tenancy.ts`** — `sameOrg`, `assertSameOrg` and `TenantMismatchError`,
-  the shared vocabulary for multi-tenant checks. A course's `orgId` is the
-  source of truth; sections, enrollments and content inherit it. Unset
-  everywhere means no checks run. Details: `docs/OTHER_MODULES.md`.
+  (fail closed, actor read from the repository, guardian links and TA grants
+  verified). Services that enforce permissions call it instead of each
+  re-implementing the rules.
+- **`tenancy.ts`** — `sameOrg`, `assertSameOrg`, `assertCourseDepartment` and
+  the errors, the shared vocabulary for multi-tenant checks. A course's
+  `orgId` is the source of truth; sections, enrollments and content inherit
+  it. Unset everywhere means every check passes. Details:
+  [TENANCY.md](../../docs/TENANCY.md).
 - **`events.ts`** — `EventBus`, the SDK's cross-cutting event/hook system.
   Read on if you're wondering "where do event handlers live" — that's
-  answered below.
+  answered below. The catalog and delivery rules are in
+  [EVENTS.md](../../docs/EVENTS.md).
 
 ## The `EventBus`: one bus, not one service
 
@@ -104,6 +114,6 @@ const gradingService = new GradingService(gradeRepo, bus);
 
 Passing an `EventBus` to a service is always optional — omit it and the
 service behaves exactly as if events didn't exist, with zero overhead.
-See `events.ts`'s module doc for the full event catalog and the
+See [EVENTS.md](../../docs/EVENTS.md) for the full event catalog and the
 failure-isolation guarantees (a throwing handler never breaks another
 handler, and never breaks the operation that triggered the event).

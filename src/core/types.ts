@@ -11,7 +11,7 @@ export type Role = 'student' | 'instructor' | 'ta' | 'admin';
 /**
  * A tenant: one institution, school, or company inside a shared deployment.
  * Single-institution deployments can ignore organizations entirely; leaving
- * `orgId` unset everywhere turns every tenant check into a no-op.
+ * `orgId` unset everywhere makes every tenant check pass.
  * See `tenancy.ts` for how the checks work.
  */
 export interface Organization {

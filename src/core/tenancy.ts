@@ -3,8 +3,9 @@
  *
  * Model: a Course may carry an `orgId`; Sections, Enrollments and Content
  * inherit it through their course instead of repeating it. Identities and
- * Terms may carry one too. If nothing in a deployment sets an `orgId`, none
- * of these checks ever run, so single-institution hosts pay nothing for this.
+ * Terms may carry one too. If nothing in a deployment sets an `orgId`, every
+ * check compares "no organization" with "no organization" and passes, so
+ * single-institution hosts pay nothing for this.
  *
  * Rule: an id only matches the *same* id. "No organization" (`undefined`)
  * only matches "no organization", so a person with no org can't slip into an
