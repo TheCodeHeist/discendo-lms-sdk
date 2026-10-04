@@ -166,6 +166,22 @@ describe('AssessmentService.submit with enforcement', () => {
     expect(w.calls.create).toBe(1);
   });
 
+  it('refuses a student\'s own "none" submission (staff record offline work with recordOffline), and stores nothing', async () => {
+    const w = await buildWorld();
+    await expect(w.service.submit('assign-1', 'stu', { kind: 'none' }, undefined, as('stu'))).rejects.toThrow(
+      'recordOffline',
+    );
+    expect(w.calls.create).toBe(0);
+    expect(w.received).toEqual([]);
+  });
+
+  it('still tells an unauthorized caller "not permitted" (not the payload error) for a "none" submission', async () => {
+    const w = await buildWorld();
+    await expect(w.service.submit('assign-1', 'stu', { kind: 'none' }, undefined, as('stu-2'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
   it('refuses without an actor, and creates nothing', async () => {
     const w = await buildWorld();
     await expect(w.service.submit('assign-1', 'stu', text)).rejects.toBeInstanceOf(ActorRequiredError);
@@ -361,6 +377,14 @@ describe('AssessmentService: nothing is looked up before the actor is known', ()
 });
 
 describe('AssessmentService without enforcement', () => {
+  it('still accepts a "none" submission from submit, as before', async () => {
+    const plain = new AssessmentService(
+      { create: async (s) => ({ ...s, id: 's1' }), countAttempts: async () => 0 },
+      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }) },
+    );
+    await expect(plain.submit('c', 'u', { kind: 'none' })).resolves.toMatchObject({ payload: { kind: 'none' } });
+  });
+
   it('behaves as before: no actor, no checks, no content lookup', async () => {
     const w = await buildWorld();
     const plain = new AssessmentService(

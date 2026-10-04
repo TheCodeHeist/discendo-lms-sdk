@@ -21,6 +21,7 @@ import { sameOrg } from './tenancy.js';
 import {
   authorize,
   activeSectionRole,
+  effectiveRoles,
   ActorRequiredError,
   PermissionDeniedError,
 } from './permissions.js';
@@ -69,6 +70,14 @@ export async function authorizeInSection(
   };
   await authorize(policy, action, ctx);
   return { policy, ctx };
+}
+
+/**
+ * Whether the authorized actor is staff (admin, instructor or TA) for the section they were
+ * authorized in. Used by the modules that keep unpublished material away from everyone else.
+ */
+export function isStaff(ctx: PermissionContext): boolean {
+  return effectiveRoles(ctx).some((r) => r === 'admin' || r === 'instructor' || r === 'ta');
 }
 
 /**

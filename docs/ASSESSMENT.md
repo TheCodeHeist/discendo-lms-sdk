@@ -208,6 +208,10 @@ specifics.
 - **The section comes from the content node** (`repos.content`), never from the
   caller. For a quiz, `quizId` has to be the **id of the quiz's content node**. An
   id that is not a content node is refused.
+- **A student cannot submit `{ kind: 'none' }`** with enforcement on: it throws a plain
+  `Error` (after the permission check, so a stranger still just hears "refused"). Staff
+  record offline work with `recordOffline`. Without enforcement `submit` accepts it, as
+  before.
 - **Only students submit.** Teachers, TAs, admins and guardians cannot submit or start
   attempts, even for a student in their own section, and a student must be an *active*
   student in that section (dropped, waitlisted and completed students are refused).
@@ -231,10 +235,6 @@ after each stored submission. A failing listener never fails the submission. See
 
 ## Known limitations
 
-- **A student can still submit `{ kind: 'none' }` themselves.** `submit` accepts any
-  payload, so a student can store an empty submission for their own work. It is harmless
-  (it only uses up an attempt). It has no `recordedBy`, which tells it apart from one
-  staff recorded, but it is not refused.
 - **The attempt limit is not atomic.** `countAttempts` and `create` are separate calls,
   so two simultaneous submissions can both pass the check. If the limit is strict,
   enforce it in your repository as well.

@@ -4,6 +4,7 @@ import {
   authorize,
   activeSectionRole,
   effectiveRoles,
+  isStaff,
   PermissionDeniedError,
   ActorRequiredError,
   DEFAULT_RULES,
@@ -544,5 +545,28 @@ describe('role hierarchy of the default rules', () => {
     expect(grantedTo('ta').length).toBeGreaterThan(grantedTo('student').length);
     expect(grantedTo('instructor').length).toBeGreaterThan(grantedTo('ta').length);
     expect(grantedTo('admin').length).toBeGreaterThan(grantedTo('instructor').length);
+  });
+});
+
+describe('isStaff', () => {
+  const person = (roles: Role[]): Identity => ({ id: 'p', roles, orgId: 'org-a' });
+  const inSection = (role: Role | undefined, roles: Role[] = ['student']): PermissionContext => ({
+    actor: person(roles),
+    section: { role },
+    resourceOrgId: 'org-a',
+  });
+
+  it.each(['admin', 'instructor', 'ta'] as const)('is true for a %s of the section', (role) => {
+    expect(isStaff(inSection(role))).toBe(true);
+  });
+
+  it('is false for a student, and for someone with no role in the section', () => {
+    expect(isStaff(inSection('student'))).toBe(false);
+    expect(isStaff(inSection(undefined))).toBe(false);
+  });
+
+  it('counts a global admin, but not a global instructor who is not enrolled', () => {
+    expect(isStaff(inSection(undefined, ['admin']))).toBe(true);
+    expect(isStaff(inSection(undefined, ['instructor']))).toBe(false);
   });
 });

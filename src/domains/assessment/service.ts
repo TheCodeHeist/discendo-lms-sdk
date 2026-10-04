@@ -1,8 +1,8 @@
 import type { EventBus } from '../../core/events.js';
 import type { RepositoryContext } from '../../core/repositories.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { PermissionDeniedError, effectiveRoles, activeSectionRole } from '../../core/permissions.js';
-import { authorizeInSection } from '../../core/authorization.js';
+import { PermissionDeniedError, activeSectionRole } from '../../core/permissions.js';
+import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
 import type {
   Submission,
@@ -49,7 +49,8 @@ export class AssessmentService {
   /**
    * Records a submission. With enforcement on (`actor` required), only the student themselves
    * may submit (`assessment.submit`, own work only) and only to content that is published and
-   * in a section where they are an active student. The permission check comes before the
+   * in a section where they are an active student. A `{ kind: 'none' }` payload is refused then:
+   * staff record offline work with `recordOffline`. The permission check comes before the
    * attempt limit, so nobody learns how many attempts someone else has used.
    */
   async submit(
@@ -59,7 +60,12 @@ export class AssessmentService {
     maxAttempts?: number,
     actor?: ActorContext,
   ): Promise<Submission> {
-    await this.authorizeOn('assessment.submit', actor, contentId, userId);
+    const authorized = await this.authorizeOn('assessment.submit', actor, contentId, userId);
+    // With enforcement, offline work is staff's to record (`recordOffline`), not a student's to
+    // claim for themselves. Checked after authorization so a stranger still just hears "refused".
+    if (authorized && payload.kind === 'none') {
+      throw new Error('A "none" submission is recorded by staff with recordOffline, not submitted');
+    }
 
     const priorAttempts = await this.submissions.countAttempts(contentId, userId);
     if (maxAttempts !== undefined && priorAttempts >= maxAttempts) {
@@ -183,8 +189,7 @@ export class AssessmentService {
       sectionId: node?.sectionId,
       ownerId,
     });
-    const isStaff = effectiveRoles(auth.ctx).some((r) => r === 'admin' || r === 'instructor' || r === 'ta');
-    if (node && !node.published && !isStaff) throw new PermissionDeniedError(action);
+    if (node && !node.published && !isStaff(auth.ctx)) throw new PermissionDeniedError(action);
     // authorizeInSection has already refused a missing node, so there is a section here.
     return { sectionId: node!.sectionId };
   }

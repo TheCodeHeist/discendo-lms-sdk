@@ -58,7 +58,7 @@ permitted: grading.record") deliberately says nothing about *why*.
 | [grading](./GRADING.md) | yes, `recordGrade` and both final-grade methods | `new GradingService(grades, bus, { policy, repos, submissions })` |
 | [assessment](./ASSESSMENT.md) | yes, all three methods | `new AssessmentService(subs, quizzes, hook, bus, { policy, repos })` |
 | [delegation](./DELEGATION.md) | always (it has no unenforced mode) | `new DelegationService(repos, { policy })` |
-| [content](./CONTENT.md) | not yet | the actions `content.view` and `content.manage` exist |
+| [content](./CONTENT.md) | yes, `createNode`, `publish`, `reorder`, `getNode`, `listNodes` (`isUnlocked` is a pure check) | `new ContentService(repos, completion, edges, bus, { policy })` |
 | [communication](./COMMUNICATION.md) | not yet | `communication.postAnnouncement`, `communication.participate` exist |
 | [scheduling](./SCHEDULING.md) | not yet | `scheduling.view`, `scheduling.manage` exist |
 | [reporting](./REPORTING.md) | not yet | `reporting.recordAttendance`, `reporting.view` exist |
@@ -188,6 +188,11 @@ in a fixed order, and **every step fails closed**:
       grant (a TA, a `delegable` rule), then a guardian link (a rule with a scope).
 7. **Only an exact `true` allows.** A policy that returns anything else, or throws,
    means the action does not happen.
+
+`authorizeInSection` returns the context it authorized. Services that keep unpublished
+material away from everyone but staff (assessment and content) pass it to
+`isStaff(ctx)`, which is true for an admin, instructor or TA **of that section** (a
+student, a guardian and a person with no role there are not staff).
 
 Two properties follow from this and are worth relying on:
 
