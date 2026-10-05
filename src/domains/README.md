@@ -24,6 +24,8 @@ summarizes what domain modules already produced, it belongs in
 - **`delegation/`** ([docs](../../docs/DELEGATION.md)) — grants an instructor hands to a teaching assistant in
   one section (`TaGrant`): the TA may then do specific delegable actions,
   until the instructor revokes them or the TA's enrollment ends.
+- **`guardians/`** ([docs](../../docs/GUARDIANS.md)) — admins creating, changing and revoking the links that give a
+  parent or guardian read-only access to a ward, and listing a section's guardians to notify.
 - **`scheduling/`** ([docs](../../docs/SCHEDULING.md), calendar: [docs](../../docs/CALENDAR.md)) — by far the largest domain module: recurring class
   routines (`ClassSessionTemplate`), materialized calendar occurrences,
   conflict detection, resource availability, room matching, teacher

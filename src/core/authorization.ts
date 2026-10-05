@@ -85,6 +85,40 @@ export async function authorizeInSection(
 }
 
 /**
+ * Authorization for an action that belongs to no section (managing guardian links, say). The
+ * actor is loaded from the repository, so roles and organization never come from the caller, and
+ * the policy is asked in the actor's OWN organization with no section: only the account-wide
+ * roles count (an `admin` of the organization), and a guardian link is never in play.
+ *
+ * The policy's tenant wall is therefore satisfied by construction, so **the caller must compare
+ * every resource it then touches with the actor's organization** (`assertInActorOrg`), or an
+ * admin of one organization could act on another's.
+ */
+export async function authorizeWithinOwnOrg(
+  policy: PermissionPolicy,
+  repos: Pick<AuthorizationRepos, 'users'>,
+  action: Action,
+  actor: ActorContext | undefined,
+  target: { ownerId?: string | undefined } = {},
+): Promise<Authorized> {
+  if (!actor) throw new ActorRequiredError(action);
+  const user = await repos.users.findById(actor.actorId);
+  if (!user) throw new PermissionDeniedError(action);
+  const ctx: PermissionContext = { actor: user, resourceOrgId: user.orgId, resourceOwnerId: target.ownerId };
+  await authorize(policy, action, ctx);
+  return { policy, ctx };
+}
+
+/**
+ * Refuses (as a plain `PermissionDeniedError`, saying nothing about the other organization)
+ * unless the resource belongs to the actor's organization. "No organization" matches only "no
+ * organization", the same rule as everywhere else.
+ */
+export function assertInActorOrg(auth: Authorized, resourceOrgId: string | undefined, action: Action): void {
+  if (!sameOrg(auth.ctx.actor.orgId, resourceOrgId)) throw new PermissionDeniedError(action);
+}
+
+/**
  * Whether the authorized actor is staff (admin, instructor or TA) for the section they were
  * authorized in. Used by the modules that keep unpublished material away from everyone else.
  */

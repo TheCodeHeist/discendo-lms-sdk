@@ -62,6 +62,7 @@ directions.
 | **Enrolling a user** | `EnrollmentService.enroll` and `bulkEnroll` | The person being enrolled must belong to the course's organization, strictly in both directions: a person with no organization can only join a course with none, and a person with an organization cannot join a course that has none. The person is always loaded to check this. A cross-tenant attempt is rejected before the capacity logic runs, so the person is not waitlisted either, and no event is emitted |
 | **Looking up by external reference** | `bulkEnroll` | The course's organization is passed to `UserRepository.findByExternalRef(ref, orgId)`, so two organizations can reuse the same external reference and each resolves to its own person |
 | **Guardian links** | guardian verification | A link's `orgId` must equal the course's organization. See [GUARDIANS.md](./GUARDIANS.md) |
+| **Managing guardian links** | `GuardianService` | The acting admin, the guardian and the ward must all belong to the same organization ("no organization" matches only "no organization"). A person who does not exist and one in another organization give the same error, and a link of another organization is "not found". See [GUARDIANS.md](./GUARDIANS.md) |
 | **Course departments** | `assertCourseDepartment`, called by *your* code | A department must belong to the same organization as the course placed in it |
 
 With enforcement turned on (see [PERMISSIONS.md](./PERMISSIONS.md)), the

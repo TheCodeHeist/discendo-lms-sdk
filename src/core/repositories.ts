@@ -90,6 +90,20 @@ export interface GuardianLinkRepository {
 }
 
 /**
+ * What `GuardianService` needs to manage links. A host that only reads links (enforcement)
+ * implements `GuardianLinkRepository` alone; this adds the writes and the listings.
+ */
+export interface GuardianLinkManagementRepository extends GuardianLinkRepository {
+  create(link: Omit<GuardianLink, 'id'>): Promise<GuardianLink>;
+  findById(id: Id): Promise<GuardianLink | null>;
+  update(id: Id, patch: Partial<Pick<GuardianLink, 'scopes' | 'status' | 'revokedAt'>>): Promise<GuardianLink>;
+  /** Every link to this ward, active or revoked. */
+  listByWard(wardId: Id): Promise<GuardianLink[]>;
+  /** Every link from this guardian, active or revoked. */
+  listByGuardian(guardianId: Id): Promise<GuardianLink[]>;
+}
+
+/**
  * Bundle of repositories the SDK's service classes are constructed with.
  * Host app wires up real implementations once at startup.
  */

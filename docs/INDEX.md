@@ -39,6 +39,7 @@ tests that cover it.
 | core: guardians | `discendo-sdk/core` | [GUARDIANS.md](./GUARDIANS.md) | Read-only access for a student's parent or guardian, through a link |
 | **enrollment** | `discendo-sdk/enrollment` | [ENROLLMENT.md](./ENROLLMENT.md) | Enrolling and dropping, waitlisting at capacity, bulk roster import |
 | **delegation** | `discendo-sdk/delegation` | [DELEGATION.md](./DELEGATION.md) | Instructors handing selected permissions to their TAs, and taking them back |
+| **guardians** | `discendo-sdk/guardians` | [GUARDIANS.md](./GUARDIANS.md) | Admins creating, changing and revoking guardian links, and listing who to notify |
 | **content** | `discendo-sdk/content` | [CONTENT.md](./CONTENT.md) | The content tree, publishing and versioning, prerequisite gating |
 | **assessment** | `discendo-sdk/assessment` | [ASSESSMENT.md](./ASSESSMENT.md) | Submissions, attempt limits, quiz attempts with randomization, a plagiarism-check seam |
 | **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades |
@@ -122,7 +123,7 @@ src/
   core/         shared types, repository interfaces, EventBus, tenancy, permissions.
                 Imports nothing else in the SDK.
   domains/      modules that own a primary entity a host persists
-    enrollment/   content/   assessment/   grading/   delegation/
+    enrollment/   content/   assessment/   grading/   delegation/   guardians/
     scheduling/   (rules/, solver/, calendar/, testing/ — see its README)
   services/     cross-cutting modules that consume what domains produce
     communication/   reporting/   admin/

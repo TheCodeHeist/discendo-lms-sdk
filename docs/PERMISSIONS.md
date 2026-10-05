@@ -117,6 +117,9 @@ policy.
 | `communication.postGuardianAnnouncement` | admin, instructor | — | — | — |
 | `communication.viewAnnouncements` | admin, instructor, ta, student | — | — | — |
 | `communication.viewGuardianAnnouncements` | admin, instructor, ta | — | announcements | — |
+| `guardian.manageLinks` | admin | — | — | — |
+| `guardian.viewLinks` | admin | admin, instructor, ta, student (their own links) | — | — |
+| `guardian.listRecipients` | admin, instructor | — | — | — |
 | `communication.participate` | admin, instructor, ta, student | — | — | — |
 | `scheduling.view` | admin, instructor, ta, student | — | schedule | — |
 | `scheduling.manage` | admin | — | — | — |
@@ -192,6 +195,15 @@ in a fixed order, and **every step fails closed**:
       grant (a TA, a `delegable` rule), then a guardian link (a rule with a scope).
 7. **Only an exact `true` allows.** A policy that returns anything else, or throws,
    means the action does not happen.
+
+**Actions that belong to no section** (managing guardian links) use
+`authorizeWithinOwnOrg` instead. It loads the actor, asks the policy in the **actor's own
+organization** with no section (so only account-wide roles count: an `admin` of the
+organization), and never involves a guardian link. The policy's tenant wall is then true by
+construction, so **the service must compare every resource it touches with the actor's
+organization**, which is what `assertInActorOrg` does (it refuses, as a plain
+`PermissionDeniedError`, unless the resource's organization equals the actor's, with "no
+organization" matching only "no organization").
 
 `authorizeInSection` returns the context it authorized. Services that keep unpublished
 material away from everyone but staff (assessment and content) pass it to

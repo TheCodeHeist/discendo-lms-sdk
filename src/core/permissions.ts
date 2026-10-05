@@ -84,6 +84,12 @@ export const DEFAULT_RULES = {
   'communication.viewAnnouncements': { roles: ['admin', 'instructor', 'ta', 'student'] },
   'communication.viewGuardianAnnouncements': { roles: ['admin', 'instructor', 'ta'], guardianScope: 'announcements' },
   'communication.participate': { roles: ['admin', 'instructor', 'ta', 'student'] },
+  // Guardian links belong to a person, not to a section, so the first two are organization-wide.
+  // Only admins create, change or revoke a link, and it is never delegable.
+  'guardian.manageLinks': { roles: ['admin'] },
+  'guardian.viewLinks': { roles: ['admin'], ownRoles: ['admin', 'instructor', 'ta', 'student'] },
+  // who to notify for a guardian announcement: a section's instructors and admins
+  'guardian.listRecipients': { roles: ['admin', 'instructor'] },
   // scheduling
   'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'], guardianScope: 'schedule' },
   'scheduling.manage': { roles: ['admin'] },

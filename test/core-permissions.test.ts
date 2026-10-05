@@ -687,3 +687,52 @@ describe('completed enrollments: read-only access to your own grades and content
     });
   });
 });
+
+describe('guardian link management actions', () => {
+  const org = (roles: Role[], extra: Partial<PermissionContext> = {}): PermissionContext => ({
+    actor: { id: 'p1', roles, orgId: 'org-a' },
+    resourceOrgId: 'org-a',
+    ...extra,
+  });
+
+  it('guardian.manageLinks is for admins only, whatever else the person is, and never delegable', () => {
+    expect(policy.can('guardian.manageLinks', org(['admin']))).toBe(true);
+    for (const role of ['instructor', 'ta', 'student'] as const) {
+      expect(policy.can('guardian.manageLinks', org([role])), role).toBe(false);
+      expect(policy.can('guardian.manageLinks', org([role], { resourceOwnerId: 'p1' })), role).toBe(false);
+    }
+    expect('delegable' in DEFAULT_RULES['guardian.manageLinks']).toBe(false);
+    expect(policy.can('guardian.manageLinks', { ...org(['admin']), resourceOrgId: 'org-b' })).toBe(false);
+  });
+
+  it('guardian.viewLinks is for admins, and for anyone about their own links', () => {
+    expect(policy.can('guardian.viewLinks', org(['admin']))).toBe(true);
+    expect(policy.can('guardian.viewLinks', org(['student'], { resourceOwnerId: 'p1' }))).toBe(true);
+    expect(policy.can('guardian.viewLinks', org(['student'], { resourceOwnerId: 'p2' }))).toBe(false);
+    expect(policy.can('guardian.viewLinks', org(['instructor']))).toBe(false);
+    expect(policy.can('guardian.viewLinks', org(['student']))).toBe(false);
+  });
+
+  it('guardian.listRecipients is for the section\'s admins and instructors, not TAs, students or guardians', () => {
+    const inSection = (role: Role | undefined, roles: Role[]): PermissionContext => ({
+      actor: { id: 'p1', roles, orgId: 'org-a' },
+      section: { role },
+      resourceOrgId: 'org-a',
+    });
+    expect(policy.can('guardian.listRecipients', inSection('instructor', ['instructor']))).toBe(true);
+    expect(policy.can('guardian.listRecipients', inSection(undefined, ['admin']))).toBe(true);
+    for (const role of ['ta', 'student'] as const) expect(policy.can('guardian.listRecipients', inSection(role, [role])), role).toBe(false);
+    expect(policy.can('guardian.listRecipients', inSection(undefined, ['instructor']))).toBe(false);
+  });
+
+  it('a guardian\'s scopes open none of the three', () => {
+    const ctx: PermissionContext = {
+      actor: { id: 'g1', roles: ['student'], orgId: 'org-a' },
+      section: { role: undefined },
+      resourceOrgId: 'org-a',
+      resourceOwnerId: 'kid',
+      guardian: { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule', 'announcements'] },
+    };
+    for (const a of ['guardian.manageLinks', 'guardian.viewLinks', 'guardian.listRecipients']) expect(policy.can(a, ctx), a).toBe(false);
+  });
+});

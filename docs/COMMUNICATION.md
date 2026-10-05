@@ -172,7 +172,7 @@ const sink: NotificationSink = {
       case 'announcementCreated': {
         // two separate channels: never send one to the other's readers
         const people = event.audience === 'guardians'
-          ? await roster.guardiansOf(event.sectionId)
+          ? await guardians.guardiansOfSection(event.sectionId, 'announcements', poster)
           : await roster.studentsOf(event.sectionId);
         return mailer.sendMany(people, event.title);
       }
@@ -222,9 +222,10 @@ await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId:
 
 - **Your repository must store `audience`**, and your sink must act on it. The SDK cannot
   stop a sink that ignores the audience from notifying the wrong people.
-- **The SDK cannot list a section's guardians.** `GuardianLinkRepository` only answers "is
-  this guardian linked to this ward"; working out who to notify for a `guardians`
-  announcement is the sink's job today.
+- **The sink must still resolve the guardians.** `GuardianService.guardiansOfSection(sectionId,
+  'announcements', actor)` lists them (see [GUARDIANS.md](./GUARDIANS.md)), but it needs an
+  actor who is an instructor of the section or an admin, so a queued job has to carry the poster
+  or an admin.
 - **A failing sink is discarded unless you pass `onDeliveryError`.** There is no
   `deliveryFailed` event yet; it is planned for the events round.
 - **A thread tied to unpublished content is still readable** by students of the section

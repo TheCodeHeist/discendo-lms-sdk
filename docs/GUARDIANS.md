@@ -1,8 +1,9 @@
 # Guardians
 
-`GuardianLink` and the verification in `src/core/authorization.ts` — read-only
-access for the parent or guardian of a student. Types and the verification live
-in `discendo-sdk/core`.
+`GuardianLink`, the verification in `src/core/authorization.ts`, and `GuardianService` —
+read-only access for the parent or guardian of a student, and the admin-only service that
+creates and ends it. Types and the verification live in `discendo-sdk/core`; the service is
+in `discendo-sdk/guardians`.
 
 Schools and other institutions with students under 18 need to let a parent see how
 their child is doing without making the parent a member of the class. The SDK
@@ -114,9 +115,70 @@ const percent = await grading.computeFinalGradeForUser(
 
 Without `guardianLinks`, a guardian can read nothing, and nothing else is affected.
 
-Creating and revoking links is **your code's job today**: write the rows through
-your own repository. (The SDK has no link-management service yet; see the
-limitations.)
+Reading only needs `GuardianLinkRepository` (the one method above). To create, change and
+revoke links with the SDK, implement `GuardianLinkManagementRepository` as well and use
+`GuardianService` (next section); without it, writing the rows is your own code's job.
+
+## Managing links: `GuardianService`
+
+```ts
+import { GuardianService } from 'discendo-sdk/guardians';
+import type { GuardianLinkManagementRepository } from 'discendo-sdk/core';
+
+const guardianLinks: GuardianLinkManagementRepository = {
+  findActive: (guardianId, wardId) => db.guardianLink.findFirst({ where: { guardianId, wardId, status: 'active' } }),
+  create: (link) => db.guardianLink.create({ data: link }),
+  findById: (id) => db.guardianLink.findUnique({ where: { id } }),
+  update: (id, patch) => db.guardianLink.update({ where: { id }, data: patch }),
+  listByWard: (wardId) => db.guardianLink.findMany({ where: { wardId } }),
+  listByGuardian: (guardianId) => db.guardianLink.findMany({ where: { guardianId } }),
+};
+
+const guardians = new GuardianService({ users, courses, enrollments, guardianLinks }, { policy });
+
+const link = await guardians.createLink(parent.id, child.id, ['grades', 'announcements'], { actorId: admin.id });
+```
+
+The service **always enforces** (there is no unenforced mode): every method needs an
+`{ actorId }` and the policy's say-so.
+
+| Method | Action | Who |
+| --- | --- | --- |
+| `createLink(guardianId, wardId, scopes, actor)` | `guardian.manageLinks` | admins of the organization, **never delegable** |
+| `updateScopes(linkId, scopes, actor)` | `guardian.manageLinks` | the same |
+| `revokeLink(linkId, actor)` | `guardian.manageLinks` | the same |
+| `listWards(guardianId, actor)` | `guardian.viewLinks` | admins, or the guardian themselves for their own links |
+| `guardiansOfSection(sectionId, scope, actor)` | `guardian.listRecipients` | admins, and the instructors of that section |
+
+**`createLink`**: both people must exist **in the acting admin's organization**, and must be
+different people. A person who does not exist and one in another organization give the same
+`GuardianLinkTargetError`, so an admin cannot probe another organization. Scopes must be a
+non-empty list of known scopes (duplicates are dropped, the order kept), or
+`InvalidGuardianLinkError`. The link's `orgId` is the ward's, never the caller's, and is absent
+when nobody has an organization. **At most one link can be active per guardian and ward**: a
+second is refused with `GuardianLinkExistsError` (carrying `linkId`); use `updateScopes`. A link
+belongs to the person, not to a section, so the ward may be in no section, or a dropped one.
+
+**`updateScopes`** replaces the scopes of an *active* link at once; the guardian's access
+follows. A revoked link cannot be changed (create a new one). **`revokeLink`** ends access at
+once, stamps `revokedAt` and keeps the record; revoking again changes nothing, not even the
+time. For both, a link of another organization and one that does not exist give the same
+`GuardianLinkNotFoundError`.
+
+**`listWards`** returns the guardian's *active* links, so a guardian knows which `wardId` to
+name when reading announcements. Revoked links and links of another organization are left out,
+and a guardian who does not exist, or is in another organization, gives `[]`.
+
+**`guardiansOfSection(sectionId, scope, actor)`** is the list to notify for a guardian
+announcement: one `{ guardianId, wardIds }` per guardian, in the order the section's roster
+gives, for guardians whose **active** link carries `scope`, in the course's organization, and
+whose ward is an **active student** of the section. That is the rule reading applies, so nobody
+is notified who could not read the message. Dropped, waitlisted and completed wards are left
+out. It does one link lookup per student, and needs an actor, so a queued job must carry the
+person who posted (an instructor or admin) or an admin. The permission check comes before
+anything is read.
+
+Nothing is created, changed or revoked for a refused call, and no events are emitted yet.
 
 ## What works today
 
@@ -154,8 +216,15 @@ This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.
 
 ## Known limitations
 
-- **No link-management service.** Nothing in the SDK creates, lists or revokes
-  links, and there is no admin-only rule for it yet. You write the rows.
+- **Whole-organization admins only.** Any admin of the organization can manage any link in it;
+  department-scoped admins are not built.
+- **No bulk import.** Links are created one at a time (a school with a roster of guardians
+  loops over `createLink`, and gets one error per bad row to handle).
+- **Create, update and revoke are not atomic.** Two admins creating the same link at the same
+  moment can both pass the duplicate check; make the repository's `create` enforce one active link
+  per guardian and ward if that matters.
+- **Nobody is told when a link changes.** The guardian is not notified of a new, changed or revoked
+  link, and the ward is never told.
 - **Four scopes only.** There is no scope for content.
 - **Two of the four scopes are not enforced by a service yet** (see above).
 - **A guardian follows the ward through completion, for the grades only.** While the ward
@@ -166,12 +235,14 @@ This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.
 - **The SDK does not know anyone's age.** When a guardian's access should end (a
   ward turning 18, a custody change) is a decision for your application: revoke the
   link.
-- **No events** are emitted when a link is created or revoked.
+- **No events** are emitted when a link is created, changed or revoked (planned for the events round).
 
 ## Tests
 
 | File | Covers |
 | --- | --- |
+| `test/guardians.test.ts` | `GuardianService`: who may manage and list, the organization wall in both directions and with no organizations, self-links, scope validation, one active link per pair, update and revoke (including idempotence), the guardian's own listing, and `guardiansOfSection` (scope, active wards only, revoked and foreign links, agreement with the read side), plus end-to-end checks that a created, changed or revoked link changes what the read side allows |
+| `test/core-authorization-org.test.ts` | `authorizeWithinOwnOrg` and `assertInActorOrg` |
 | `test/core-permissions.test.ts` | the policy side: scopes (including that `announcements` opens only the guardian channel), owner match, self-links, tenant check, overrides that drop the scope, and that no write action ever carries a scope |
 | `test/communication-permissions.test.ts` | the guardian channel in `CommunicationService`: scope, ward, active enrollment, wrong ward, other organization |
 | `test/grading-permissions.test.ts` | the service side: verification, revoked and cross-organization links, a repository returning the wrong link, following the ward's enrollment, failing closed with no repository |

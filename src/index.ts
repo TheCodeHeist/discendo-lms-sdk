@@ -8,7 +8,7 @@
  *   core/      — shared primitives + EventBus. Everything else depends on
  *                this; this depends on nothing else in the SDK.
  *   domains/   — modules that own a primary entity a host app persists
- *                (enrollment, content, assessment, grading, delegation,
+ *                (enrollment, content, assessment, grading, delegation, guardians,
  *                scheduling).
  *   services/  — cross-cutting modules that consume/aggregate what domains
  *                produce, rather than owning a primary entity of their own
@@ -22,6 +22,7 @@ export * from './domains/content/index.js';
 export * from './domains/assessment/index.js';
 export * from './domains/grading/index.js';
 export * from './domains/delegation/index.js';
+export * from './domains/guardians/index.js';
 export * from './domains/scheduling/index.js';
 export * from './services/communication/index.js';
 export * from './services/reporting/index.js';
