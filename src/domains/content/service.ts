@@ -145,7 +145,11 @@ export class ContentService {
   }
 
   private authorizeOn(action: Action, actor: ActorContext | undefined, sectionId: string | undefined): Promise<Authorized> {
-    return authorizeInSection(this.options.policy!, this.repos, action, actor, { sectionId });
+    // Only reading opts in: a completed student keeps read-only access to published content.
+    return authorizeInSection(this.options.policy!, this.repos, action, actor, {
+      sectionId,
+      afterCompletion: action === 'content.view',
+    });
   }
 
   private denied(action: Action): Error {

@@ -53,8 +53,8 @@ tests that cover it.
 
 | Module | Permission enforcement |
 | --- | --- |
-| enrollment, grading, assessment, content, delegation | **yes**: opt-in (delegation always) |
-| communication, scheduling, reporting, admin | not yet: the actions exist, the services do not check them |
+| enrollment, grading, assessment, content, communication, delegation | **yes**: opt-in (delegation always) |
+| scheduling, reporting, admin | not yet: the actions exist, the services do not check them |
 
 See [PERMISSIONS.md](./PERMISSIONS.md) for how to turn it on and what to do for the
 rest.

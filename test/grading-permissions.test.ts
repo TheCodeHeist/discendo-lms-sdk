@@ -551,10 +551,35 @@ describe('GradingService permissions: guardians', () => {
       await expect(view(w)).resolves.toBeCloseTo(80);
     });
 
-    it.each(['dropped', 'waitlisted', 'completed'] as const)('refuses once the ward is %s', async (status) => {
+    it.each(['dropped', 'waitlisted'] as const)('refuses once the ward is %s', async (status) => {
       const w = await withGrades();
       w.link('parent', 'stu', ['grades']);
       setWard(w, { status });
+      await expect(view(w)).rejects.toBeInstanceOf(PermissionDeniedError);
+    });
+
+    it('still shows the grades once the ward has completed the section (read-only)', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      setWard(w, { status: 'completed' });
+      await expect(view(w)).resolves.toBeCloseTo(80);
+    });
+
+    it('still needs the grades scope, and still refuses another student\'s grades, after completion', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['attendance', 'schedule', 'announcements']);
+      setWard(w, { status: 'completed' });
+      await expect(view(w)).rejects.toBeInstanceOf(PermissionDeniedError);
+      w.link('parent', 'stu', ['grades']);
+      await expect(w.service.computeFinalGradeForUser('stu-2', 'sec-1', scheme, as('parent'))).rejects.toBeInstanceOf(
+        PermissionDeniedError,
+      );
+    });
+
+    it('refuses a completed ward whose enrollment is not as a student', async () => {
+      const w = await withGrades();
+      w.link('parent', 'stu', ['grades']);
+      setWard(w, { status: 'completed', role: 'ta' });
       await expect(view(w)).rejects.toBeInstanceOf(PermissionDeniedError);
     });
 
@@ -621,5 +646,77 @@ describe('GradingService permissions: guardians', () => {
     });
     await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu'))).resolves.toBeCloseTo(80);
     expect(lookups).toBe(0);
+  });
+});
+
+describe('GradingService permissions: a completed student keeps read-only access to their own grades', () => {
+  async function completedWorld(role: Role = 'student') {
+    const w = await buildWorld();
+    await w.service.recordGrade('sub-1', 'stu', 80, 100, 'teacher', undefined, as('teacher'));
+    await w.service.recordGrade('sub-2', 'stu-2', 95, 100, 'teacher', undefined, as('teacher'));
+    const set = (userId: string, patch: Partial<Enrollment>) => {
+      const e = [...w.enrollments.values()].find((x) => x.userId === userId && x.sectionId === 'sec-1')!;
+      w.enrollments.set(e.id, { ...e, ...patch });
+    };
+    set('stu', { status: 'completed', role });
+    return { w, set };
+  }
+
+  it('lets them read their own final and letter grade', async () => {
+    const { w } = await completedWorld();
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu'))).resolves.toBeCloseTo(80);
+    await expect(w.service.computeLetterGradeForUser('stu', 'sec-1', scheme, scale, as('stu'))).resolves.toBe('F');
+  });
+
+  it('still refuses them a classmate\'s grades', async () => {
+    const { w } = await completedWorld();
+    await expect(w.service.computeFinalGradeForUser('stu-2', 'sec-1', scheme, as('stu'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('refuses them every write: nothing can be recorded under or by a completed student', async () => {
+    const { w } = await completedWorld();
+    const before = w.calls.create;
+    await expect(w.service.recordGrade('sub-1', 'stu', 10, 100, 'stu', undefined, as('stu'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+    expect(w.calls.create).toBe(before);
+  });
+
+  it.each(['dropped', 'waitlisted'] as const)('gives a %s student nothing', async (status) => {
+    const { w, set } = await completedWorld();
+    set('stu', { status });
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it.each(['ta', 'instructor'] as const)('gives a completed %s nothing: only students keep access', async (role) => {
+    const { w } = await completedWorld(role);
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('is only in force in that section: a completed student sees nothing in another one', async () => {
+    const { w } = await completedWorld();
+    await expect(w.service.computeFinalGradeForUser('stu', 'sec-2', scheme, as('stu'))).rejects.toBeInstanceOf(
+      PermissionDeniedError,
+    );
+  });
+
+  it('gives a custom policy the completed role only for a read, never for a write', async () => {
+    const seen: Array<{ action: string; completedRole: unknown }> = [];
+    const spy: PermissionPolicy = {
+      can: (action, ctx) => (seen.push({ action, completedRole: ctx.section?.completedRole }), false),
+    };
+    const w = await buildWorld(spy);
+    const e = [...w.enrollments.values()].find((x) => x.userId === 'stu' && x.sectionId === 'sec-1')!;
+    w.enrollments.set(e.id, { ...e, status: 'completed' });
+    await w.service.computeFinalGradeForUser('stu', 'sec-1', scheme, as('stu')).catch(() => {});
+    await w.service.recordGrade('sub-1', 'stu', 1, 100, 'stu', undefined, as('stu')).catch(() => {});
+    expect(seen.find((s) => s.action === 'grading.view')!.completedRole).toBe('student');
+    expect(seen.find((s) => s.action === 'grading.record')!.completedRole).toBeUndefined();
   });
 });

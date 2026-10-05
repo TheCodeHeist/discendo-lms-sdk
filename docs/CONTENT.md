@@ -169,12 +169,12 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 | Method | Action | Who |
 | --- | --- | --- |
 | `createNode`, `publish`, `reorder` | `content.manage` | admins and instructors of the section; a TA only when delegated (see [DELEGATION.md](./DELEGATION.md)) |
-| `getNode`, `listNodes` | `content.view` | active members of the section; **drafts for staff only** |
+| `getNode`, `listNodes` | `content.view` | active members of the section, and completed students (read-only); **drafts for staff only** |
 
 - **The section is the node's, never the caller's** (for `publish` and `getNode`), and a
   missing node, section or course is refused like a forbidden one, for every actor.
-- **Students must be active** in the section: dropped, waitlisted and **completed**
-  students are refused (see the limitations below). Guardians get nothing here.
+- **Reading needs an active student, or a completed one** (read-only, published nodes only);
+  writing needs staff. Dropped and waitlisted students are refused. Guardians get nothing here.
 - **The permission check comes first**, before the parent, the ids or any content are
   looked up, and nothing is looked up before the actor is known.
 - Nothing is stored, changed or emitted for a refused call.
@@ -183,9 +183,9 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 
 ## Known limitations
 
-- **A completed student cannot read content yet.** The decision is that a completed
-  enrollment keeps read-only access to its own content and grades, but this is not
-  built: only an *active* student can `getNode` or `listNodes` today.
+- **A completed student can read published content, never drafts, and write nothing.**
+  `getNode` and `listNodes` honor a completed student (see [PERMISSIONS.md](./PERMISSIONS.md));
+  every write refuses them.
 - **Without enforcement there are no checks**, and `getNode` / `listNodes` show drafts.
   Turn enforcement on, or filter by `published` yourself.
 - **Only the service is guarded.** Your own code can still read and write the
@@ -210,4 +210,4 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 | File | Covers |
 | --- | --- |
 | `test/content-events.test.ts` | `content.published`, and working with no event bus |
-| `test/content-permissions.test.ts` | every method with enforcement on (who may, delegation, drafts, parents, reorder ids, unknown and orphaned targets, check ordering, no lookups before the actor is known), `isUnlocked` (none, AND, direct-only, per person, cycles) and behaviour with enforcement off |
+| `test/content-permissions.test.ts` | every method with enforcement on (who may, delegation, drafts, completed students, parents, reorder ids, unknown and orphaned targets, check ordering, no lookups before the actor is known), `isUnlocked` (none, AND, direct-only, per person, cycles) and behaviour with enforcement off |

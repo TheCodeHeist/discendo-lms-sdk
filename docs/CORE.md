@@ -112,8 +112,10 @@ interface Enrollment {
 ```
 
 Enrollments are never deleted: dropping flips `status` and sets `droppedAt`.
-**Only an `active` enrollment grants anything.** Waitlisted, dropped and completed
-enrollments give no role in permission checks (`activeSectionRole`). A person can
+**Only an `active` enrollment grants a role.** Waitlisted, dropped and completed
+enrollments give no role in permission checks (`activeSectionRole`). The one exception
+is read-only: a `completed` student keeps their own grades and the published content
+(see [PERMISSIONS.md](./PERMISSIONS.md)). A person can
 end up with several records for one section (dropped, then enrolled again), which is
 why `EnrollmentRepository.findByUserAndSection` must return the most recent.
 

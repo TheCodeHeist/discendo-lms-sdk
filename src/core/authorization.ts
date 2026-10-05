@@ -21,6 +21,7 @@ import { sameOrg } from './tenancy.js';
 import {
   authorize,
   activeSectionRole,
+  completedSectionRole,
   effectiveRoles,
   ActorRequiredError,
   PermissionDeniedError,
@@ -43,7 +44,17 @@ export async function authorizeInSection(
   repos: AuthorizationRepos,
   action: Action,
   actor: ActorContext | undefined,
-  target: { sectionId: string | undefined; ownerId?: string | undefined },
+  target: {
+    sectionId: string | undefined;
+    ownerId?: string | undefined;
+    /**
+     * Set by a service for an action that is readable after a student completes the section
+     * (see `ActionRule.afterCompletion`). Only then is a completed enrollment (the actor's, or
+     * the ward's for a guardian) put in the context, and the rule still has to opt in. Leave it
+     * out for everything else, so completion never reaches a policy that did not ask for it.
+     */
+    afterCompletion?: boolean | undefined;
+  },
 ): Promise<Authorized> {
   if (!actor) throw new ActorRequiredError(action);
   if (target.sectionId === undefined) throw new PermissionDeniedError(action);
@@ -63,10 +74,11 @@ export async function authorizeInSection(
     section: {
       role,
       delegated: role === 'ta' && membership ? await verifiedGrants(repos, membership.id, target.sectionId) : undefined,
+      completedRole: target.afterCompletion === true ? completedSectionRole(membership) : undefined,
     },
     resourceOrgId: course.orgId,
     resourceOwnerId: target.ownerId,
-    guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, target.sectionId, course.orgId),
+    guardian: await verifiedGuardianLink(repos, user.id, target.ownerId, target.sectionId, course.orgId, target.afterCompletion === true),
   };
   await authorize(policy, action, ctx);
   return { policy, ctx };
@@ -94,6 +106,7 @@ async function verifiedGuardianLink(
   ownerId: string | undefined,
   sectionId: string,
   courseOrgId: string | undefined,
+  afterCompletion: boolean,
 ): Promise<PermissionContext['guardian']> {
   if (!repos.guardianLinks || ownerId === undefined || ownerId === actorId) return undefined;
   const link = await repos.guardianLinks.findActive(actorId, ownerId);
@@ -106,11 +119,15 @@ async function verifiedGuardianLink(
   ) {
     return undefined;
   }
-  // A guardian's access follows the ward's own enrollment: only in a section where the
-  // ward is currently an active student.
+  // A guardian's access follows the ward's own enrollment: only in a section where the ward is
+  // currently an active student, or, for an action that is readable after completion, a student
+  // who has completed it (flagged, so the policy can still refuse anything else).
   const wardEnrollment = await repos.enrollments.findByUserAndSection(ownerId, sectionId);
-  if (activeSectionRole(wardEnrollment) !== 'student') return undefined;
-  return { wardId: link.wardId, scopes: link.scopes };
+  if (activeSectionRole(wardEnrollment) === 'student') return { wardId: link.wardId, scopes: link.scopes };
+  if (afterCompletion && completedSectionRole(wardEnrollment) === 'student') {
+    return { wardId: link.wardId, scopes: link.scopes, wardCompleted: true };
+  }
+  return undefined;
 }
 
 /**

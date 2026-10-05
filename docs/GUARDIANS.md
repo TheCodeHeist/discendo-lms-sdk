@@ -17,7 +17,7 @@ enrollment, and no rule that mentions a guardian by role. What makes someone a
 guardian of a particular student is a **link** between the two people:
 
 ```ts
-type GuardianScope = 'grades' | 'attendance' | 'schedule';
+type GuardianScope = 'grades' | 'attendance' | 'schedule' | 'announcements';
 
 interface GuardianLink {
   id: Id;
@@ -46,8 +46,9 @@ Each scope opens exactly one read-only action:
 | `grades` | `grading.view` | the ward's grades and final grade |
 | `attendance` | `reporting.view` | the ward's attendance and reports |
 | `schedule` | `scheduling.view` | the ward's class schedule |
+| `announcements` | `communication.viewGuardianAnnouncements` | the announcements addressed to guardians |
 
-A guardian can **never write anything**: the three actions above are the only ones
+A guardian can **never write anything**: the four actions above are the only ones
 in the default rules that carry a `guardianScope`, and a test enforces that no
 write action ever does.
 
@@ -58,7 +59,8 @@ write action ever does.
 | read the ward's grades, if the link has `grades` | record, change or delete anything |
 | read the ward's attendance, if the link has `attendance` | submit work or start a quiz attempt for the ward |
 | read the ward's schedule, if the link has `schedule` | see another student's records, even in the same section |
-| do all of this without being enrolled in anything | see content, rosters, discussions or attempt counts |
+| read the guardian announcements for the ward's sections, if the link has `announcements` | see content, rosters, discussions or attempt counts |
+| do all of this without being enrolled in anything | read the announcements addressed to students |
 | | act once the ward has left the section |
 
 Guardians read the **ward's own records**. They do not become a member of the class,
@@ -125,6 +127,7 @@ Scopes only matter where a service enforces the action behind them:
 | `grades` | **Yes.** `GradingService.computeFinalGradeForUser` and `computeLetterGradeForUser` enforce `grading.view` |
 | `attendance` | Only if you call the policy yourself. `ReportingService` does not enforce yet |
 | `schedule` | Only if you call the policy yourself. `SchedulingService` does not enforce yet |
+| `announcements` | **Yes.** `CommunicationService.listAnnouncements(sectionId, actor, { wardId })` enforces `communication.viewGuardianAnnouncements` |
 
 The scopes are still worth putting on links now: they take effect for each of those
 actions the day its module starts enforcing.
@@ -134,19 +137,32 @@ actions the day its module starts enforcing.
 Guardians get **their own channel**, separate from the one students read. If an
 institution wants the same message in both, it sends it twice, and what a guardian
 sees is only what the institution addressed to guardians. Guardians are tied to the
-ward's enrollment, so they hear about the sections their ward is in. This is a
-design decision for the communication module; it is **not built yet**, and a guardian
-link does not give access to student announcements.
+ward's enrollment, so they hear about the sections their ward is in, and **only while
+the ward is an active student there**.
+
+This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.md)):
+
+- **Posting** to guardians needs `communication.postGuardianAnnouncement`: admins and
+  instructors only, and not delegable to a TA.
+- **Reading** needs a verified link with the `announcements` scope. The guardian names
+  the ward (`listAnnouncements(sectionId, actor, { wardId })`), because one guardian
+  can have several wards, and gets only the guardian channel. A link without the scope,
+  or a ward who has dropped the section, gets nothing, and a guardian never reads the
+  students' channel.
+- The notification for a guardian announcement carries `audience: 'guardians'`, so your
+  sink can send it to guardians only.
 
 ## Known limitations
 
 - **No link-management service.** Nothing in the SDK creates, lists or revokes
   links, and there is no admin-only rule for it yet. You write the rows.
-- **Three scopes only.** There is no scope for content or announcements.
-- **Two of the three scopes are not enforced by a service yet** (see above).
-- **Completed enrollments do not count**, so a guardian loses access when the ward
-  completes a section. This follows the ward: if students are later given read-only
-  access after completion, guardians will follow.
+- **Four scopes only.** There is no scope for content.
+- **Two of the four scopes are not enforced by a service yet** (see above).
+- **A guardian follows the ward through completion, for the grades only.** While the ward
+  is an active student a guardian gets every action their scopes open; once the ward has
+  *completed* the section they keep the grades (`grading.view`, with the `grades` scope) and
+  lose the rest (attendance, schedule, guardian announcements). A ward who dropped or is
+  waitlisted gives a guardian nothing.
 - **The SDK does not know anyone's age.** When a guardian's access should end (a
   ward turning 18, a custody change) is a decision for your application: revoke the
   link.
@@ -156,6 +172,7 @@ link does not give access to student announcements.
 
 | File | Covers |
 | --- | --- |
-| `test/core-permissions.test.ts` | the policy side: scopes, owner match, self-links, tenant check, overrides that drop the scope, and that no write action ever carries a scope |
+| `test/core-permissions.test.ts` | the policy side: scopes (including that `announcements` opens only the guardian channel), owner match, self-links, tenant check, overrides that drop the scope, and that no write action ever carries a scope |
+| `test/communication-permissions.test.ts` | the guardian channel in `CommunicationService`: scope, ward, active enrollment, wrong ward, other organization |
 | `test/grading-permissions.test.ts` | the service side: verification, revoked and cross-organization links, a repository returning the wrong link, following the ward's enrollment, failing closed with no repository |
 | `test/assessment-permissions.test.ts` | a guardian gets nothing from the assessment actions |

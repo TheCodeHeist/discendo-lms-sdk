@@ -236,8 +236,9 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
   succeed. If that can happen, guard it in your repository.
 - **No grade release.** A grade is visible to the student, through `grading.view`, as
   soon as it is recorded. There is no "hold until released" state.
-- **Completed enrollments cannot view grades** under enforcement, since only an active
-  enrollment counts. Read-only access after completion is planned.
+- **A completed student can still read their own grades** (final and letter grade), and so
+  can their guardians, but nothing else, and never anyone else's. Dropped and waitlisted
+  students cannot. See [PERMISSIONS.md](./PERMISSIONS.md).
 - **Not built yet:** grading extensions, curve, GPA, and excused-assignment handling.
 - **Late penalties are manual** (see above).
 
@@ -246,5 +247,5 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | File | Covers |
 | --- | --- |
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
-| `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |
+| `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, completed students and their guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |
 | `test/grading-events.test.ts` | `grading.gradePosted`, including once per regrade |

@@ -202,6 +202,7 @@ export class GradingService {
     await authorizeInSection(enforcement.policy, enforcement.repos, 'grading.view', actor, {
       sectionId,
       ownerId: userId,
+      afterCompletion: true, // a completed student keeps read-only access to their own grades
     });
   }
 }

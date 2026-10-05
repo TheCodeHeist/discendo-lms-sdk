@@ -142,6 +142,7 @@ function buildWorld(opts: { policy?: PermissionPolicy; grants?: TaGrant[]; enfor
   return { service, calls, nodes, published, done };
 }
 
+const ids = (list: ContentNode[]) => list.map((n) => n.id);
 const grant = (over: Partial<TaGrant> = {}): TaGrant => ({
   id: 'g1',
   enrollmentId: 'enr-3',
@@ -348,7 +349,7 @@ describe('ContentService.getNode: drafts are for staff only', () => {
     await expect(w.service.getNode('n-draft-1', as(who))).resolves.toMatchObject({ id: 'n-draft-1', published: false });
   });
 
-  it.each(['stu-dropped', 'stu-wait', 'stu-done', 'stu-sec2', 'outsider', 'parent', 'teacher-2', 'root-b', 'stu-b', 'nobody'])(
+  it.each(['stu-dropped', 'stu-wait', 'stu-sec2', 'outsider', 'parent', 'teacher-2', 'root-b', 'stu-b', 'nobody'])(
     'refuses %s even a published node (not an active member of the section, another section, or another organization)',
     async (who) => {
       const w = buildWorld();
@@ -393,7 +394,7 @@ describe('ContentService.listNodes: drafts are for staff only', () => {
     expect(list.map((n) => n.id)).toEqual(['n-pub-1', 'n-draft-1', 'n-pub-2']);
   });
 
-  it.each(['stu-dropped', 'stu-wait', 'stu-done', 'stu-sec2', 'outsider', 'parent', 'teacher-2', 'root-b', 'nobody'])(
+  it.each(['stu-dropped', 'stu-wait', 'stu-sec2', 'outsider', 'parent', 'teacher-2', 'root-b', 'nobody'])(
     'refuses %s, and does not even read the section\'s nodes',
     async (who) => {
       const w = buildWorld();
@@ -411,6 +412,43 @@ describe('ContentService.listNodes: drafts are for staff only', () => {
     const w = buildWorld();
     await expect(w.service.listNodes('sec-1')).rejects.toBeInstanceOf(ActorRequiredError);
     expect(w.calls.listCalls).toBe(0);
+  });
+});
+
+describe('ContentService: a completed student keeps read-only access to published content', () => {
+  it('lets them read a published node and list the published nodes', async () => {
+    const w = buildWorld();
+    await expect(w.service.getNode('n-pub-1', as('stu-done'))).resolves.toMatchObject({ id: 'n-pub-1' });
+    expect(ids(await w.service.listNodes('sec-1', as('stu-done')))).toEqual(['n-pub-1', 'n-pub-2']);
+  });
+
+  it('still keeps drafts from them, exactly as for an active student', async () => {
+    const w = buildWorld();
+    await expect(w.service.getNode('n-draft-1', as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it('refuses them another section\'s content', async () => {
+    const w = buildWorld();
+    await expect(w.service.getNode('n-other', as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(w.service.listNodes('sec-2', as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+  });
+
+  it('refuses them every write', async () => {
+    const w = buildWorld();
+    await expect(w.service.createNode(newNode(), as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(w.service.publish('n-draft-1', as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    await expect(w.service.reorder('sec-1', ['n-pub-1'], as('stu-done'))).rejects.toBeInstanceOf(PermissionDeniedError);
+    expect(w.calls.create + w.calls.update + w.calls.reorder.length).toBe(0);
+  });
+
+  it('gives a custom policy the completed role only for a read, never for a write', async () => {
+    const seen: Array<{ action: string; completedRole: unknown }> = [];
+    const spy: PermissionPolicy = { can: (action, ctx) => (seen.push({ action, completedRole: ctx.section?.completedRole }), false) };
+    const w = buildWorld({ policy: spy });
+    await w.service.getNode('n-pub-1', as('stu-done')).catch(() => {});
+    await w.service.createNode(newNode(), as('stu-done')).catch(() => {});
+    expect(seen.find((s) => s.action === 'content.view')!.completedRole).toBe('student');
+    expect(seen.find((s) => s.action === 'content.manage')!.completedRole).toBeUndefined();
   });
 });
 

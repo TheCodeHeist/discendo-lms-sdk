@@ -3,6 +3,7 @@ import {
   createRolePolicy,
   authorize,
   activeSectionRole,
+  completedSectionRole,
   effectiveRoles,
   isStaff,
   PermissionDeniedError,
@@ -386,16 +387,41 @@ describe('guardian access (a verified link to a ward)', () => {
   });
 
   it('never gives a guardian a write action, whatever scopes the link has', () => {
-    const all = link(['grades', 'attendance', 'schedule']);
+    const all = link(['grades', 'attendance', 'schedule', 'announcements']);
     for (const [action, rule] of Object.entries(DEFAULT_RULES)) {
       const allowed = policy.can(action, ctxFor(all));
       expect(allowed, action).toBe('guardianScope' in rule);
     }
     expect(Object.keys(DEFAULT_RULES).filter((a) => 'guardianScope' in DEFAULT_RULES[a as keyof typeof DEFAULT_RULES]).sort()).toEqual([
+      'communication.viewGuardianAnnouncements',
       'grading.view',
       'reporting.view',
       'scheduling.view',
     ]);
+  });
+
+  it('the announcements scope opens the guardian channel and nothing else, and no other scope opens it', () => {
+    const only = link(['announcements']);
+    for (const action of Object.keys(DEFAULT_RULES)) {
+      expect(policy.can(action, ctxFor(only)), action).toBe(action === 'communication.viewGuardianAnnouncements');
+    }
+    expect(policy.can('communication.viewGuardianAnnouncements', ctxFor(link(['grades', 'attendance', 'schedule'])))).toBe(false);
+  });
+
+  it('never lets a guardian read the students\' channel or post to either channel', () => {
+    const all = link(['grades', 'attendance', 'schedule', 'announcements']);
+    for (const action of ['communication.viewAnnouncements', 'communication.postAnnouncement', 'communication.postGuardianAnnouncement']) {
+      expect(policy.can(action, ctxFor(all)), action).toBe(false);
+    }
+  });
+
+  it('keeps the guardian channel apart from the students\' channel and from delegation', () => {
+    expect(DEFAULT_RULES['communication.postGuardianAnnouncement']).toEqual({ roles: ['admin', 'instructor'] });
+    expect('delegable' in DEFAULT_RULES['communication.postGuardianAnnouncement']).toBe(false);
+    // a student reads the students' channel but never the guardians'
+    const student: PermissionContext = { actor: { id: 's', roles: ['student'], orgId: 'org-a' }, section: { role: 'student' }, resourceOrgId: 'org-a' };
+    expect(policy.can('communication.viewAnnouncements', student)).toBe(true);
+    expect(policy.can('communication.viewGuardianAnnouncements', student)).toBe(false);
   });
 });
 
@@ -568,5 +594,96 @@ describe('isStaff', () => {
   it('counts a global admin, but not a global instructor who is not enrolled', () => {
     expect(isStaff(inSection(undefined, ['admin']))).toBe(true);
     expect(isStaff(inSection(undefined, ['instructor']))).toBe(false);
+  });
+});
+
+describe('completed enrollments: read-only access to your own grades and content', () => {
+  const completedStudent = (ownerId?: string): PermissionContext => ({
+    actor: { id: 's1', roles: ['student'], orgId: 'org-a' },
+    section: { role: undefined, completedRole: 'student' },
+    resourceOrgId: 'org-a',
+    resourceOwnerId: ownerId,
+  });
+
+  it('completedSectionRole is the role of a completed enrollment, and nothing else', () => {
+    expect(completedSectionRole({ role: 'student', status: 'completed' })).toBe('student');
+    for (const status of ['active', 'waitlisted', 'dropped'] as const) {
+      expect(completedSectionRole({ role: 'student', status }), status).toBeUndefined();
+    }
+    expect(completedSectionRole(null)).toBeUndefined();
+    expect(completedSectionRole(undefined)).toBeUndefined();
+  });
+
+  it('opens exactly two actions to a completed student: their own grades, and published content', () => {
+    const allowed = Object.keys(DEFAULT_RULES).filter((a) => policy.can(a, completedStudent('s1')));
+    expect(allowed.sort()).toEqual(['content.view', 'grading.view']);
+  });
+
+  it('never lets a completed student see someone else\'s grades', () => {
+    expect(policy.can('grading.view', completedStudent('s2'))).toBe(false);
+    expect(policy.can('grading.view', completedStudent(undefined))).toBe(false);
+  });
+
+  it.each(['instructor', 'ta', 'admin'] as const)('gives a completed %s nothing: only students keep access', (role) => {
+    const ctx: PermissionContext = {
+      actor: { id: 's1', roles: [role === 'admin' ? 'student' : role], orgId: 'org-a' },
+      section: { role: undefined, completedRole: role },
+      resourceOrgId: 'org-a',
+      resourceOwnerId: 's1',
+    };
+    for (const action of Object.keys(DEFAULT_RULES)) expect(policy.can(action, ctx), action).toBe(false);
+  });
+
+  it('only counts on a rule that opts in with afterCompletion, so an override that drops the flag revokes it', () => {
+    const custom = createRolePolicy({ overrides: { 'content.view': { roles: ['admin', 'instructor', 'ta', 'student'] } } });
+    expect(custom.can('content.view', completedStudent('s1'))).toBe(false);
+    const kept = createRolePolicy({
+      overrides: { 'content.view': { roles: ['admin', 'instructor', 'ta', 'student'], afterCompletion: true } },
+    });
+    expect(kept.can('content.view', completedStudent('s1'))).toBe(true);
+  });
+
+  it('is carried by exactly the two view actions: no write action, and none delegable', () => {
+    const flagged = Object.entries(DEFAULT_RULES).filter(([, rule]) => 'afterCompletion' in rule);
+    expect(flagged.map(([a]) => a).sort()).toEqual(['content.view', 'grading.view']);
+    for (const [action, rule] of flagged) {
+      expect(action.endsWith('.view'), action).toBe(true);
+      expect('delegable' in rule, action).toBe(false);
+    }
+  });
+
+  describe('guardians follow the ward', () => {
+    const guardianOf = (wardCompleted: boolean | undefined, scopes: GuardianScope[]): PermissionContext => ({
+      actor: { id: 'g1', roles: ['student'], orgId: 'org-a' },
+      section: { role: undefined },
+      resourceOrgId: 'org-a',
+      resourceOwnerId: 'kid',
+      guardian: { wardId: 'kid', scopes, ...(wardCompleted === undefined ? {} : { wardCompleted }) },
+    });
+    const all: GuardianScope[] = ['grades', 'attendance', 'schedule', 'announcements'];
+
+    it('a guardian of a completed ward gets the grades and nothing else', () => {
+      const allowed = Object.keys(DEFAULT_RULES).filter((a) => policy.can(a, guardianOf(true, all)));
+      expect(allowed).toEqual(['grading.view']);
+    });
+
+    it('a guardian of an active ward still gets every action their scopes open', () => {
+      const allowed = Object.keys(DEFAULT_RULES).filter((a) => policy.can(a, guardianOf(false, all)));
+      expect(allowed.sort()).toEqual([
+        'communication.viewGuardianAnnouncements',
+        'grading.view',
+        'reporting.view',
+        'scheduling.view',
+      ]);
+    });
+
+    it('still needs the grades scope, and a rule that has dropped the flag refuses a completed ward', () => {
+      expect(policy.can('grading.view', guardianOf(true, ['attendance']))).toBe(false);
+      const custom = createRolePolicy({
+        overrides: { 'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' } },
+      });
+      expect(custom.can('grading.view', guardianOf(true, all))).toBe(false);
+      expect(custom.can('grading.view', guardianOf(false, all))).toBe(true);
+    });
   });
 });

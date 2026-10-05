@@ -214,7 +214,8 @@ specifics.
   before.
 - **Only students submit.** Teachers, TAs, admins and guardians cannot submit or start
   attempts, even for a student in their own section, and a student must be an *active*
-  student in that section (dropped, waitlisted and completed students are refused).
+  student in that section (dropped, waitlisted and completed students are refused: a
+  completed student gets no new submissions and no attempt counts).
   Staff record offline work with `recordOffline`.
 - **Unpublished content is invisible to non-staff.** A student is refused on a draft
   assignment or quiz, while staff are not.

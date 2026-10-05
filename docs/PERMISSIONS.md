@@ -59,7 +59,7 @@ permitted: grading.record") deliberately says nothing about *why*.
 | [assessment](./ASSESSMENT.md) | yes, all three methods | `new AssessmentService(subs, quizzes, hook, bus, { policy, repos })` |
 | [delegation](./DELEGATION.md) | always (it has no unenforced mode) | `new DelegationService(repos, { policy })` |
 | [content](./CONTENT.md) | yes, `createNode`, `publish`, `reorder`, `getNode`, `listNodes` (`isUnlocked` is a pure check) | `new ContentService(repos, completion, edges, bus, { policy })` |
-| [communication](./COMMUNICATION.md) | not yet | `communication.postAnnouncement`, `communication.participate` exist |
+| [communication](./COMMUNICATION.md) | yes, `postAnnouncement`, `listAnnouncements`, `reply`, `getThread` | `new CommunicationService(announcements, threads, sink, { enforcement: { policy, repos } })` |
 | [scheduling](./SCHEDULING.md) | not yet | `scheduling.view`, `scheduling.manage` exist |
 | [reporting](./REPORTING.md) | not yet | `reporting.recordAttendance`, `reporting.view` exist |
 | [admin](./ADMIN.md) | not yet | `admin.viewAuditLog` exists |
@@ -81,7 +81,8 @@ There are two places a role can come from, and they mean different things:
 
 - **`Enrollment.role`** is what someone is *inside one section*. Every action that
   targets a section uses this, and **only an `active` enrollment counts**.
-  Waitlisted, dropped and completed enrollments give no role.
+  Waitlisted, dropped and completed enrollments give no role (a completed student's
+  read-only access is separate: see "After a student completes a section").
 - **`Identity.roles`** is account-wide. For an action that targets a section, only
   `admin` is honoured from here: a global "instructor" does not get to manage every
   section, only the ones they are enrolled in as an instructor. For actions with no
@@ -113,6 +114,9 @@ policy.
 | `grading.record` | admin, instructor, ta | — | — | — |
 | `grading.view` | admin, instructor, ta | student | grades | — |
 | `communication.postAnnouncement` | admin, instructor | — | — | yes |
+| `communication.postGuardianAnnouncement` | admin, instructor | — | — | — |
+| `communication.viewAnnouncements` | admin, instructor, ta, student | — | — | — |
+| `communication.viewGuardianAnnouncements` | admin, instructor, ta | — | announcements | — |
 | `communication.participate` | admin, instructor, ta, student | — | — | — |
 | `scheduling.view` | admin, instructor, ta, student | — | schedule | — |
 | `scheduling.manage` | admin | — | — | — |
@@ -221,6 +225,32 @@ look anything up. `resourceOrgId` is a required key so a caller cannot forget it
 and a JavaScript caller that omits it is treated as saying "no organization", which
 fails closed.
 
+## After a student completes a section
+
+A student whose enrollment is `completed` keeps **read-only** access to **their own
+grades** (`grading.view`) and to the **published content** (`content.view`), and
+nothing else: no new submissions, no announcements or threads, no writes. A guardian of
+that student follows, for the grades only. Dropped and waitlisted students keep nothing.
+
+How it works, in three layers that all have to agree:
+
+1. **The rule opts in.** `ActionRule.afterCompletion: true` is on exactly those two default
+   rules (a test pins that only view actions carry it). Override a rule without the
+   flag and the access is gone for that action.
+2. **The service opts in.** `authorizeInSection(..., { afterCompletion: true })` is the only
+   thing that puts a completed enrollment in the context, and only `GradingService` (the
+   two view methods) and `ContentService` (`getNode`, `listNodes`) pass it. Every other
+   action never sees it, so a custom policy gets no new data for them.
+3. **Only students.** A completed TA or instructor gets nothing. `completedSectionRole`
+   returns the role of a completed enrollment; the policy honors it only when it is
+   `student`.
+
+What a policy sees: `ctx.section.completedRole` (the completed role, only when the service
+opted in) and `ctx.guardian.wardCompleted` (true when the ward is completed rather than
+active). `ctx.section.role` stays `undefined` for a completed student. **A custom policy
+that reads `ctx.guardian` itself must check `wardCompleted`**: it means "read-only access to
+an action that is readable after completion", not the same as an active ward.
+
 ## Customizing
 
 ### Overriding rules
@@ -315,9 +345,10 @@ This is the checklist the existing services follow, for anyone extending the SDK
 
 - **Four modules do not enforce yet** (see the table above). The rules exist, the
   wiring does not.
-- **Completed enrollments grant nothing.** Today a student whose enrollment is
-  `completed` can no longer view their own grades or content. Read-only access
-  after completion is planned.
+- **A completed student keeps only two actions**: their own grades and the published
+  content. Announcements, threads and a student's own attempt counts are not included
+  (see [COMMUNICATION.md](./COMMUNICATION.md), [ASSESSMENT.md](./ASSESSMENT.md)). Widening
+  it means adding `afterCompletion` to another view rule and making its service opt in.
 - **Denials are not recorded.** A refusal throws; nothing is emitted or logged. Wrap
   calls with [`withAudit`](./ADMIN.md) or catch `PermissionDeniedError` yourself.
 - **No department-scoped roles.** An admin is an admin of the whole organization.

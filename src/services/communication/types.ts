@@ -5,8 +5,15 @@
  */
 export type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
-  | { type: 'announcementCreated'; sectionId: string; title: string }
+  | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
   | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
+
+/**
+ * Announcements go out on two separate channels. `students` reaches the section's students;
+ * `guardians` reaches the guardians of its students. An institution that wants a message on
+ * both posts it twice.
+ */
+export type AnnouncementAudience = 'students' | 'guardians';
 
 export interface NotificationSink {
   dispatch(event: NotificationEvent): Promise<void>;
@@ -18,6 +25,8 @@ export interface Announcement {
   title: string;
   body: string;
   postedAt: Date;
+  /** Which channel it was posted to. A record without one (from before channels) counts as `students`. */
+  audience?: AnnouncementAudience;
 }
 
 export interface ThreadPost {

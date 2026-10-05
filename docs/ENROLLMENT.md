@@ -58,7 +58,9 @@ interface BatchReport {
 - **A dropped person who is enrolled again gets a brand-new record.** The old one
   stays as history. Anything attached to the old enrollment (TA grants, for example)
   does not carry over.
-- `completed` is reserved for your application. The SDK never sets it.
+- `completed` is reserved for your application. The SDK never sets it. A completed
+  **student** keeps read-only access to their own grades and the published content, and
+  nothing else (see [PERMISSIONS.md](./PERMISSIONS.md)).
 - **Only `active` enrollments grant a role** in permission checks.
 
 ## `EnrollmentService`

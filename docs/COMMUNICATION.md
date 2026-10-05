@@ -13,25 +13,30 @@ delivery mechanism.
 
 | | |
 | --- | --- |
-| **You import** | `CommunicationService`, `bridgeEventBusToNotificationSink`, and the types in `types.ts` |
+| **You import** | `CommunicationService`, `CommunicationEnforcement`, `CommunicationServiceOptions`, `bridgeEventBusToNotificationSink`, and the types in `types.ts` |
 | **You implement** | `AnnouncementRepository`, `ThreadRepository`, and a `NotificationSink` |
 | **Emits events** | none itself; it *consumes* `grading.gradePosted` through the bridge |
-| **Permission actions** | `communication.postAnnouncement` (delegable), `communication.participate` |
-| **Enforcement** | **not yet.** The actions exist; the service does not check them |
+| **Permission actions** | `communication.postAnnouncement` (delegable), `communication.postGuardianAnnouncement`, `communication.viewAnnouncements`, `communication.viewGuardianAnnouncements`, `communication.participate` |
+| **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the fourth constructor argument |
 
 ## Types (`types.ts`)
 
 ```ts
 type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
-  | { type: 'announcementCreated'; sectionId: string; title: string }
+  | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
   | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
+
+type AnnouncementAudience = 'students' | 'guardians';
 
 interface NotificationSink {
   dispatch(event: NotificationEvent): Promise<void>;
 }
 
-interface Announcement { id: string; sectionId: string; title: string; body: string; postedAt: Date }
+interface Announcement {
+  id: string; sectionId: string; title: string; body: string; postedAt: Date;
+  audience?: AnnouncementAudience;   // missing on old records, which count as 'students'
+}
 interface ThreadPost   { id: string; authorId: string; body: string; postedAt: Date }
 interface Thread {
   id: string;
@@ -43,7 +48,9 @@ interface Thread {
 ```
 
 A `NotificationEvent` says *what happened*, not *who to tell*. Working out the
-recipients (a section's students, a single user) and the channel is the sink's job.
+recipients and the channel is the sink's job. For an announcement the event carries the
+**audience**: a sink must send a `guardians` announcement to guardians only and a
+`students` one to students only, or the two channels leak into each other.
 
 ## `CommunicationService`
 
@@ -52,8 +59,16 @@ new CommunicationService(
   announcements: AnnouncementRepository,
   threads: ThreadRepository,
   sink?: NotificationSink,
+  options?: {
+    enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos };
+    onDeliveryError?: (error: unknown, announcement: Announcement) => void;
+  },
 )
 ```
+
+When `enforcement` is set, every method takes a trailing `actor?: { actorId }` that is
+required; without it the actor is ignored and nothing is checked. The `repos` need `users`,
+`courses`, `enrollments`, and, if you use them, `guardianLinks` and `delegations`.
 
 ```ts
 interface AnnouncementRepository {
@@ -67,25 +82,59 @@ interface ThreadRepository {
 }
 ```
 
-### `postAnnouncement(sectionId, title, body): Promise<Announcement>`
+### `postAnnouncement(sectionId, title, body, audience = 'students', actor?): Promise<Announcement>`
 
-Stores the announcement (`postedAt` is now) and then sends
-`{ type: 'announcementCreated', sectionId, title }` to the sink, if there is one.
+Stores the announcement (`postedAt` is now, with its `audience`) and then sends
+`{ type: 'announcementCreated', sectionId, title, audience }` to the sink, if there is one.
+An `audience` that is not `'students'` or `'guardians'` throws before anything else.
 
-**The sink is awaited, and its failure is not swallowed.** If `dispatch` throws, the
-announcement has already been stored, but `postAnnouncement` rejects. The caller sees an
-error for a post that exists. Wrap your sink so it never throws (catch and log inside
-`dispatch`), or handle that case in the caller, or route notifications through the event
-bridge below, which isolates failures.
+- **Two channels.** `students` is the default. `guardians` is a separate channel for the
+  guardians of the section's students. An institution that wants both sends twice.
+- **(Enforcement on)** the students' channel needs `communication.postAnnouncement` (a TA
+  only if delegated); the guardians' channel needs `communication.postGuardianAnnouncement`,
+  for **admins and instructors only, and it can never be delegated**. A delegation of it that
+  is stored anyway has no effect.
+- **A failing sink never fails the post.** The announcement is already stored, so a sink that
+  rejects or throws is caught and the announcement is returned. Pass `onDeliveryError` to hear
+  about it (it gets the error and the announcement). Without that handler the failure is
+  **discarded silently**, so a dead notification channel is invisible. A throwing handler is
+  ignored too. This applies with or without enforcement. The sink is still awaited, so a
+  slow sink slows the call.
 
-### `reply(threadId, authorId, body): Promise<ThreadPost>`
+### `listAnnouncements(sectionId, actor?, { wardId? }): Promise<Announcement[]>`
 
-Adds a post to a thread (`postedAt` is now) and returns it. The service does **no**
+A section's announcements, in the repository's order. **With enforcement:**
+
+| You call it as | Needs | You get |
+| --- | --- | --- |
+| a student (no `wardId`) | `communication.viewAnnouncements`, an active student of the section | the **students'** channel only |
+| staff (no `wardId`) | the same, as admin, instructor or TA | **both** channels |
+| a guardian, naming `wardId` | `communication.viewGuardianAnnouncements`: a verified, active link to that ward with the `announcements` scope, and the ward an active student of the section | the **guardians'** channel only |
+| staff, naming `wardId` | the same, as staff | the guardians' channel only |
+
+A guardian who does not name a ward is refused (a guardian is not a student), and a student
+who names a ward is refused unless they are staff. A record without an `audience` counts as a
+students' announcement. The section's announcements are not even read for a refused caller.
+**Without enforcement** it returns everything the repository has, both channels.
+
+### `reply(threadId, authorId, body, actor?): Promise<ThreadPost>`
+
+Adds a post to a thread (`postedAt` is now) and returns it. Without enforcement it does **no**
 checking: it does not look up the thread, and it trusts `authorId` as given.
 
-The service exposes only these two methods. `AnnouncementRepository.listBySection` and
-`ThreadRepository.create` and `findById` are there for your own code (listing
-announcements, starting a thread, reading one); there is no service method for them.
+**With enforcement** the actor needs `communication.participate` in the **thread's** section
+(taken from the stored thread, so a student of section 1 cannot reach a section 2 thread), and
+**`authorId` must be the actor's own id**: anyone else's is refused, so nobody can post in
+another person's name, a teacher included. An unknown thread is refused exactly like a
+forbidden one. Guardians cannot reply.
+
+### `getThread(threadId, actor?): Promise<Thread>`
+
+Reads a thread with its posts. With enforcement it needs `communication.participate` in the
+thread's section. Without it, an unknown thread throws `Thread <id> not found`.
+
+`ThreadRepository.create` is not exposed by the service: starting a thread is still your
+code's job.
 
 ## The event bridge
 
@@ -121,8 +170,11 @@ const sink: NotificationSink = {
       case 'gradePosted':
         return push.send(event.userId, `A grade was posted`);
       case 'announcementCreated': {
-        const students = await roster.studentsOf(event.sectionId);
-        return mailer.sendMany(students, event.title);
+        // two separate channels: never send one to the other's readers
+        const people = event.audience === 'guardians'
+          ? await roster.guardiansOf(event.sectionId)
+          : await roster.studentsOf(event.sectionId);
+        return mailer.sendMany(people, event.title);
       }
       case 'dueDateApproaching':
         return push.send(event.userId, `Due ${event.dueAt.toISOString()}`);
@@ -133,36 +185,64 @@ const sink: NotificationSink = {
 
 ## Permissions
 
-| Action | Default |
-| --- | --- |
-| `communication.postAnnouncement` | admin, instructor; **delegable** to a TA |
-| `communication.participate` | admin, instructor, ta, student |
+Turn enforcement on with `enforcement` in the fourth constructor argument:
 
-`CommunicationService` does not enforce them yet, so check them with the policy at your own
-API boundary ([PERMISSIONS.md](./PERMISSIONS.md)). Because `reply` trusts `authorId`, your
-route must set it from the authenticated user, never from the request.
+```ts
+const communication = new CommunicationService(announcements, threads, sink, {
+  enforcement: { policy, repos },
+  onDeliveryError: (error, announcement) => logger.error({ error, id: announcement.id }),
+});
 
-### Planned: a separate channel for guardians
+await communication.postAnnouncement('sec-1', 'Trip on Friday', '...', 'guardians', { actorId: teacher.id });
+await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId: child.id });
+```
 
-Announcements to students and announcements to guardians are **two separate channels**.
-An institution that wants the same message in both sends it twice, and a guardian sees only
-what was addressed to guardians, for the sections their ward is in. This is not built
-yet; see [GUARDIANS.md](./GUARDIANS.md).
+| Method | Action | Who |
+| --- | --- | --- |
+| `postAnnouncement` (students) | `communication.postAnnouncement` | admins and instructors; a TA only when delegated |
+| `postAnnouncement` (guardians) | `communication.postGuardianAnnouncement` | admins and instructors only; **not delegable** |
+| `listAnnouncements` (no ward) | `communication.viewAnnouncements` | active members of the section (students: their channel; staff: both) |
+| `listAnnouncements` (with ward) | `communication.viewGuardianAnnouncements` | guardians whose link has the `announcements` scope (see [GUARDIANS.md](./GUARDIANS.md)); staff |
+| `reply`, `getThread` | `communication.participate` | active members of the thread's section; `reply` only as yourself |
+
+- **The two channels are separate in every direction.** A guardian never reads the students'
+  channel, a student never reads the guardians', and holding one posting action does not give
+  the other. Staff read both.
+- **The section is the thread's, or the one you name**, and a missing section, course or
+  thread is refused like a forbidden one, for every actor.
+- **Students must be active** in the section; dropped, waitlisted and completed students are
+  refused.
+- **The permission check comes first**, and nothing is looked up before the actor is known.
+- Nothing is stored, sent or notified for a refused call.
+- Without `enforcement` the service behaves as it always has, except that a failing sink no
+  longer fails the post, `postAnnouncement` stores an `audience`, and there are two more
+  methods.
 
 ## Known limitations
 
-- **No permission enforcement yet.**
+- **Your repository must store `audience`**, and your sink must act on it. The SDK cannot
+  stop a sink that ignores the audience from notifying the wrong people.
+- **The SDK cannot list a section's guardians.** `GuardianLinkRepository` only answers "is
+  this guardian linked to this ward"; working out who to notify for a `guardians`
+  announcement is the sink's job today.
+- **A failing sink is discarded unless you pass `onDeliveryError`.** There is no
+  `deliveryFailed` event yet; it is planned for the events round.
+- **A thread tied to unpublished content is still readable** by students of the section
+  (`Thread.contentId` is not checked against the content's draft state).
+- **A completed student cannot read announcements or threads.** Read-only access after
+  completion covers grades and content only; the guardian channel is not extended to a
+  completed ward either. Widening it would mean adding `afterCompletion` to the view rules
+  and having this service opt in.
+- **No service method to start a thread.**
 - **`dueDateApproaching` is defined but nothing produces it.** The SDK has no scheduler;
   your application would decide when to dispatch it.
-- **A failing sink rejects `postAnnouncement` after the announcement is stored** (see above).
-- **`reply` checks nothing** (thread existence, membership, the author).
-- **No service methods to list announcements or to create and read threads.**
-- **Only grades are bridged.**
-- **No tests for `CommunicationService` itself.** Its behaviour was checked by running it;
-  only the event bridge has tests.
+- **Only grades are bridged.** The bridge does not forward announcements: the service
+  notifies the sink itself.
+- **Only the service is guarded.** Your own code can still use the repositories directly.
 
 ## Tests
 
-`test/communication-event-bridge.test.ts` — the bridge: translating a grade event, an async
-`resolveContentId`, skipping unresolved submissions, forwarding nothing without a resolver,
-ignoring other events, a failing sink, a throwing resolver, and unsubscribing.
+| File | Covers |
+| --- | --- |
+| `test/communication-event-bridge.test.ts` | the bridge: translating a grade event, an async `resolveContentId`, skipping unresolved submissions, forwarding nothing without a resolver, ignoring other events, a failing sink, a throwing resolver, and unsubscribing |
+| `test/communication-permissions.test.ts` | every method with enforcement on (both channels in both directions, delegation, guardian links and scopes, author = actor, thread sections, unknown and orphaned targets, check ordering, no lookups before the actor is known), a failing or throwing sink with and without `onDeliveryError`, and behaviour with enforcement off |

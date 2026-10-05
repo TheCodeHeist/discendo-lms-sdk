@@ -42,6 +42,14 @@ export interface ActionRule {
    * grant for the action has no effect.
    */
   delegable?: boolean;
+  /**
+   * A student whose enrollment is `completed` keeps this action, read-only, in that section
+   * (their own grades and the published content). Only for view actions, and only students:
+   * a completed TA or instructor gets nothing. A guardian of such a student follows. It also
+   * takes the service calling `authorizeInSection` with `afterCompletion: true`, so overriding
+   * a rule without this flag revokes the access.
+   */
+  afterCompletion?: boolean;
 }
 
 /** Built-in defaults. Deliberately conservative; every one is overridable. */
@@ -58,7 +66,7 @@ export const DEFAULT_RULES = {
   'enrollment.grantRole.ta': { roles: ['admin', 'instructor'] },
   'enrollment.grantRole.student': { roles: ['admin', 'instructor'], delegable: true },
   // content
-  'content.view': { roles: ['admin', 'instructor', 'ta', 'student'] },
+  'content.view': { roles: ['admin', 'instructor', 'ta', 'student'], afterCompletion: true },
   'content.manage': { roles: ['admin', 'instructor'], delegable: true },
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
@@ -67,9 +75,14 @@ export const DEFAULT_RULES = {
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
-  'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades' },
+  'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades', afterCompletion: true },
   // communication
+  // Announcements have two separate channels: one addressed to the students and one to the
+  // guardians. Each has its own post and view action, so nobody gets one by holding the other.
   'communication.postAnnouncement': { roles: ['admin', 'instructor'], delegable: true },
+  'communication.postGuardianAnnouncement': { roles: ['admin', 'instructor'] },
+  'communication.viewAnnouncements': { roles: ['admin', 'instructor', 'ta', 'student'] },
+  'communication.viewGuardianAnnouncements': { roles: ['admin', 'instructor', 'ta'], guardianScope: 'announcements' },
   'communication.participate': { roles: ['admin', 'instructor', 'ta', 'student'] },
   // scheduling
   'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'], guardianScope: 'schedule' },
@@ -98,7 +111,16 @@ export interface PermissionContext {
    * as a TA in the section, ALREADY verified (see `authorizeInSection`); they
    * only count for a `ta` and only for actions whose rule is `delegable`.
    */
-  section?: { role?: Role | undefined; delegated?: readonly Action[] | undefined };
+  section?: {
+    role?: Role | undefined;
+    delegated?: readonly Action[] | undefined;
+    /**
+     * The role of a COMPLETED enrollment in this section. Only filled in when the service asked
+     * for it (`afterCompletion`), and only a completed `student` is ever honored, by a rule that
+     * has `afterCompletion`. It is never a `role`: a completed enrollment still grants nothing else.
+     */
+    completedRole?: Role | undefined;
+  };
   /**
    * Organization that owns the target, or `undefined` when the target belongs
    * to no organization. Always compared with the actor's organization, and
@@ -116,7 +138,10 @@ export interface PermissionContext {
    * policy still requires `wardId` to be the resource's owner, and never lets a
    * guardian act on their own resource this way.
    */
-  guardian?: { wardId: Id; scopes: readonly GuardianScope[] } | undefined;
+  guardian?: { wardId: Id; scopes: readonly GuardianScope[]; wardCompleted?: boolean | undefined } | undefined;
+  // `wardCompleted` is true when the ward's enrollment is completed rather than active. It is
+  // only ever set when the service asked for it (`afterCompletion`); a policy that looks at
+  // `guardian` itself must treat it as read-only access to an action that is readable after completion.
 }
 
 /** May be async so a host's own policy can look things up (attribute-based rules). */
@@ -178,6 +203,16 @@ export function activeSectionRole(
   return enrollment && enrollment.status === 'active' ? enrollment.role : undefined;
 }
 
+/**
+ * The role of a `completed` enrollment, or undefined. Completion grants nothing by itself: only a
+ * rule with `afterCompletion`, asked about by a service that opted in, honors a completed student.
+ */
+export function completedSectionRole(
+  enrollment: Pick<Enrollment, 'role' | 'status'> | null | undefined,
+): Role | undefined {
+  return enrollment && enrollment.status === 'completed' ? enrollment.role : undefined;
+}
+
 /** The roles that count for this context (see the module note on the two role sources). */
 export function effectiveRoles(ctx: PermissionContext): Role[] {
   if (!ctx.section) return [...ctx.actor.roles];
@@ -219,6 +254,10 @@ export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPol
       if (!rule) return false;
 
       const roles = effectiveRoles(ctx);
+      // A completed student keeps the read-only actions that opt in (their own grades, published content).
+      if (rule.afterCompletion === true && ctx.section?.completedRole === 'student' && !roles.includes('student')) {
+        roles.push('student');
+      }
       if (rule.roles?.some((r) => roles.includes(r))) return true;
 
       const isOwner = ctx.resourceOwnerId !== undefined && ctx.resourceOwnerId === ctx.actor.id;
@@ -239,6 +278,7 @@ export function createRolePolicy(options: RolePolicyOptions = {}): PermissionPol
         ctx.resourceOwnerId !== undefined &&
         g.wardId === ctx.resourceOwnerId &&
         g.wardId !== ctx.actor.id &&
+        (g.wardCompleted !== true || rule.afterCompletion === true) &&
         g.scopes.includes(rule.guardianScope)
       );
     },

@@ -25,7 +25,7 @@ export interface Organization {
  * `grades` -> `grading.view`, `attendance` -> `reporting.view`,
  * `schedule` -> `scheduling.view`. A guardian can never write anything.
  */
-export type GuardianScope = 'grades' | 'attendance' | 'schedule';
+export type GuardianScope = 'grades' | 'attendance' | 'schedule' | 'announcements';
 
 /**
  * A parent-or-guardian to student relationship: the guardian may read the ward's

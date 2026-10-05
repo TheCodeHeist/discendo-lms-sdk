@@ -189,10 +189,8 @@ override one of the built-in delegable actions.
 
 ## Known limitations
 
-- **One of the five built-in delegable actions is not enforced by a service yet.**
-  `communication.postAnnouncement` takes effect when `CommunicationService` enforces
-  permissions. Until then the grant is stored correctly but there is nothing to apply
-  it to, unless you call the policy yourself.
+- **`communication.postAnnouncement` covers the students' channel only.** Posting to
+  guardians (`communication.postGuardianAnnouncement`) is never delegable.
 - **No events.** Granting and revoking emit nothing.
 - **No expiry.** A grant lasts until it is revoked or the TA's enrollment ends.
 - **`list` shows only active grants.** The revoked history is in your repository, but
