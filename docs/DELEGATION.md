@@ -55,6 +55,7 @@ there. The built-in delegable actions are:
 | `assessment.recordOffline` | record work a student did offline (see [ASSESSMENT.md](./ASSESSMENT.md)) |
 | `scheduling.manageOccurrence` | cancel or move a class, and run the planning checks (see [SCHEDULING.md](./SCHEDULING.md)) |
 | `scheduling.recordAttendance` | take attendance for a class (see [SCHEDULING.md](./SCHEDULING.md)) |
+| `reporting.recordAttendance` | take attendance for a session through the reporting module (see [REPORTING.md](./REPORTING.md)) |
 
 Enrolling someone needs **both** `enrollment.enroll` *and* the grant for the role
 being given, so a TA given both of the last two can enroll **students** and nothing

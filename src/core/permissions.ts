@@ -105,7 +105,8 @@ export const DEFAULT_RULES = {
   'delegation.revoke': { roles: ['admin', 'instructor'] },
   'delegation.view': { roles: ['admin', 'instructor'], ownRoles: ['ta'] },
   // reporting and administration
-  'reporting.recordAttendance': { roles: ['admin', 'instructor', 'ta'] },
+  // Taking attendance is an instructor's job; a TA only when the instructor appoints one (delegation).
+  'reporting.recordAttendance': { roles: ['admin', 'instructor'], delegable: true },
   'reporting.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'attendance' },
   'admin.viewAuditLog': { roles: ['admin'] },
 } as const satisfies Record<string, ActionRule>;

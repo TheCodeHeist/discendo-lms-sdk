@@ -187,7 +187,7 @@ Scopes only matter where a service enforces the action behind them:
 | Scope | Effective today? |
 | --- | --- |
 | `grades` | **Yes.** `GradingService.computeFinalGradeForUser` and `computeLetterGradeForUser` enforce `grading.view` |
-| `attendance` | Only if you call the policy yourself. `ReportingService` does not enforce yet |
+| `attendance` | **Yes.** `ReportingService.attendanceForStudent(sectionId, wardId, actor)` enforces `reporting.view` |
 | `schedule` | **Yes.** `SchedulingService.listOccurrences(sectionId, from, to, actor, { wardId })` enforces `scheduling.view` |
 | `announcements` | **Yes.** `CommunicationService.listAnnouncements(sectionId, actor, { wardId })` enforces `communication.viewGuardianAnnouncements` |
 
@@ -226,7 +226,7 @@ This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.
 - **Nobody is told when a link changes.** The guardian is not notified of a new, changed or revoked
   link, and the ward is never told.
 - **Four scopes only.** There is no scope for content.
-- **One of the four scopes is not enforced by a service yet**: `attendance` (see above).
+- **All four scopes are enforced by a service.** Each is read-only, and each follows the ward's enrollment.
 - **A guardian follows the ward through completion, for the grades only.** While the ward
   is an active student a guardian gets every action their scopes open; once the ward has
   *completed* the section they keep the grades (`grading.view`, with the `grades` scope) and

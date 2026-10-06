@@ -790,7 +790,7 @@ design above.
 
 ```ts
 type AttendanceMark = 'present' | 'absent' | 'excused' | 'late';
-interface AttendanceEntry { sessionId: Id; userId: Id; status: AttendanceMark; recordedAt: Date }
+interface AttendanceEntry { sessionId: Id; userId: Id; status: AttendanceMark; recordedAt: Date; recordedBy?: Id }
 
 /** What scheduling needs from an attendance store (a structural subset of reporting's). */
 interface AttendanceRecorder {
@@ -810,6 +810,10 @@ function validateAttendanceTarget(occurrence: ClassOccurrence | null): Attendanc
 missing occurrence and a **cancelled** one (a class that never happened must not be marked, or
 reporting's "classes held" counts would be wrong). A `scheduled`, `moved` or `completed` occurrence is
 valid. A host that really needs a note for a cancelled class should model it separately.
+
+With enforcement on, `recordAttendanceForOccurrence` stamps `recordedBy` with the actor, like
+`ReportingService.recordAttendance` does, so the two ways of recording attendance leave the same
+audit trail. Without enforcement it is not set.
 
 The shapes are defined here, structurally identical to the ones in the reporting module, so the
 two modules need not import each other and one repository implementation can serve both (see

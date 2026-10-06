@@ -434,6 +434,7 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     'content.manage',
     'enrollment.enroll',
     'enrollment.grantRole.student',
+    'reporting.recordAttendance',
     'scheduling.manageOccurrence',
     'scheduling.recordAttendance',
   ];
@@ -444,7 +445,7 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     ...extra,
   });
 
-  it('marks exactly seven built-in actions as delegable, and the policy lists them', () => {
+  it('marks exactly eight built-in actions as delegable, and the policy lists them', () => {
     expect(
       Object.entries(DEFAULT_RULES)
         .filter(([, rule]) => 'delegable' in rule)
@@ -794,5 +795,39 @@ describe('scheduling actions', () => {
     for (const a of Object.keys(DEFAULT_RULES).filter((x) => x.startsWith('scheduling.'))) {
       expect(policy.can(a, ctx), a).toBe(a === 'scheduling.view');
     }
+  });
+});
+
+describe('reporting actions', () => {
+  const inSection = (id: string, role: Role | undefined, roles: Role[] = [role ?? 'student'], extra: Partial<PermissionContext> = {}): PermissionContext => ({
+    actor: { id, roles, orgId: 'org-a' },
+    section: { role },
+    resourceOrgId: 'org-a',
+    ...extra,
+  });
+  const delegated = (action: string): PermissionContext => ({
+    ...inSection('t', 'ta', ['ta']),
+    section: { role: 'ta', delegated: [action] as never },
+  });
+
+  it('reporting.recordAttendance: an instructor or admin; a TA only when the instructor appoints them; never a student', () => {
+    expect(policy.can('reporting.recordAttendance', inSection('i', 'instructor'))).toBe(true);
+    expect(policy.can('reporting.recordAttendance', inSection('a', undefined, ['admin']))).toBe(true);
+    expect(policy.can('reporting.recordAttendance', inSection('t', 'ta'))).toBe(false);
+    expect(policy.can('reporting.recordAttendance', delegated('reporting.recordAttendance'))).toBe(true);
+    expect(policy.can('reporting.recordAttendance', delegated('scheduling.recordAttendance'))).toBe(false);
+    expect(policy.can('reporting.recordAttendance', inSection('s', 'student'))).toBe(false);
+    expect('delegable' in DEFAULT_RULES['reporting.recordAttendance']).toBe(true);
+  });
+
+  it('reporting.view: staff for anyone, a student for themselves, a guardian through the attendance scope', () => {
+    for (const role of ['instructor', 'ta'] as const) expect(policy.can('reporting.view', inSection('x', role)), role).toBe(true);
+    expect(policy.can('reporting.view', inSection('s1', 'student', ['student'], { resourceOwnerId: 's1' }))).toBe(true);
+    expect(policy.can('reporting.view', inSection('s1', 'student', ['student'], { resourceOwnerId: 's2' }))).toBe(false);
+    expect(policy.can('reporting.view', inSection('s1', 'student'))).toBe(false);
+    const guardian = (scopes: GuardianScope[]): PermissionContext =>
+      inSection('g', undefined, ['student'], { resourceOwnerId: 'kid', guardian: { wardId: 'kid', scopes } });
+    expect(policy.can('reporting.view', guardian(['attendance']))).toBe(true);
+    expect(policy.can('reporting.view', guardian(['grades', 'schedule', 'announcements']))).toBe(false);
   });
 });

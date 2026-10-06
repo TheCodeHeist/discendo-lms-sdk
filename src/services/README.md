@@ -18,7 +18,7 @@ to a domain module's.
 - **`communication/`** ([docs](../../docs/COMMUNICATION.md)) — announcements, discussion threads, and a
   `NotificationSink` seam other modules' events can be routed through (the
   SDK never sends actual email/push/SMS itself).
-- **`reporting/`** ([docs](../../docs/REPORTING.md)) — attendance recording (`AttendanceRecord.sessionId`
+- **`reporting/`** ([docs](../../docs/REPORTING.md)) — attendance recording and reading, now enforced (`AttendanceRecord.sessionId`
   is meant to reference a `scheduling.ClassOccurrence.id`, though nothing
   enforces that link at the type level — see `scheduling`'s
   `attendance.ts` for the validated integration point) and a generic

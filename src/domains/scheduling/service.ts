@@ -419,6 +419,7 @@ export class SchedulingService {
       userId,
       status,
       recordedAt: new Date(),
+      ...(guard ? { recordedBy: guard.oversight.actorId } : {}),
     });
   }
 

@@ -434,6 +434,15 @@ describe('recording attendance', () => {
     expect(w.recorded).toMatchObject([{ sessionId: 'occ-1', userId: 'stu', status: 'present' }]);
   });
 
+  it('stamps who recorded it, and says nothing about it when enforcement is off', async () => {
+    const w = buildWorld();
+    await w.service.recordAttendanceForOccurrence('occ-1', 'stu', 'present', as('teacher'));
+    expect(w.recorded[0]).toMatchObject({ userId: 'stu', recordedBy: 'teacher' });
+    const plain = buildWorld({ enforce: false });
+    await plain.service.recordAttendanceForOccurrence('occ-1', 'stu', 'present');
+    expect('recordedBy' in plain.recorded[0]!).toBe(false);
+  });
+
   it('lets an admin, and a TA with the delegated action', async () => {
     await expect(buildWorld().service.recordAttendanceForOccurrence('occ-1', 'stu', 'present', as('root'))).resolves.toBeUndefined();
     const w = buildWorld({ grants: [grant('scheduling.recordAttendance')] });
