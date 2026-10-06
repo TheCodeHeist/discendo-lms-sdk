@@ -60,7 +60,7 @@ permitted: grading.record") deliberately says nothing about *why*.
 | [delegation](./DELEGATION.md) | always (it has no unenforced mode) | `new DelegationService(repos, { policy })` |
 | [content](./CONTENT.md) | yes, `createNode`, `publish`, `reorder`, `getNode`, `listNodes` (`isUnlocked` is a pure check) | `new ContentService(repos, completion, edges, bus, { policy })` |
 | [communication](./COMMUNICATION.md) | yes, `postAnnouncement`, `listAnnouncements`, `reply`, `getThread` | `new CommunicationService(announcements, threads, sink, { enforcement: { policy, repos } })` |
-| [scheduling](./SCHEDULING.md) | not yet | `scheduling.view`, `scheduling.manage` exist |
+| [scheduling](./SCHEDULING.md) | yes, every method of `SchedulingService` | `new SchedulingService(repo, recorder, bus, { enforcement: { policy, repos }, settings })` |
 | [reporting](./REPORTING.md) | not yet | `reporting.recordAttendance`, `reporting.view` exist |
 | [admin](./ADMIN.md) | not yet | `admin.viewAuditLog` exists |
 
@@ -123,6 +123,10 @@ policy.
 | `communication.participate` | admin, instructor, ta, student | — | — | — |
 | `scheduling.view` | admin, instructor, ta, student | — | schedule | — |
 | `scheduling.manage` | admin | — | — | — |
+| `scheduling.manageOccurrence` | admin, instructor | — | — | yes |
+| `scheduling.recordAttendance` | admin, instructor | — | — | yes |
+| `scheduling.manageSettings` | admin | instructor (their own settings) | — | — |
+| `scheduling.manageQualifications` | admin | — | — | — |
 | `delegation.grant` | admin, instructor | — | — | — |
 | `delegation.revoke` | admin, instructor | — | — | — |
 | `delegation.view` | admin, instructor | ta | — | — |

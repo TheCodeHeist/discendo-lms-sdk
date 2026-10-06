@@ -116,8 +116,8 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `grading.gradePosted` | `GradingService.recordGrade` | a grade is recorded, including a regrade that supersedes an earlier one | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId` |
 | `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version` |
 | `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber` |
-| `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?` |
-| `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?` |
+| `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `previousStatus` |
+| `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `from` |
 
 Details that are easy to get wrong:
 
@@ -127,6 +127,16 @@ Details that are easy to get wrong:
   a *new* record and a new event.
 - **`occurrenceRescheduled` carries the occurrence's values after the move**, not
   the patch that was applied.
+- **With scheduling enforcement on, both occurrence events say who did it**, for oversight.
+  An instructor can cancel or move their own class without an admin, so an admin who wants to
+  know listens for these: `actorId`, `actorRole` (`'admin'`, `'instructor'`, or `'ta'` when
+  delegated) and `sectionId`. `occurrenceCancelled` also carries `previousStatus`, and
+  `occurrenceRescheduled` carries `from`, where the occurrence was (`date`, `status`, and
+  `roomId`, `startTime`, `endTime` with the template's values where the occurrence has none of
+  its own). Without enforcement these fields are absent, because the service does not know the
+  actor. The SDK sends nothing to admins itself: forward them to your audit log or
+  notification channel, for instance `bus.on('scheduling.*', ...)` and filter on
+  `actorRole !== 'admin'`.
 - **`grading.gradePosted` identifies the work by `submissionId`, not `contentId`.**
   Grading does not know which content a submission belongs to, so a consumer that
   needs it must look it up (this is why the notification bridge takes a

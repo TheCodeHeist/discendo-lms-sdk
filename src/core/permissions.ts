@@ -93,6 +93,13 @@ export const DEFAULT_RULES = {
   // scheduling
   'scheduling.view': { roles: ['admin', 'instructor', 'ta', 'student'], guardianScope: 'schedule' },
   'scheduling.manage': { roles: ['admin'] },
+  // An instructor cancels or moves their own class (an admin any), and a TA when delegated. Each
+  // change tells admins who made it (see the events).
+  'scheduling.manageOccurrence': { roles: ['admin', 'instructor'], delegable: true },
+  'scheduling.recordAttendance': { roles: ['admin', 'instructor'], delegable: true },
+  // An instructor's own availability and preferences (an admin anyone's); qualifications are the admin's alone.
+  'scheduling.manageSettings': { roles: ['admin'], ownRoles: ['instructor'] },
+  'scheduling.manageQualifications': { roles: ['admin'] },
   // delegation: instructors hand delegable actions to their TAs; a TA can see their own
   'delegation.grant': { roles: ['admin', 'instructor'] },
   'delegation.revoke': { roles: ['admin', 'instructor'] },

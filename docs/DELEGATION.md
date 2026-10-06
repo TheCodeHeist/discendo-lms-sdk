@@ -53,12 +53,14 @@ there. The built-in delegable actions are:
 | `enrollment.enroll` | enroll people (see below) |
 | `enrollment.grantRole.student` | grant the `student` role |
 | `assessment.recordOffline` | record work a student did offline (see [ASSESSMENT.md](./ASSESSMENT.md)) |
+| `scheduling.manageOccurrence` | cancel or move a class, and run the planning checks (see [SCHEDULING.md](./SCHEDULING.md)) |
+| `scheduling.recordAttendance` | take attendance for a class (see [SCHEDULING.md](./SCHEDULING.md)) |
 
 Enrolling someone needs **both** `enrollment.enroll` *and* the grant for the role
 being given, so a TA given both of the last two can enroll **students** and nothing
 else. They cannot enroll a TA, an instructor or an admin, and they cannot bulk
 enroll, drop anyone, or delegate onwards. Everything not on this list, such as
-`enrollment.bulkEnroll`, `scheduling.manage` and the delegation actions themselves,
+`enrollment.bulkEnroll`, `scheduling.manage`, the scheduling settings and the delegation actions themselves,
 can never be delegated.
 
 **Permissions never grow downwards.** An instructor can only hand over an action

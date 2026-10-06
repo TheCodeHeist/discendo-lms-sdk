@@ -434,6 +434,8 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     'content.manage',
     'enrollment.enroll',
     'enrollment.grantRole.student',
+    'scheduling.manageOccurrence',
+    'scheduling.recordAttendance',
   ];
   const asTa = (delegated: string[] | undefined, extra: Partial<PermissionContext> = {}): PermissionContext => ({
     actor: ta,
@@ -442,7 +444,7 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     ...extra,
   });
 
-  it('marks exactly five built-in actions as delegable, and the policy lists them', () => {
+  it('marks exactly seven built-in actions as delegable, and the policy lists them', () => {
     expect(
       Object.entries(DEFAULT_RULES)
         .filter(([, rule]) => 'delegable' in rule)
@@ -734,5 +736,63 @@ describe('guardian link management actions', () => {
       guardian: { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule', 'announcements'] },
     };
     for (const a of ['guardian.manageLinks', 'guardian.viewLinks', 'guardian.listRecipients']) expect(policy.can(a, ctx), a).toBe(false);
+  });
+});
+
+describe('scheduling actions', () => {
+  const org = (id: string, roles: Role[], extra: Partial<PermissionContext> = {}): PermissionContext => ({
+    actor: { id, roles, orgId: 'org-a' },
+    resourceOrgId: 'org-a',
+    ...extra,
+  });
+  const inSection = (id: string, role: Role | undefined, roles: Role[] = [role ?? 'student'], delegated?: string[]): PermissionContext =>
+    org(id, roles, { section: { role, ...(delegated ? { delegated: delegated as never } : {}) } });
+
+  it.each(['scheduling.manageOccurrence', 'scheduling.recordAttendance'])('%s: an instructor or admin, a TA only when delegated, never a student', (action) => {
+    expect(policy.can(action, inSection('i', 'instructor'))).toBe(true);
+    expect(policy.can(action, inSection('a', undefined, ['admin']))).toBe(true);
+    expect(policy.can(action, inSection('t', 'ta'))).toBe(false);
+    expect(policy.can(action, inSection('t', 'ta', ['ta'], [action]))).toBe(true);
+    expect(policy.can(action, inSection('t', 'ta', ['ta'], ['scheduling.view']))).toBe(false);
+    expect(policy.can(action, inSection('s', 'student'))).toBe(false);
+    expect(policy.can(action, inSection('s', 'student', ['student'], [action]))).toBe(false);
+    expect('delegable' in DEFAULT_RULES[action as keyof typeof DEFAULT_RULES]).toBe(true);
+  });
+
+  it('scheduling.manage is still the admin\'s alone, delegable to nobody', () => {
+    expect(policy.can('scheduling.manage', inSection('a', undefined, ['admin']))).toBe(true);
+    for (const role of ['instructor', 'ta', 'student'] as const) expect(policy.can('scheduling.manage', inSection('x', role)), role).toBe(false);
+    expect(policy.can('scheduling.manage', inSection('t', 'ta', ['ta'], ['scheduling.manage']))).toBe(false);
+  });
+
+  it('scheduling.manageSettings: an instructor for themselves only, an admin for anyone, no one else', () => {
+    expect(policy.can('scheduling.manageSettings', org('i1', ['instructor'], { resourceOwnerId: 'i1' }))).toBe(true);
+    expect(policy.can('scheduling.manageSettings', org('i1', ['instructor'], { resourceOwnerId: 'i2' }))).toBe(false);
+    expect(policy.can('scheduling.manageSettings', org('i1', ['instructor']))).toBe(false);
+    expect(policy.can('scheduling.manageSettings', org('a', ['admin'], { resourceOwnerId: 'i2' }))).toBe(true);
+    for (const role of ['ta', 'student'] as const) {
+      expect(policy.can('scheduling.manageSettings', org('x', [role], { resourceOwnerId: 'x' })), role).toBe(false);
+    }
+    expect('delegable' in DEFAULT_RULES['scheduling.manageSettings']).toBe(false);
+  });
+
+  it('scheduling.manageQualifications is the admin\'s alone: an instructor cannot qualify themselves', () => {
+    expect(policy.can('scheduling.manageQualifications', org('a', ['admin']))).toBe(true);
+    expect(policy.can('scheduling.manageQualifications', org('i1', ['instructor'], { resourceOwnerId: 'i1' }))).toBe(false);
+    expect(policy.can('scheduling.manageQualifications', { ...org('a', ['admin']), resourceOrgId: 'org-b' })).toBe(false);
+    expect('delegable' in DEFAULT_RULES['scheduling.manageQualifications']).toBe(false);
+  });
+
+  it('a guardian\'s scopes still open only scheduling.view', () => {
+    const ctx: PermissionContext = {
+      actor: { id: 'g', roles: ['student'], orgId: 'org-a' },
+      section: { role: undefined },
+      resourceOrgId: 'org-a',
+      resourceOwnerId: 'kid',
+      guardian: { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule', 'announcements'] },
+    };
+    for (const a of Object.keys(DEFAULT_RULES).filter((x) => x.startsWith('scheduling.'))) {
+      expect(policy.can(a, ctx), a).toBe(a === 'scheduling.view');
+    }
   });
 });
