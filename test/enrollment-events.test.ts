@@ -11,11 +11,13 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
 
   const repos: RepositoryContext & { _sections: Map<string, CourseSection> } = {
     users: {
-      findById: async () => null,
+      // The tenant check always loads the person, so they must exist (no organization here).
+      findById: async (id) => ({ id, roles: ['student'] }),
       findByExternalRef: async () => null,
     },
     courses: {
-      findCourse: async () => null,
+      // The tenant check needs the section's course to exist (no organization here).
+      findCourse: async (id) => ({ id, title: 'Course' }),
       findSection: async (id) => sections.get(id) ?? null,
       listSections: async () => [],
     },
@@ -33,6 +35,7 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
         enrollments.set(id, updated);
         return updated;
       },
+      findById: async (id) => enrollments.get(id) ?? null,
       findByUserAndSection: async (userId, sectionId) =>
         [...enrollments.values()].find((e) => e.userId === userId && e.sectionId === sectionId) ?? null,
       listBySection: async (sectionId) => [...enrollments.values()].filter((e) => e.sectionId === sectionId),

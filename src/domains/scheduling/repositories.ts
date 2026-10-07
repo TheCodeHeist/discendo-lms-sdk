@@ -6,6 +6,7 @@ import type {
   Room,
   SchedulingGroup,
   TeacherQualification,
+  TeacherSchedulingPreferences,
 } from './types.js';
 
 export interface SchedulingRepository {
@@ -45,4 +46,23 @@ export interface SchedulingRepository {
   findRoom(id: Id): Promise<Room | null>;
   listRooms(): Promise<Room[]>;
   findGroup(id: Id): Promise<SchedulingGroup | null>;
+}
+
+/**
+ * What the settings methods of `SchedulingService` need to write. Separate from
+ * `SchedulingRepository` so a host that only reads schedules does not have to implement it; pass
+ * it as `options.settings`. `InMemorySchedulingRepository` implements both.
+ */
+export interface SchedulingSettingsRepository {
+  /** Replaces ALL of the resource's availability rules with these, and returns the stored rules. */
+  replaceAvailability(
+    resourceType: 'teacher' | 'room' | 'group',
+    resourceId: Id,
+    rules: Array<Omit<AvailabilityRule, 'id' | 'resourceId' | 'resourceType'>>,
+  ): Promise<AvailabilityRule[]>;
+  findTeacherPreferences(teacherId: Id): Promise<TeacherSchedulingPreferences | null>;
+  /** Stores these as the teacher's preferences, replacing any earlier ones. */
+  saveTeacherPreferences(preferences: TeacherSchedulingPreferences): Promise<TeacherSchedulingPreferences>;
+  /** Stores this as the teacher's qualification, replacing any earlier one. */
+  saveTeacherQualification(qualification: TeacherQualification): Promise<TeacherQualification>;
 }

@@ -77,6 +77,14 @@ export interface OccurrenceCancelledEvent {
   occurrenceId: string;
   templateId: string;
   note?: string;
+  // Oversight: filled in when `SchedulingService` enforces permissions, so a host can tell admins
+  // who cancelled what (an instructor cancelling their own class, say). Absent otherwise.
+  sectionId?: string;
+  actorId?: string;
+  /** 'admin', or the role the actor acted as in the section ('instructor', or 'ta' when delegated). */
+  actorRole?: 'admin' | 'instructor' | 'ta';
+  /** The occurrence's status before this call. */
+  previousStatus?: string;
 }
 /** Carries the occurrence's values AFTER the move, not the patch that was applied. */
 export interface OccurrenceRescheduledEvent {
@@ -87,6 +95,11 @@ export interface OccurrenceRescheduledEvent {
   roomId?: string;
   startTime?: string;
   endTime?: string;
+  // Oversight, as on the cancelled event; `from` is what the occurrence was before the move.
+  sectionId?: string;
+  actorId?: string;
+  actorRole?: 'admin' | 'instructor' | 'ta';
+  from?: { date: Timestamp; status: string; roomId?: string; startTime?: string; endTime?: string };
 }
 
 /**

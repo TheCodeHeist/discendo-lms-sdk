@@ -1,10 +1,11 @@
 # Getting Started
 
 A practical walkthrough of wiring the SDK into a host application, using
-the patterns that hold across every module (see `README.md`'s "Design
-principles" section for the full list). Ends with a worked, runnable-style
-example of the `scheduling` module end to end, since it's the most involved
-module and the one most likely to need a concrete example to click.
+the patterns that hold across every module (see the "Design principles"
+section of [INDEX.md](./INDEX.md) for the full list). Ends with a worked,
+runnable-style example of the `scheduling` module end to end, since it's the
+most involved module and the one most likely to need a concrete example to
+click.
 
 ## 1. Install and import
 
@@ -43,6 +44,9 @@ class PrismaGradeRepository implements GradeRepository {
   async create(entry: Omit<GradeEntry, "id">): Promise<GradeEntry> {
     return this.prisma.gradeEntry.create({ data: entry });
   }
+  async findById(id: string): Promise<GradeEntry | null> {
+    return this.prisma.gradeEntry.findUnique({ where: { id } });
+  }
   async markSuperseded(id: string, byId: string): Promise<void> {
     await this.prisma.gradeEntry.update({
       where: { id },
@@ -56,10 +60,13 @@ class PrismaGradeRepository implements GradeRepository {
 ```
 
 You only need to implement the repositories for the modules you're actually
-using. `core`'s `RepositoryContext` bundles the five repositories that
-`enrollment` and `content` need; modules like `grading`, `assessment`,
-`communication`, `reporting`, and `admin` take their own repositories
-directly, not through `RepositoryContext`.
+using. `core`'s `RepositoryContext` bundles five required repositories (`users`,
+`courses`, `enrollments`, `content`, `terms`), which `enrollment` and `content`
+are built from, plus four optional ones that switch features on when you supply
+them (`organizations`, `departments`, `delegations`, `guardianLinks`). Modules
+like `grading`, `assessment`, `communication`, `reporting`, `scheduling` and
+`admin` also take their own repositories directly. [CORE.md](./CORE.md) lists
+every interface and what your implementations must guarantee.
 
 For quick prototyping or tests, an in-memory `Map`-backed implementation is
 often faster to write than wiring a real database — see
@@ -117,7 +124,38 @@ last constructor argument to the services that emit, and subscribe with
 Omit these entirely if you don't need them yet — they're optional
 constructor parameters, not required wiring.
 
-## 5. Wrap mutations in `withAudit` where you want history
+## 5. Turn on permissions where you want them
+
+By default a service does no permission checking; your own API layer decides.
+To have a service enforce permissions, give it a policy. It then needs to be told
+who is acting on every call:
+
+```ts
+import { createRolePolicy } from "discendo-sdk/core";
+
+const policy = createRolePolicy();   // the default rules; override any of them
+
+const enrollmentService = new EnrollmentService(repos, bus, { policy });
+
+await enrollmentService.enroll(
+  { userId: "stu-1", sectionId: "sec-1", role: "student" },
+  { actorId: currentUser.id },       // the user your app has authenticated
+);
+// throws PermissionDeniedError, and does nothing, if currentUser may not do this
+```
+
+The SDK trusts the `actorId` you pass (authenticating the person is your job) and
+checks everything else itself. Enrollment, grading, assessment and delegation
+enforce today; the others are on their way, and [PERMISSIONS.md](./PERMISSIONS.md)
+shows how to guard them yourself in the meantime. It also has the full rule table,
+how to override rules, and how to write your own policy.
+
+If you host several institutions, set `orgId` on courses and people and nobody can act
+across them ([TENANCY.md](./TENANCY.md)). For parents who should see their child's
+grades, see [GUARDIANS.md](./GUARDIANS.md); for instructors who want to hand some
+rights to a TA, see [DELEGATION.md](./DELEGATION.md).
+
+## 6. Wrap mutations in `withAudit` where you want history
 
 `admin`'s `withAudit` is a free function, not tied to any specific service,
 so it composes with anything:
@@ -129,6 +167,10 @@ await withAudit(auditRepo, "grade.record", submissionId, actorId, () =>
   gradingService.recordGrade(submissionId, userId, score, maxScore, actorId),
 );
 ```
+
+With more than one organization, use `AdminService.audited` instead: it takes the actor and their
+organization from the stored account, so an admin only ever reads their own organization's trail
+(see [ADMIN.md](./ADMIN.md)).
 
 ---
 
@@ -180,7 +222,7 @@ const template = await repo.createTemplate({
 ### Step 3 — (optional) declare availability constraints
 
 Skip this step entirely if you don't need to constrain when a resource can
-be used — availability is opt-in (see `SCHEDULING.md`'s `availability.ts`
+be used — availability is opt-in (see [SCHEDULING.md](./SCHEDULING.md)'s `availability.ts`
 section).
 
 ```ts
@@ -294,8 +336,7 @@ if (!check.ok) {
   in particular the "Known limitations" section (no soft-constraint
   optimization, the `interval > 1` availability limitation, and the
   one-room-per-week-per-template assumption).
-- Read `OTHER_MODULES.md` for the complete type/method reference of every
-  other module.
+- [INDEX.md](./INDEX.md) lists a dedicated page for every module, each with its types,
+  methods, permissions, events, known limitations and tests.
 - Run `bun test` after extracting this project to confirm the existing test
-  suite passes in your environment — see `SCHEDULING.md`'s "A note on how
-  this was verified" for context on how these tests were last exercised.
+  suite passes in your environment.

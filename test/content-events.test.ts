@@ -12,6 +12,7 @@ function makeRepos(): RepositoryContext {
     enrollments: {
       create: async (e) => ({ ...e, id: 'e1' }),
       update: async (id, patch) => ({ id, userId: 'u', sectionId: 's', role: 'student', status: 'active', enrolledAt: new Date(), ...patch }),
+      findById: async () => null,
       findByUserAndSection: async () => null,
       listBySection: async () => [],
       countActive: async () => 0,

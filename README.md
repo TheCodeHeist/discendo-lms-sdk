@@ -10,7 +10,11 @@ This SDK aims to standardize the core LMS logic so that different host applicati
 
 ## Documentation
 
-Check out the [documentation markdown file](./docs/INDEX.md) for a detailed overview of the SDK's modules, domain models, and services.
+Start at the [documentation index](./docs/INDEX.md). Every module has its own page
+with its types, methods, permissions, events, known limitations and tests, and there are
+dedicated pages for [permissions](./docs/PERMISSIONS.md), [tenancy](./docs/TENANCY.md),
+[events](./docs/EVENTS.md) and [guardians](./docs/GUARDIANS.md). New to the SDK? Begin
+with [Getting Started](./docs/GETTING_STARTED.md).
 
 ## Project layout (for contributors and plugin authors)
 
@@ -19,8 +23,8 @@ what belongs there:
 
 | Layer | What goes here | Start with |
 | --- | --- | --- |
-| [`src/core/`](./src/core/README.md) | Shared primitives and the `EventBus` every module can emit to | `events.ts` |
-| [`src/domains/`](./src/domains/README.md) | Modules that own a primary entity: enrollment, content, assessment, grading, scheduling | [`scheduling/README.md`](./src/domains/scheduling/README.md) |
+| [`src/core/`](./src/core/README.md) | Shared types, repository interfaces, the `EventBus`, tenancy and permissions | `events.ts` |
+| [`src/domains/`](./src/domains/README.md) | Modules that own a primary entity: enrollment, content, assessment, grading, delegation, scheduling | [`scheduling/README.md`](./src/domains/scheduling/README.md) |
 | [`src/services/`](./src/services/README.md) | Cross-cutting modules that consume what domains produce: communication, reporting, admin | — |
 | `src/interop/` | Pluggable protocol seams (LTI, SSO, SCORM/xAPI), no implementations | — |
 
@@ -28,3 +32,23 @@ what belongs there:
 another domain or service. Modules coordinate through the shared `EventBus`
 instead. This is enforced by `test/architecture.test.ts`, so a change that
 breaks it fails CI.
+
+## Verifying a change
+
+Run all three; each catches something the others cannot.
+
+```sh
+npx tsc --noEmit
+npx tsc --noEmit --ignoreConfig test/*.test.ts src/domains/scheduling/index.ts \
+  --moduleResolution nodenext --module nodenext --target es2022 --types bun-types \
+  --strict --exactOptionalPropertyTypes --noUncheckedIndexedAccess \
+  --verbatimModuleSyntax --skipLibCheck
+bun test
+```
+
+`bun test` does not typecheck, which is why the second command exists: it typechecks the
+tests under the same strict flags as the source. Changes to permissions or tenancy are
+expected to come with tests written first and to be mutation-tested (break the code on
+purpose and confirm a test fails). The docs under `docs/` are checked by
+`test/docs.test.ts`, so a new built-in action, module or export that is not documented
+fails the build.

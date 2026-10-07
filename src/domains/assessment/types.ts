@@ -11,6 +11,11 @@ export interface Submission {
   payload: SubmissionPayload;
   submittedAt: Date;
   attemptNumber: number;
+  /**
+   * Who recorded this on the student's behalf (`AssessmentService.recordOffline`). Absent on
+   * a submission the student made themselves, so it also tells the two apart.
+   */
+  recordedBy?: string;
 }
 
 export interface Criterion {

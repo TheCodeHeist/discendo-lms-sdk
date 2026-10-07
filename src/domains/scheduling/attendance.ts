@@ -22,6 +22,8 @@ export interface AttendanceEntry {
   userId: Id;
   status: AttendanceMark;
   recordedAt: Date;
+  /** Who recorded it. Set when scheduling enforces permissions; absent otherwise. */
+  recordedBy?: Id;
 }
 
 /** Structural subset of reporting.AttendanceRepository — only what's needed here. */

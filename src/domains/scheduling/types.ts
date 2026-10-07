@@ -125,6 +125,12 @@ export interface ClassOccurrence {
 
 export interface Room {
   id: Id;
+  /**
+   * The organization this room belongs to. With enforcement on, only people of that organization
+   * can see or use it, and "no organization" matches only "no organization" (see TENANCY.md). A
+   * room with none is visible only to people with none.
+   */
+  orgId?: string;
   name: string;
   capacity: number;
   features: string[];
@@ -135,4 +141,41 @@ export interface SchedulingGroup {
   id: Id;
   sectionId: Id;
   size: number;
+}
+
+/**
+ * What an instructor tells the planner about themselves, persisted. Soft: it steers the solver
+ * (`teacherTimePreference`, weight 1 for everyone, so nobody outweighs anyone), it never makes a
+ * schedule fail.
+ */
+export interface TeacherSchedulingPreferences {
+  teacherId: Id;
+  /** Start times the teacher prefers, "HH:MM" each, `earliest` no later than `latest`. */
+  preferredStartWindow?: { earliest: string; latest: string };
+}
+
+/** A room, teacher, group or course the actor cannot see: it does not exist, or is another organization's. */
+export class SchedulingTargetNotFoundError extends Error {
+  constructor() {
+    // One message for "does not exist" and "belongs to another organization", so nobody can use
+    // it to find out what another organization has.
+    super('Scheduling resource not found in this organization');
+    this.name = 'SchedulingTargetNotFoundError';
+  }
+}
+
+/** Availability, preferences or a qualification that is not valid. */
+export class InvalidSchedulingSettingsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidSchedulingSettingsError';
+  }
+}
+
+/** A submitted auto-schedule plan has a placement that cannot be applied (bad times or days). */
+export class InvalidSchedulingPlanError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidSchedulingPlanError';
+  }
 }

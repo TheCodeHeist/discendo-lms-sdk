@@ -11,11 +11,23 @@ import type {
   Enrollment,
   ContentNode,
   AcademicTerm,
+  Organization,
+  GuardianLink,
+  Department,
+  TaGrant,
 } from './types.js';
 
 export interface UserRepository {
   findById(id: Id): Promise<Identity | null>;
-  findByExternalRef(ref: string): Promise<Identity | null>;
+  /**
+   * `orgId` is passed when the caller is working inside one organization
+   * (e.g. a roster import into an org-scoped course). Two organizations may
+   * reuse the same external reference, so implementations should then return
+   * only an identity belonging to that organization. When it is omitted, no
+   * organization is implied. Implementations that don't support multiple
+   * organizations can ignore it.
+   */
+  findByExternalRef(ref: string, orgId?: Id): Promise<Identity | null>;
 }
 
 export interface CourseRepository {
@@ -26,7 +38,13 @@ export interface CourseRepository {
 
 export interface EnrollmentRepository {
   create(enrollment: Omit<Enrollment, 'id'>): Promise<Enrollment>;
+  findById(id: Id): Promise<Enrollment | null>;
   update(id: Id, patch: Partial<Enrollment>): Promise<Enrollment>;
+  /**
+   * A person can have several records for one section (for example a dropped
+   * one and a later active one). Return the MOST RECENT: permission checks and
+   * delegated grants depend on it being the current enrollment.
+   */
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(sectionId: Id, status?: Enrollment['status']): Promise<Enrollment[]>;
   countActive(sectionId: Id): Promise<number>;
@@ -44,6 +62,47 @@ export interface TermRepository {
   findById(id: Id): Promise<AcademicTerm | null>;
 }
 
+export interface OrganizationRepository {
+  findById(id: Id): Promise<Organization | null>;
+}
+
+export interface DepartmentRepository {
+  findById(id: Id): Promise<Department | null>;
+  /** The departments of one organization (`undefined` = those that belong to no organization). */
+  listByOrg(orgId: Id | undefined): Promise<Department[]>;
+}
+
+export interface DelegationRepository {
+  create(grant: Omit<TaGrant, 'id'>): Promise<TaGrant>;
+  findById(id: Id): Promise<TaGrant | null>;
+  /** The grants of this enrollment that have not been revoked. */
+  listActiveForEnrollment(enrollmentId: Id): Promise<TaGrant[]>;
+  revoke(id: Id, at: Date): Promise<TaGrant>;
+}
+
+export interface GuardianLinkRepository {
+  /**
+   * The active link from this guardian to this ward, or null. Enforcement
+   * re-checks what comes back (ids, status, organization), so a repository
+   * that returns the wrong link still can't widen anyone's access.
+   */
+  findActive(guardianId: Id, wardId: Id): Promise<GuardianLink | null>;
+}
+
+/**
+ * What `GuardianService` needs to manage links. A host that only reads links (enforcement)
+ * implements `GuardianLinkRepository` alone; this adds the writes and the listings.
+ */
+export interface GuardianLinkManagementRepository extends GuardianLinkRepository {
+  create(link: Omit<GuardianLink, 'id'>): Promise<GuardianLink>;
+  findById(id: Id): Promise<GuardianLink | null>;
+  update(id: Id, patch: Partial<Pick<GuardianLink, 'scopes' | 'status' | 'revokedAt'>>): Promise<GuardianLink>;
+  /** Every link to this ward, active or revoked. */
+  listByWard(wardId: Id): Promise<GuardianLink[]>;
+  /** Every link from this guardian, active or revoked. */
+  listByGuardian(guardianId: Id): Promise<GuardianLink[]>;
+}
+
 /**
  * Bundle of repositories the SDK's service classes are constructed with.
  * Host app wires up real implementations once at startup.
@@ -54,4 +113,12 @@ export interface RepositoryContext {
   enrollments: EnrollmentRepository;
   content: ContentRepository;
   terms: TermRepository;
+  /** Only needed by hosts that use organizations. Nothing in the SDK requires it yet. */
+  organizations?: OrganizationRepository;
+  /** Only needed by hosts that group courses into departments. Nothing in the SDK requires it. */
+  departments?: DepartmentRepository;
+  /** Only needed by hosts whose instructors delegate actions to TAs. Without it a TA only has the TA defaults. */
+  delegations?: DelegationRepository;
+  /** Only needed by hosts with guardians. Without it a guardian can read nothing. */
+  guardianLinks?: GuardianLinkRepository;
 }

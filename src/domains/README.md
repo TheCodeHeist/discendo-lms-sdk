@@ -11,17 +11,22 @@ summarizes what domain modules already produced, it belongs in
 
 ## What's here
 
-- **`enrollment/`** — the join entity between a user and a course section:
+- **`enrollment/`** ([docs](../../docs/ENROLLMENT.md)) — the join entity between a user and a course section:
   enrolling, dropping, waitlisting, bulk roster import.
-- **`content/`** — the content tree (pages, assignments, quizzes, files)
+- **`content/`** ([docs](../../docs/CONTENT.md)) — the content tree (pages, assignments, quizzes, files)
   a course section is built from: publishing, versioning, prerequisite
   gating.
-- **`assessment/`** — submissions and quiz attempts: attempt limits,
+- **`assessment/`** ([docs](../../docs/ASSESSMENT.md)) — submissions and quiz attempts: attempt limits,
   question randomization, a plagiarism-check seam.
-- **`grading/`** — grade entries and the calculations built on them:
+- **`grading/`** ([docs](../../docs/GRADING.md)) — grade entries and the calculations built on them:
   weighted categories, late penalties, letter grades, a full audit trail
   via `supersededBy` (grades are never overwritten, only superseded).
-- **`scheduling/`** — by far the largest domain module: recurring class
+- **`delegation/`** ([docs](../../docs/DELEGATION.md)) — grants an instructor hands to a teaching assistant in
+  one section (`TaGrant`): the TA may then do specific delegable actions,
+  until the instructor revokes them or the TA's enrollment ends.
+- **`guardians/`** ([docs](../../docs/GUARDIANS.md)) — admins creating, changing and revoking the links that give a
+  parent or guardian read-only access to a ward, and listing a section's guardians to notify.
+- **`scheduling/`** ([docs](../../docs/SCHEDULING.md), calendar: [docs](../../docs/CALENDAR.md)) — by far the largest domain module: recurring class
   routines (`ClassSessionTemplate`), materialized calendar occurrences,
   conflict detection, resource availability, room matching, teacher
   qualifications, an auto-scheduling solver, and (nested under

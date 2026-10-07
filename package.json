@@ -12,6 +12,8 @@
     "./content": "./dist/domains/content/index.js",
     "./assessment": "./dist/domains/assessment/index.js",
     "./grading": "./dist/domains/grading/index.js",
+    "./delegation": "./dist/domains/delegation/index.js",
+    "./guardians": "./dist/domains/guardians/index.js",
     "./scheduling": "./dist/domains/scheduling/index.js",
     "./scheduling/calendar": "./dist/domains/scheduling/calendar/index.js",
     "./communication": "./dist/services/communication/index.js",

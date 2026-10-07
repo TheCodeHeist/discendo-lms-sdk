@@ -9,8 +9,24 @@ self-contained sub-module, `calendar/`, that handles assignment due-date
 windows (locked/open/closed) and iCal export. It shares no code with the
 class-routine logic described in the rest of this document; it lives here
 because both answer "is this thing available right now?". This document
-covers the class-routine side. For a quick folder map and "which piece do I
+covers the class-routine side; the calendar sub-module has its own page,
+[CALENDAR.md](./CALENDAR.md). For a quick folder map and "which piece do I
 need" table, see `src/domains/scheduling/README.md`.
+
+**How scheduling fits with the rest of the SDK.**
+
+- **Permissions.** Opt-in enforcement: pass `{ enforcement: { policy, repos } }` and every
+  method needs an actor (see "Enforcement and organizations" below). Without it the service
+  behaves as it always has. See [PERMISSIONS.md](./PERMISSIONS.md) and
+  [GUARDIANS.md](./GUARDIANS.md).
+- **Events.** It emits `scheduling.occurrenceCancelled` and
+  `scheduling.occurrenceRescheduled`, and with enforcement on they say **who** did it, so admins
+  can oversee instructors who cancel or move their own classes; see [EVENTS.md](./EVENTS.md).
+- **Attendance.** `recordAttendanceForOccurrence` shares its record shape with
+  the reporting module, so one repository can serve both; see
+  [REPORTING.md](./REPORTING.md).
+- **Tenancy.** With enforcement on, rooms (`Room.orgId`), teachers, groups and courses must belong
+  to the actor's organization; see [TENANCY.md](./TENANCY.md).
 
 ## Why the module is shaped this way
 
@@ -46,7 +62,8 @@ propose a full conflict-free timetable given a set of unscheduled sessions.
 ```
 src/domains/scheduling/
   types.ts               Domain model: Weekday, RecurrenceRule, AvailabilityRule,
-                          ClassSessionTemplate, ClassOccurrence, Room, SchedulingGroup
+                          TeacherQualification, ClassSessionTemplate, ClassOccurrence,
+                          Room, SchedulingGroup
   repositories.ts         SchedulingRepository interface
   service.ts              SchedulingService — the class most host apps interact with
   rules/                  Pure constraint checks (no I/O, no repository)
@@ -129,6 +146,7 @@ wants "teachers can only be booked 9–5" adds rules to enforce it.
 interface ClassSessionTemplate {
   id: Id;
   sectionId: Id;
+  courseId?: Id; // optional; only used for teacher-qualification checks
   teacherIds: Id[]; // multiple co-teachers supported, none privileged
   groupId: Id;
   roomId?: Id; // optional — a template can exist unscheduled
@@ -147,6 +165,11 @@ The abstract "this class meets on this pattern" record. `roomId`,
 can be created before scheduling is decided, then filled in later — either
 manually or via `SchedulingService.planAutoSchedule` /
 `applyAutoSchedulePlan`.
+
+`courseId` is a loose reference to whatever the host calls "the course" (for
+example `core.Course.id`). Scheduling never resolves it; it is consulted only by
+the teacher-qualification check (see `teacher-qualification.ts` below), and a
+template without one is never checked.
 
 ### `ClassOccurrence`
 
@@ -177,11 +200,15 @@ occurrence use the template's time or its own."
 ```ts
 interface Room {
   id: Id;
+  orgId?: string;      // the organization it belongs to; see "Enforcement and organizations"
   name: string;
   capacity: number;
   features: string[];
 }
 ```
+
+A room with no `orgId` belongs to no organization, so with enforcement on only people with no
+organization can see or use it. Give every room of a multi-organization deployment an `orgId`.
 
 ### `SchedulingGroup`
 
@@ -195,6 +222,21 @@ interface SchedulingGroup {
 
 A group being scheduled together — a section, batch, or cohort. `size` is
 what room-capacity matching checks against.
+
+### `TeacherQualification`
+
+```ts
+interface TeacherQualification {
+  teacherId: Id;
+  qualifiedCourseIds: Id[];
+}
+```
+
+Which courses a teacher may teach. Like `AvailabilityRule`, it is **opt-in**:
+a teacher with *no record on file* is qualified for everything, so a single-tutor
+setup never declares any. Once a teacher *has* a record, only the listed courses
+count, and an empty `qualifiedCourseIds` means qualified for **nothing** (not
+"unconstrained").
 
 ---
 
@@ -216,6 +258,7 @@ interface SchedulingRepository {
     patch: Partial<ClassSessionTemplate>,
   ): Promise<ClassSessionTemplate>;
 
+  findOccurrence(id: Id): Promise<ClassOccurrence | null>;
   listOccurrences(
     templateId: Id,
     from: Date,
@@ -240,6 +283,9 @@ interface SchedulingRepository {
     resourceId: Id,
   ): Promise<AvailabilityRule[]>;
 
+  /** null = no record on file, which means "qualified for everything", not an error. */
+  findTeacherQualification(teacherId: Id): Promise<TeacherQualification | null>;
+
   findRoom(id: Id): Promise<Room | null>;
   listRooms(): Promise<Room[]>;
   findGroup(id: Id): Promise<SchedulingGroup | null>;
@@ -253,13 +299,27 @@ to schedule, rather than the service discovering them itself; this keeps
 the service decoupled from however a host app decides which templates need
 scheduling (a dedicated query, a term-planning UI selection, etc.).
 
+### `SchedulingSettingsRepository` (`repositories.ts`)
+
+What the settings methods of `SchedulingService` write, kept apart from `SchedulingRepository` so a
+host that only reads schedules does not have to implement it. Pass it as `options.settings`.
+
+```ts
+interface SchedulingSettingsRepository {
+  replaceAvailability(resourceType, resourceId, rules): Promise<AvailabilityRule[]>; // replaces ALL
+  findTeacherPreferences(teacherId: Id): Promise<TeacherSchedulingPreferences | null>;
+  saveTeacherPreferences(p: TeacherSchedulingPreferences): Promise<TeacherSchedulingPreferences>;
+  saveTeacherQualification(q: TeacherQualification): Promise<TeacherQualification>;
+}
+```
+
 ### `InMemorySchedulingRepository` (`testing/in-memory-repository.ts`)
 
 A complete, `Map`-backed reference implementation of `SchedulingRepository`.
 **Not exported from the package root** — it's meant as a starting point to
 copy/adapt for a real implementation, and as the backbone of this module's
 own test suite. Exposes seed helpers for tests: `seedTemplate`, `seedRoom`,
-`seedGroup`, `seedAvailability`.
+`seedGroup`, `seedAvailability`, `seedTeacherQualification`.
 
 ---
 
@@ -417,6 +477,47 @@ first problem found.
 
 ---
 
+## `teacher-qualification.ts` — who may teach what
+
+```ts
+interface QualificationCheckResult {
+  qualified: boolean;
+  reason?: string;
+}
+
+function checkTeacherQualified(
+  teacherId: Id,
+  courseId: string | undefined,
+  qualifications: TeacherQualification[],
+): QualificationCheckResult;
+
+function checkAllTeachersQualified(
+  teacherIds: Id[],
+  courseId: string | undefined,
+  qualifications: TeacherQualification[],
+): QualificationCheckResult[];
+```
+
+Pure and time-blind: it answers only the **staffing** question, independent of
+when. A teacher can be fully qualified and still be double-booked (`conflict.ts`) or
+off shift (`availability.ts`).
+
+`checkTeacherQualified` is `{ qualified: true }` when `courseId` is `undefined`
+(nothing to check against), when the teacher has no record in `qualifications`, or when
+the course is in their `qualifiedCourseIds`. Otherwise it returns
+`{ qualified: false, reason }` naming the teacher and the course.
+
+`checkAllTeachersQualified` is what a **multi-teacher** session needs: **every**
+co-teacher must be qualified, not just one. It returns one failure per unqualified
+teacher, so an empty array means everyone is fine.
+
+Qualification is enforced by the **solver** (an unqualified session is reported as
+unplaceable with the reason) and therefore by `planAutoSchedule`. It is **not**
+part of `SchedulingService.checkAll`, which covers conflicts, availability and room
+suitability only.
+
+---
+
 ## `solver/` — the auto-scheduling solver
 
 This is the NP-hard part: given a set of classes that need a room and time,
@@ -443,6 +544,7 @@ anything upstream.
 interface UnscheduledSession {
   id: Id;
   sectionId: Id;
+  courseId?: Id; // only for qualification checks
   teacherIds: Id[];
   groupId: Id;
   groupSize: number;
@@ -469,6 +571,7 @@ interface SchedulingProblem {
   sessions: UnscheduledSession[];
   rooms: SolverRoom[];
   availability: ResourceAvailabilityWindow[];
+  teacherQualifications?: TeacherQualification[]; // opt-in; see teacher-qualification.ts
   candidateSlotsPerDay: string[]; // e.g. every 30 min from 08:00-18:00
   days: Weekday[];
 }
@@ -492,10 +595,12 @@ interface SolveResult {
   status: SolveStatus;
   placements: PlacedSession[];
   unplaced: UnplaceableSession[];
+  totalPenalty: number; // weighted soft-constraint penalty of the schedule found; 0 if none supplied
 }
 
 interface SolverOptions {
   maxBacktrackSteps?: number; // default 200,000
+  softConstraints?: SoftConstraint[]; // preferences, see soft-constraints.ts
 }
 ```
 
@@ -540,6 +645,12 @@ function solveSchedule(
 
 **Approach: most-constrained-variable backtracking.**
 
+0. **Qualification first.** Before any searching, every session's teachers are
+   checked with `checkAllTeachersQualified`. A session with an unqualified teacher
+   can never be placed whatever the room or time, so it is pulled out up front and
+   reported in `unplaced` with the specific reason ("Teacher t1 is not listed as
+   qualified for course c1."), rather than the generic "no slot found". It never
+   blocks the other sessions.
 1. **Sort sessions by how few valid candidates they have, hardest first.**
    For each session, candidates are precomputed once: every `(room,
 startTime)` pair where the room has sufficient capacity and required
@@ -550,8 +661,9 @@ startTime)` pair where the room has sufficient capacity and required
    blowup: a session with only one qualifying room and one available time
    slot must never be left until last, after everything else has already
    claimed it.
-2. **Try each candidate in order** for the current session; skip any that
-   conflicts with a placement already made this search — same room, same
+2. **Try each candidate** for the current session, best-scoring first when soft
+   constraints are supplied (see `soft-constraints.ts` below), in generated order
+   otherwise; skip any that conflicts with a placement already made this search — same room, same
    day, overlapping time; or same group; or a shared teacher, again on a
    shared day with overlapping time.
 3. **Recurse.** If every remaining session places successfully, done. If a
@@ -572,6 +684,63 @@ Overall status:
 - `PARTIAL` — some placed, some not
 - `INFEASIBLE` — nothing could be placed at all
 
+### `solver/soft-constraints.ts` — preferences
+
+Hard constraints (capacity, features, availability, qualification, no double-booking)
+decide whether a placement is *allowed*. **Soft constraints** decide which of the allowed
+placements is *better*, and **never make a solve fail**.
+
+```ts
+interface SoftConstraint {
+  name: string;
+  weight: number;                          // penalties are multiplied by this
+  penalty(ctx: CandidateContext): number;  // >= 0; 0 = fully satisfied
+}
+
+interface CandidateContext {
+  session: UnscheduledSession;
+  roomId: Id;
+  days: Weekday[];
+  startTime: string;
+  endTime: string;
+  placedSoFar: ReadonlyMap<string, PlacedSession>;   // only this branch of the search
+  sessionsById: ReadonlyMap<string, UnscheduledSession>;
+}
+
+function scoreCandidate(constraints: SoftConstraint[], ctx: CandidateContext): number;
+```
+
+Three constraint builders are provided:
+
+| Builder | Penalty |
+| --- | --- |
+| `teacherTimePreference(teacherId, earliest, latest, weight = 1)` | for a session that teacher teaches, the **minutes** by which the start falls outside `[earliest, latest]` (10 minutes early costs less than 3 hours early); 0 inside the window or for other teachers' sessions |
+| `preferredRoomForCourse(courseId, preferredRoomIds, weight = 1)` | for a session of that course, a flat `1` if the room is not in the list, else 0; 0 for other courses and for sessions with no `courseId` |
+| `spaceOutSameDaySessions(weight = 1, minGapMinutes = 30)` | for each already-placed session of the **same group** on a shared day, the shortfall in minutes below `minGapMinutes` between the two; an actual overlap is a hard conflict and is not penalized here |
+
+`spaceOutSameDaySessions` can only choose a *start time*. A session's days are fixed by its
+own rule, so it cannot move a class to another day.
+
+```ts
+const { result } = await service.planAutoSchedule(templateIds, grid, undefined, {
+  softConstraints: [
+    teacherTimePreference('t1', '10:00', '15:00', 2),
+    preferredRoomForCourse('physics', ['lab-a', 'lab-b']),
+    spaceOutSameDaySessions(),
+  ],
+});
+result.totalPenalty;   // how well the schedule it found satisfied them
+```
+
+**What this does and does not guarantee.** The solver commits to the *first* feasible
+assignment it finds; it does not compare complete schedules. Soft constraints work by
+**ordering**: each session's candidates are scored and sorted so the search *tries
+lower-penalty candidates first*, which tends to land on a good schedule but is a greedy
+heuristic, not an optimum. `totalPenalty` reports the score of the one schedule found, so you
+can see how it turned out or compare runs with different constraint sets. With no soft
+constraints supplied, behaviour is exactly the earlier first-feasible search and
+`totalPenalty` is `0`.
+
 ### `solver-adapter.ts` — bridging repository data and the solver
 
 ```ts
@@ -582,6 +751,8 @@ function flattenAvailabilityForSolver(
 ): { windows: ResourceAvailabilityWindow[]; skipped: AvailabilityRule[] };
 
 function roomToSolverRoom(room: Room): SolverRoom;
+
+const ALL_WEEKDAYS: Weekday[];   // ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
 
 interface SolvedTemplatePatch {
   templateId: Id;
@@ -615,18 +786,111 @@ design above.
 
 ---
 
-## `service.ts` — `SchedulingService`
-
-The class most host apps interact with directly. Constructed with a single
-`SchedulingRepository`:
+## `attendance.ts` — attendance validation
 
 ```ts
-const service = new SchedulingService(myRepository);
+type AttendanceMark = 'present' | 'absent' | 'excused' | 'late';
+interface AttendanceEntry { sessionId: Id; userId: Id; status: AttendanceMark; recordedAt: Date; recordedBy?: Id }
+
+/** What scheduling needs from an attendance store (a structural subset of reporting's). */
+interface AttendanceRecorder {
+  record(entry: AttendanceEntry): Promise<void>;
+  listForSession(sessionId: Id): Promise<AttendanceEntry[]>;
+}
+
+interface AttendanceValidationError {
+  reason: 'occurrence-not-found' | 'occurrence-cancelled';
+  message: string;
+}
+
+function validateAttendanceTarget(occurrence: ClassOccurrence | null): AttendanceValidationError | undefined;
 ```
+
+`validateAttendanceTarget` is pure: it takes the occurrence rather than fetching it. It refuses a
+missing occurrence and a **cancelled** one (a class that never happened must not be marked, or
+reporting's "classes held" counts would be wrong). A `scheduled`, `moved` or `completed` occurrence is
+valid. A host that really needs a note for a cancelled class should model it separately.
+
+With enforcement on, `recordAttendanceForOccurrence` stamps `recordedBy` with the actor, like
+`ReportingService.recordAttendance` does, so the two ways of recording attendance leave the same
+audit trail. Without enforcement it is not set.
+
+The shapes are defined here, structurally identical to the ones in the reporting module, so the
+two modules need not import each other and one repository implementation can serve both (see
+[REPORTING.md](./REPORTING.md)).
+
+---
+
+## `service.ts` — `SchedulingService`
+
+The class most host apps interact with directly. Constructed with a
+`SchedulingRepository`, and optionally an `AttendanceRecorder` and an `EventBus`:
+
+```ts
+const service = new SchedulingService(myRepository, attendanceRepo, bus);
+```
+
+Only the repository is required. Without a recorder, the attendance methods throw; without a bus,
+nothing is emitted. A fourth argument, `options`, turns on enforcement and supplies the settings
+repository:
+
+```ts
+new SchedulingService(repo, attendanceRepo, bus, {
+  enforcement: { policy, repos },   // repos: users, courses, enrollments (+ guardianLinks, delegations)
+  settings: repo,                   // a SchedulingSettingsRepository, only for the settings methods
+});
+```
+
+### Enforcement and organizations
+
+With `enforcement` set, every public method takes a trailing `actor?: { actorId }` that is
+**required**, and a missing one is refused before anything is read. The section a call is about
+always comes from the **stored** template (an occurrence's, a candidate's, a plan placement's),
+never from what the caller says; a missing template, occurrence, section or course is refused like
+a forbidden one.
+
+| Method | Action | Who |
+| --- | --- | --- |
+| `cancelOccurrence`, `rescheduleOccurrence` | `scheduling.manageOccurrence` | admins, and the **instructor of that section** (their class, their call); a TA only when delegated |
+| `checkConflicts`, `checkAll` | `scheduling.manageOccurrence` in the candidate's section | the same |
+| `checkAvailabilityForResources`, `checkRoomForOccurrence` | `scheduling.manageOccurrence`, organization-wide (no candidate to tie to a section) | admins and instructors of the organization |
+| `recordAttendanceForOccurrence`, `canRecordAttendance` | `scheduling.recordAttendance` | admins and the section's instructor; a TA when delegated. The student must be an **active student** of the section |
+| `materializeOccurrences`, `planAutoSchedule`, `applyAutoSchedulePlan` | `scheduling.manage` | admins only |
+| `listOccurrences` | `scheduling.view` | active members of the section, and a guardian whose link has the `schedule` scope, naming the ward |
+| `setAvailability` / `getAvailability` (a **teacher**) | `scheduling.manageSettings` | that instructor, or an admin |
+| `setAvailability` / `getAvailability` (a **room** or **group**) | `scheduling.manage` | admins only |
+| `setTeacherPreferences`, `getTeacherPreferences`, `getTeacherQualification` | `scheduling.manageSettings` | that instructor, or an admin |
+| `setTeacherQualification` | `scheduling.manageQualifications` | admins only: an instructor cannot qualify themselves |
+
+**Organizations.** What a call touches must belong to the actor's organization, with "no
+organization" matching only "no organization": rooms by `Room.orgId`, teachers by their account,
+groups and courses through the section's course. A resource that does not exist and one in another
+organization give the same `SchedulingTargetNotFoundError`, so nobody can use it to find out what
+another organization has. The permission check always comes first. Concretely:
+
+- `rescheduleOccurrence` refuses a `roomId` that is not the section's organization's.
+- The planning checks refuse teachers, rooms and groups of another organization **before reading
+  anyone's bookings**.
+- `planAutoSchedule` gives the solver **only the organization's own rooms**, however big another
+  organization's are, and refuses a template whose teachers or group are not the organization's.
+- `applyAutoSchedulePlan` treats the plan as **untrusted input**, since it is data the caller hands
+  over: every placement needs `scheduling.manage` in its template's section and a room of that
+  organization, with well-formed times and days (`InvalidSchedulingPlanError`), and all of them are
+  checked before the first write. A placement for a template that does not exist is refused instead
+  of being skipped. Even an empty plan needs an admin.
+
+**Oversight.** An instructor cancels or moves their own class without asking an admin, so both
+events carry who did it (`actorId`, `actorRole`, `sectionId`, plus `previousStatus` or `from`).
+Forward them to an audit log or tell the admins; see [EVENTS.md](./EVENTS.md). The SDK sends nothing
+to anyone itself.
+
+Without `enforcement` none of this applies: no actor, no permission checks, **no organization
+checks** (the service has no way to resolve a section's organization without the core repositories),
+and the events keep their old shape.
 
 ### Conflict & availability checking
 
-#### `checkConflicts(candidate, resources): Promise<ResourceConflict[]>`
+#### `checkConflicts(candidate, resources, actor?): Promise<ResourceConflict[]>`
 
 ```ts
 resources: {
@@ -692,7 +956,7 @@ for that call.
 
 ### Occurrence materialization & mutation
 
-#### `materializeOccurrences(templateId, rangeStart, rangeEnd): Promise<ClassOccurrence[]>`
+#### `materializeOccurrences(templateId, rangeStart, rangeEnd, actor?): Promise<ClassOccurrence[]>`
 
 Generates and persists occurrences for a template across a date range.
 **Idempotent** — it queries what's already materialized for that template
@@ -700,23 +964,40 @@ in that range first, and only creates occurrences for dates not already
 covered, so calling this repeatedly (the "keep a rolling window filled"
 pattern) is safe.
 
-#### `cancelOccurrence(id, note?): Promise<ClassOccurrence>`
+#### `cancelOccurrence(id, note?, actor?): Promise<ClassOccurrence>`
 
-Sets `status: 'cancelled'` on a single occurrence. Does not touch the
-template or any sibling occurrence.
+Sets `status: 'cancelled'` on a single occurrence and emits
+`scheduling.occurrenceCancelled` (carrying `note` only when one was given). Does not
+touch the template or any sibling occurrence.
 
-#### `rescheduleOccurrence(id, patch): Promise<ClassOccurrence>`
+#### `rescheduleOccurrence(id, patch, actor?): Promise<ClassOccurrence>`
 
 ```ts
 patch: { roomId?: Id; startTime?: string; endTime?: string; date?: Date }
 ```
 
-Applies overrides to a single occurrence and sets `status: 'moved'`,
-leaving the template's own rule untouched.
+Applies overrides to a single occurrence and sets `status: 'moved'`, leaving the
+template's own rule untouched, then emits `scheduling.occurrenceRescheduled` carrying the
+occurrence's values **after** the move (not the patch). `materializeOccurrences` emits
+nothing.
+
+### Attendance
+
+#### `recordAttendanceForOccurrence(occurrenceId, userId, status, actor?): Promise<void>`
+
+Looks up the occurrence, refuses it with `validateAttendanceTarget` (throws
+`recordAttendanceForOccurrence: <message>` for a missing or cancelled occurrence), and records
+`{ sessionId: occurrenceId, userId, status, recordedAt: now }` through the `AttendanceRecorder`.
+Throws if no recorder was given to the constructor.
+
+#### `canRecordAttendance(occurrenceId, actor?): Promise<AttendanceValidationError | undefined>`
+
+The same validation **without throwing**, for a UI that wants to show why a class cannot take
+attendance (a cancelled one greyed out) instead of catching an exception.
 
 ### Auto-scheduling
 
-#### `planAutoSchedule(templateIds, grid, durationOverrides?, solverOptions?): Promise<{ result: SolveResult; skippedAvailability: string[] }>`
+#### `planAutoSchedule(templateIds, grid, durationOverrides?, solverOptions?, actor?): Promise<{ result: SolveResult; skippedAvailability: string[] }>`
 
 ```ts
 grid: { candidateSlotsPerDay: string[]; days: Weekday[] }
@@ -742,7 +1023,15 @@ The end-to-end entry point for auto-scheduling:
    would be a surprising thing for a library to do, and a caller may well
    want to show the plan to a human before committing it.
 
-#### `applyAutoSchedulePlan(result): Promise<ClassSessionTemplate[]>`
+Details added since the steps above: step 3 also loads each teacher's
+`TeacherQualification` (when one is on file) and passes it to the solver, so an unqualified
+template comes back in `unplaced` with its reason; and `solverOptions` is where you pass
+`softConstraints` and `maxBacktrackSteps`. **If `options.settings` was given**, each teacher's saved
+preferences (`setTeacherPreferences`) are added as `teacherTimePreference` soft constraints with
+weight 1 for everyone, after yours, so no one outweighs anyone. With enforcement on, the plan stays
+inside the actor's organization (see above).
+
+#### `applyAutoSchedulePlan(result, actor?): Promise<ClassSessionTemplate[]>`
 
 Writes a `SolveResult`'s placements back onto their templates — sets
 `roomId`, `startTime`, `endTime`, and updates `rule.byDay` to the placed
@@ -752,45 +1041,108 @@ manual scheduling. Returns only the templates that were actually updated —
 applying an all-unplaced or empty `SolveResult` is a safe no-op that
 returns an empty array.
 
+### Reading the timetable
+
+#### `listOccurrences(sectionId, from, to, actor?, { wardId? }): Promise<ClassOccurrence[]>`
+
+A section's occurrences between two dates (inclusive), across all of its templates, oldest first,
+**cancelled ones included** (students need to know a class is off). With enforcement it is
+`scheduling.view` in the section: its active members, its staff, and a guardian whose link has the
+`schedule` scope and who names the ward. A dropped, waitlisted or completed student, a guardian
+without the scope or naming the wrong ward, and anyone from another section or organization are
+refused, and the section's templates are not even read for them. Without enforcement it returns
+everything.
+
+### Settings
+
+Settings are what the people running a timetable keep about themselves and their resources. They
+need `options.settings` (a `SchedulingSettingsRepository`), or they throw. With enforcement each
+checks permission first, then that the person or resource is in the actor's organization, then
+validates.
+
+| | Instructor, for themselves | Admin |
+| --- | --- | --- |
+| a teacher's **availability** (`setAvailability('teacher', id, rules)`) | yes | any teacher of the organization |
+| a teacher's **preferences** (`setTeacherPreferences`) | yes | yes |
+| reading a teacher's **qualification** | their own | any |
+| a room's or group's **availability** | no | yes |
+| a teacher's **qualification** (`setTeacherQualification`) | **no** | yes |
+
+- **Availability** is replaced as a whole (an empty list clears it). Each rule needs a weekly
+  recurrence with an interval of at least 1 and known days, `HH:MM` times with the end after the
+  start, a timezone, and a valid `validFrom` (with `validUntil`, if any, not before it), or
+  `InvalidSchedulingSettingsError` is thrown and the old rules are kept. Only those fields are
+  stored.
+- **Preferences** are `{ preferredStartWindow?: { earliest, latest } }` as `HH:MM` with the
+  earliest no later than the latest; `{}` clears them. They are **soft**: they steer the planner,
+  never make a plan fail.
+- **Qualifications** are course ids; duplicates are dropped, and with enforcement every course must
+  exist in the actor's organization. An **empty list means qualified for nothing**, while a teacher
+  with **no record** is not restricted.
+
 ---
 
 ## Test inventory
 
-Six test files, all under `test/`, all written for `bun:test`:
+Fifteen files under `test/`, all for `bun:test`:
 
-| File                                      | Lines | Covers                                                                                                                                                                                                                                                                          |
-| ----------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `scheduling.test.ts`                      | 91    | `conflict.ts` — overlap, back-to-back non-overlap, cancelled occurrences, cross-date isolation, `effectiveWindow`                                                                                                                                                               |
-| `scheduling-generator.test.ts`            | 152   | `generator.ts` — weekly/fortnightly expansion, `validFrom`/`validUntil` clamping                                                                                                                                                                                                |
-| `scheduling-availability.test.ts`         | 77    | `availability.ts` — no-rules default, in/out of hours, wrong weekday, `validFrom`/`validUntil` bounds, split shifts, fortnightly availability                                                                                                                                   |
-| `scheduling-room-matching.test.ts`        | 54    | `room-matching.ts` — capacity, features, combined violations, `findSuitableRooms` filtering                                                                                                                                                                                     |
-| `scheduling-solver.test.ts`               | 163   | `solveSchedule` — basic placement, infeasible-by-capacity, infeasible-by-feature, the multi-day-atomic-placement regression case, teacher-contention resolution across days, room double-booking avoidance, most-constrained-first ordering, `PARTIAL` results                  |
-| `scheduling-service-autoschedule.test.ts` | 139   | `SchedulingService.planAutoSchedule` + `applyAutoSchedulePlan` end to end against `InMemorySchedulingRepository` — single-template scheduling, multi-template teacher-sharing, room-feature requirements, repository-sourced availability rules, safe no-op on infeasible plans |
+| File | Covers |
+| --- | --- |
+| `scheduling.test.ts` | `conflict.ts`: overlap, back-to-back non-overlap, cancelled occurrences, cross-date isolation, `effectiveWindow` |
+| `scheduling-generator.test.ts` | `generator.ts`: weekly and fortnightly expansion, `validFrom`/`validUntil` clamping |
+| `scheduling-availability.test.ts` | `availability.ts`: no-rules default, in/out of hours, wrong weekday, date bounds, split shifts, fortnightly availability |
+| `scheduling-room-matching.test.ts` | `room-matching.ts`: capacity, features, combined violations, `findSuitableRooms` |
+| `scheduling-teacher-qualification.test.ts` | `checkTeacherQualified` and `checkAllTeachersQualified`: no `courseId`, no record on file, an empty list, multi-teacher |
+| `scheduling-solver.test.ts` | `solveSchedule`: basic placement, infeasible by capacity or feature, the multi-day-atomic regression, teacher contention, room double-booking avoidance, most-constrained-first ordering, `PARTIAL` results |
+| `scheduling-solver-qualifications.test.ts` | the solver with qualifications: unqualified sessions unplaced with a reason and never blocking others, all co-teachers required |
+| `scheduling-soft-constraints.test.ts` | the three constraint builders and `scoreCandidate`, each in isolation |
+| `scheduling-solver-soft-constraints.test.ts` | the solver with preferences: `totalPenalty`, preferred slots and rooms chosen, spacing, still feasible when preferences cannot all be met, hard constraints never overridden |
+| `scheduling-service-autoschedule.test.ts` | `planAutoSchedule` + `applyAutoSchedulePlan` end to end against `InMemorySchedulingRepository` |
+| `scheduling-service-qualifications.test.ts` | `planAutoSchedule` with qualifications on file |
+| `scheduling-service-events.test.ts` | the cancel and reschedule events, no event on materializing, a throwing listener, working with no bus |
+| `scheduling-permissions.test.ts` | enforcement end to end: who may cancel, move, plan, apply, record attendance, read the timetable and manage settings; the organization wall on rooms, teachers, groups and courses; a forged plan; the oversight on the events; saved preferences and qualifications reaching the planner; behaviour with enforcement off |
+| `scheduling-attendance.test.ts` | `validateAttendanceTarget` and the service's attendance methods |
+| `scheduling-calendar.test.ts` | the calendar sub-module; see [CALENDAR.md](./CALENDAR.md) |
 
-### A note on how this was verified
+### Verification
 
-The development environment used to build this module did not have the Bun
-runtime available (only `tsc` for typechecking). Every module was
-additionally verified **behaviorally** — not just typechecked — by
-compiling to plain JavaScript and exercising the exact scenarios described
-in the `bun:test` files (and additional stress tests) via a Node.js
-harness. Across the full history of this module's development, **52
-behavioral checks were run and passed** against the final combined build,
-including a 12-session/3-teacher/2-room/4-group stress test confirming zero
-real scheduling conflicts in the solver's output, and a targeted regression
-check for the multi-day placement bug described above. This doesn't replace
-running the actual `bun test` suite — do that as the first thing after
-extracting this project — but it means the logic itself has been exercised,
-not just type-checked.
+Three checks apply to this module, as to the rest of the SDK: `npx tsc --noEmit`, a strict typecheck
+of the tests, and `bun test`. They are listed in "Verifying a change" in the root `README.md`. The
+solver has a regression test for the multi-day placement bug described above.
 
 ## Known limitations / not yet implemented
 
-- **No soft-constraint optimization.** The solver only satisfies hard
-  constraints (capacity, features, availability, no double-booking). It
-  does not yet support preferences like "avoid morning classes for this
-  teacher," "spread a course's sessions across the week," or "prefer this
-  room for this course." All feasible solutions are treated equally; the
-  first one the backtracking search finds is returned.
+- **Soft constraints are a heuristic, not an optimizer.** The solver orders
+  candidates by penalty and commits to the first feasible assignment; it never
+  compares complete schedules, so the result is a *good* schedule, not the best
+  one. Only three constraint kinds exist (teacher time window, preferred room,
+  spacing), and "spread a course's sessions across the week" is not one of
+  them, because a session's days are fixed by its own rule.
+- **Qualification is not part of `checkAll`.** It is enforced by the solver
+  (and so by `planAutoSchedule`), but a manual placement checked with
+  `checkAll` is not tested for it.
+- **Organization checks need enforcement.** Without it the service cannot resolve a section's
+  organization, so a plan may use any room. Turn enforcement on in a multi-organization deployment.
+- **`rescheduleOccurrence` does not run the conflict, availability or room checks itself.** An
+  instructor can move their class onto a time when a room is taken or they are unavailable. Call
+  `checkAll` first, and use the `occurrenceRescheduled` event to see who moved what.
+- **A cancelled occurrence can be moved or cancelled again.** Cancelling twice emits a second
+  event, and moving a cancelled class marks it `moved`.
+- **The planning checks are organization-wide for staff.** An instructor can see when any teacher,
+  room or group of their organization is booked, not only their own section's, since arranging a
+  class needs that.
+- **Template creation stays with the host.** There is no service method to create or edit a
+  template, so no permission rule covers it.
+- **Only one preference kind is stored** (the teacher's preferred start window). Preferred rooms
+  and spacing can still be passed as `softConstraints`, but are not persisted. Preferences are
+  not part of `checkAll`.
+- **Replacing availability is not atomic**, and two instructors cannot clash over it (each
+  manages only their own), but an admin and an instructor editing the same teacher can.
+- **`applyAutoSchedulePlan` does not check that a plan is a good one**, only that it is allowed
+  and well-formed: a plan that double-books is applied if every placement is individually valid.
+- **Sections are loose references without enforcement.** `sectionId` and `courseId` on a
+  template are plain ids that scheduling does not resolve, so it cannot tell whether they exist.
+  With enforcement a template whose section or course is missing is refused like a forbidden one.
 - **No CP-SAT / external solver adapter.** By design (matches the project's
   zero-runtime-dependency stance), but noted as a natural extension point
   for institutions large enough to need a stronger solver than backtracking

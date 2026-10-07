@@ -5,7 +5,7 @@
  * starting point for a real (SQLite/Postgres/etc.) implementation.
  */
 import type { Id } from '../../../core/types.js';
-import type { SchedulingRepository } from '../repositories.js';
+import type { SchedulingRepository, SchedulingSettingsRepository } from '../repositories.js';
 import type {
   AvailabilityRule,
   ClassOccurrence,
@@ -13,6 +13,7 @@ import type {
   Room,
   SchedulingGroup,
   TeacherQualification,
+  TeacherSchedulingPreferences,
 } from '../types.js';
 
 let counter = 0;
@@ -21,17 +22,21 @@ function nextId(prefix: string): Id {
   return `${prefix}-${counter}`;
 }
 
-export class InMemorySchedulingRepository implements SchedulingRepository {
+export class InMemorySchedulingRepository implements SchedulingRepository, SchedulingSettingsRepository {
   private templates = new Map<Id, ClassSessionTemplate>();
   private occurrences = new Map<Id, ClassOccurrence>();
   private availability = new Map<Id, AvailabilityRule[]>();
   private rooms = new Map<Id, Room>();
   private groups = new Map<Id, SchedulingGroup>();
   private qualifications = new Map<Id, TeacherQualification>();
+  private preferences = new Map<Id, TeacherSchedulingPreferences>();
 
   // --- seeding helpers (test/dev only) ---
   seedTemplate(template: ClassSessionTemplate): void {
     this.templates.set(template.id, template);
+  }
+  seedOccurrence(occurrence: ClassOccurrence): void {
+    this.occurrences.set(occurrence.id, occurrence);
   }
   seedRoom(room: Room): void {
     this.rooms.set(room.id, room);
@@ -146,5 +151,29 @@ export class InMemorySchedulingRepository implements SchedulingRepository {
 
   async findTeacherQualification(teacherId: Id): Promise<TeacherQualification | null> {
     return this.qualifications.get(teacherId) ?? null;
+  }
+
+  async replaceAvailability(
+    resourceType: 'teacher' | 'room' | 'group',
+    resourceId: Id,
+    rules: Array<Omit<AvailabilityRule, 'id' | 'resourceId' | 'resourceType'>>,
+  ): Promise<AvailabilityRule[]> {
+    const stored = rules.map((r) => ({ ...r, id: nextId('avail'), resourceId, resourceType }));
+    this.availability.set(`${resourceType}:${resourceId}`, stored);
+    return stored;
+  }
+
+  async findTeacherPreferences(teacherId: Id): Promise<TeacherSchedulingPreferences | null> {
+    return this.preferences.get(teacherId) ?? null;
+  }
+
+  async saveTeacherPreferences(preferences: TeacherSchedulingPreferences): Promise<TeacherSchedulingPreferences> {
+    this.preferences.set(preferences.teacherId, preferences);
+    return preferences;
+  }
+
+  async saveTeacherQualification(qualification: TeacherQualification): Promise<TeacherQualification> {
+    this.qualifications.set(qualification.teacherId, qualification);
+    return qualification;
   }
 }

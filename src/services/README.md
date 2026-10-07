@@ -15,17 +15,19 @@ to a domain module's.
 
 ## What's here
 
-- **`communication/`** — announcements, discussion threads, and a
+- **`communication/`** ([docs](../../docs/COMMUNICATION.md)) — announcements, discussion threads, and a
   `NotificationSink` seam other modules' events can be routed through (the
   SDK never sends actual email/push/SMS itself).
-- **`reporting/`** — attendance recording (`AttendanceRecord.sessionId`
+- **`reporting/`** ([docs](../../docs/REPORTING.md)) — attendance recording and reading, now enforced (`AttendanceRecord.sessionId`
   is meant to reference a `scheduling.ClassOccurrence.id`, though nothing
   enforces that link at the type level — see `scheduling`'s
   `attendance.ts` for the validated integration point) and a generic
   `toCsv` export usable by anything implementing `Exportable`.
-- **`admin/`** — audit logging. `withAudit(...)` is a free function that
+- **`admin/`** ([docs](../../docs/ADMIN.md)) — audit logging. `withAudit(...)` is a free function that
   wraps any other service's mutation to append an audit entry, rather than
-  every domain service having to know how to log itself.
+  every domain service having to know how to log itself; `AdminService.audited` does the same
+  with the actor and organization taken from the stored account, and `history` reads it back
+  (admins, own organization only).
 
 ## How a `services/` module relates to `domains/`
 
