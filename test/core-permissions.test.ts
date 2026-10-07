@@ -831,3 +831,27 @@ describe('reporting actions', () => {
     expect(policy.can('reporting.view', guardian(['grades', 'schedule', 'announcements']))).toBe(false);
   });
 });
+
+describe('admin.viewAuditLog', () => {
+  const org = (id: string, roles: Role[], resourceOrgId = 'org-a'): PermissionContext => ({
+    actor: { id, roles, orgId: 'org-a' },
+    resourceOrgId,
+  });
+
+  it('is for admins of the organization only: never an instructor, a TA, a student, or an admin of another organization', () => {
+    expect(policy.can('admin.viewAuditLog', org('a', ['admin']))).toBe(true);
+    for (const role of ['instructor', 'ta', 'student'] as const) {
+      expect(policy.can('admin.viewAuditLog', org('x', [role])), role).toBe(false);
+      expect(policy.can('admin.viewAuditLog', { ...org('x', [role]), resourceOwnerId: 'x' }), role).toBe(false);
+    }
+    expect(policy.can('admin.viewAuditLog', org('a', ['admin'], 'org-b'))).toBe(false);
+    expect('delegable' in DEFAULT_RULES['admin.viewAuditLog']).toBe(false);
+  });
+
+  it('is not opened by a delegation, an instructor role in a section, or a guardian link', () => {
+    const delegated: PermissionContext = { ...org('t', ['ta']), section: { role: 'ta', delegated: ['admin.viewAuditLog'] as never } };
+    expect(policy.can('admin.viewAuditLog', delegated)).toBe(false);
+    const guardian: PermissionContext = { ...org('g', ['student']), resourceOwnerId: 'kid', guardian: { wardId: 'kid', scopes: ['grades', 'attendance', 'schedule', 'announcements'] } };
+    expect(policy.can('admin.viewAuditLog', guardian)).toBe(false);
+  });
+});

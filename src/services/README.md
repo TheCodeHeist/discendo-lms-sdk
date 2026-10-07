@@ -25,7 +25,9 @@ to a domain module's.
   `toCsv` export usable by anything implementing `Exportable`.
 - **`admin/`** ([docs](../../docs/ADMIN.md)) — audit logging. `withAudit(...)` is a free function that
   wraps any other service's mutation to append an audit entry, rather than
-  every domain service having to know how to log itself.
+  every domain service having to know how to log itself; `AdminService.audited` does the same
+  with the actor and organization taken from the stored account, and `history` reads it back
+  (admins, own organization only).
 
 ## How a `services/` module relates to `domains/`
 

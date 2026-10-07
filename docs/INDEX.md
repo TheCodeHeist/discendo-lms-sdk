@@ -47,18 +47,16 @@ tests that cover it.
 | scheduling: calendar | `discendo-sdk/scheduling/calendar` | [CALENDAR.md](./CALENDAR.md) | Availability windows (locked, open, closed) and iCal export of due dates |
 | **communication** | `discendo-sdk/communication` | [COMMUNICATION.md](./COMMUNICATION.md) | Announcements, thread replies, and the bridge from events to a notification sink |
 | **reporting** | `discendo-sdk/reporting` | [REPORTING.md](./REPORTING.md) | Attendance, completion percentage, CSV export |
-| **admin** | `discendo-sdk/admin` | [ADMIN.md](./ADMIN.md) | Audit logging with `withAudit` and `AdminService` |
+| **admin** | `discendo-sdk/admin` | [ADMIN.md](./ADMIN.md) | Audit logging: `withAudit`, and `AdminService` (`audited`, `history`, organization-aware) |
 | **interop** | `discendo-sdk/interop` | [INTEROP.md](./INTEROP.md) | Type-only seams for LTI, SSO and SCORM/xAPI import |
 
 ### What is built, and what enforces permissions
 
 | Module | Permission enforcement |
 | --- | --- |
-| enrollment, grading, assessment, content, communication, scheduling, reporting, delegation | **yes**: opt-in (delegation always) |
-| admin | not yet: the actions exist, the service does not check them |
+| enrollment, grading, assessment, content, communication, scheduling, reporting, admin, delegation | **yes**: opt-in (delegation always) |
 
-See [PERMISSIONS.md](./PERMISSIONS.md) for how to turn it on and what to do for the
-rest.
+See [PERMISSIONS.md](./PERMISSIONS.md) for how to turn it on.
 
 ## Design principles that hold across every module
 

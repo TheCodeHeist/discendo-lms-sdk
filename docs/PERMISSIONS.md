@@ -62,10 +62,10 @@ permitted: grading.record") deliberately says nothing about *why*.
 | [communication](./COMMUNICATION.md) | yes, `postAnnouncement`, `listAnnouncements`, `reply`, `getThread` | `new CommunicationService(announcements, threads, sink, { enforcement: { policy, repos } })` |
 | [scheduling](./SCHEDULING.md) | yes, every method of `SchedulingService` | `new SchedulingService(repo, recorder, bus, { enforcement: { policy, repos }, settings })` |
 | [reporting](./REPORTING.md) | yes, `recordAttendance`, `listAttendanceForSession`, `attendanceForStudent` (`computeCompletionPercent` and `toCsv` are pure) | `new ReportingService(attendance, { sessions, enforcement: { policy, repos } })` |
-| [admin](./ADMIN.md) | not yet | `admin.viewAuditLog` exists |
+| [admin](./ADMIN.md) | yes, `AdminService.history` and `audited` | `new AdminService(audit, { enforcement: { policy, repos } })` |
 
-For the modules that do not enforce yet, call the policy yourself at your API
-boundary (see "Using the policy directly").
+**Every module can now enforce.** Anything you build yourself, or an old route that bypasses these
+services, still needs the policy called at your API boundary (see "Using the policy directly").
 
 Every enforcing service follows the same discipline, so what you learn here
 transfers: authorization comes first, before anything about the target is looked up
@@ -318,7 +318,7 @@ declare `delegableActions` makes nothing delegable.
 
 ### Using the policy directly
 
-For the modules that do not enforce yet, or for your own routes:
+For your own routes, or anything that bypasses these services:
 
 ```ts
 import { authorize, activeSectionRole } from 'discendo-sdk/core';
@@ -359,14 +359,15 @@ This is the checklist the existing services follow, for anyone extending the SDK
 
 ## Known limitations
 
-- **Four modules do not enforce yet** (see the table above). The rules exist, the
-  wiring does not.
+- **Enforcement is opt-in everywhere except delegation**, so a service built without it has no
+  permission checks at all. In a deployment with real users, turn it on for every module.
 - **A completed student keeps only two actions**: their own grades and the published
   content. Announcements, threads and a student's own attempt counts are not included
   (see [COMMUNICATION.md](./COMMUNICATION.md), [ASSESSMENT.md](./ASSESSMENT.md)). Widening
   it means adding `afterCompletion` to another view rule and making its service opt in.
-- **Denials are not recorded.** A refusal throws; nothing is emitted or logged. Wrap
-  calls with [`withAudit`](./ADMIN.md) or catch `PermissionDeniedError` yourself.
+- **Denials are not recorded by default.** A refusal throws; nothing is emitted or logged. Wrap
+  calls with [`AdminService.audited(..., { recordDenials: true })`](./ADMIN.md) to write them to
+  the audit log, or catch `PermissionDeniedError` yourself.
 - **No department-scoped roles.** An admin is an admin of the whole organization.
 - **The actor id is trusted** (see the top of this page).
 

@@ -168,6 +168,10 @@ await withAudit(auditRepo, "grade.record", submissionId, actorId, () =>
 );
 ```
 
+With more than one organization, use `AdminService.audited` instead: it takes the actor and their
+organization from the stored account, so an admin only ever reads their own organization's trail
+(see [ADMIN.md](./ADMIN.md)).
+
 ---
 
 ## Worked example: scheduling end to end
