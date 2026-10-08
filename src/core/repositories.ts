@@ -57,6 +57,16 @@ export interface EnrollmentRepository {
    * seat can both succeed. With it, the service waitlists the person (or throws) on `null`.
    */
   createIfSeatFree?(enrollment: Omit<Enrollment, 'id'>, capacity: number): Promise<Enrollment | null>;
+  /**
+   * OPTIONAL, and strongly recommended whenever a section has a capacity: set the `waitlisted`
+   * enrollment `enrollmentId` to `active` **only if** it is still `waitlisted` AND the section has
+   * fewer than `capacity` active enrollments, as ONE atomic step, and return the updated enrollment,
+   * or `null` if nothing was changed (the section is full, or the enrollment is no longer
+   * waitlisted). Count the same enrollments `countActive` counts. Without it the service checks
+   * `countActive` and then calls `update`, so two simultaneous promotions into the last seat can
+   * both succeed.
+   */
+  promoteIfSeatFree?(enrollmentId: Id, capacity: number): Promise<Enrollment | null>;
 }
 
 export interface ContentRepository {

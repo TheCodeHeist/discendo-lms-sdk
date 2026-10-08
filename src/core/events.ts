@@ -42,6 +42,21 @@ export interface DroppedEvent {
   userId: string;
   sectionId: string;
 }
+/**
+ * A waitlisted person was given a seat. `trigger` says how: `'manual'` (someone called
+ * `promoteFromWaitlist`) or `'auto'` (the service's `promoteOnDrop` option, after a seat was freed).
+ * `actorId` is present only for a manual promotion made with permissions enforced; an automatic one
+ * names nobody, so a student who drops themselves is never tied to who moved up.
+ */
+export interface PromotedEvent {
+  type: 'enrollment.promoted';
+  enrollmentId: string;
+  userId: string;
+  sectionId: string;
+  previousStatus: 'waitlisted';
+  trigger: 'manual' | 'auto';
+  actorId?: string;
+}
 
 // --- grading events ---
 export interface GradePostedEvent {
@@ -111,6 +126,7 @@ export interface OccurrenceRescheduledEvent {
 export type LmsEvent =
   | EnrolledEvent
   | DroppedEvent
+  | PromotedEvent
   | GradePostedEvent
   | ContentPublishedEvent
   | SubmissionReceivedEvent

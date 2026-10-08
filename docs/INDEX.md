@@ -37,7 +37,7 @@ tests that cover it.
 | core: tenancy | `discendo-sdk/core` | [TENANCY.md](./TENANCY.md) | Organizations (the tenant wall) and optional departments |
 | core: permissions | `discendo-sdk/core` | [PERMISSIONS.md](./PERMISSIONS.md) | Roles, the default rule table, policies, and how services enforce them |
 | core: guardians | `discendo-sdk/core` | [GUARDIANS.md](./GUARDIANS.md) | Read-only access for a student's parent or guardian, through a link |
-| **enrollment** | `discendo-sdk/enrollment` | [ENROLLMENT.md](./ENROLLMENT.md) | Enrolling and dropping, waitlisting at capacity, bulk roster import |
+| **enrollment** | `discendo-sdk/enrollment` | [ENROLLMENT.md](./ENROLLMENT.md) | Enrolling and dropping, waitlisting and waitlist promotion, bulk roster import |
 | **delegation** | `discendo-sdk/delegation` | [DELEGATION.md](./DELEGATION.md) | Instructors handing selected permissions to their TAs, and taking them back |
 | **guardians** | `discendo-sdk/guardians` | [GUARDIANS.md](./GUARDIANS.md) | Admins creating, changing and revoking guardian links, and listing who to notify |
 | **content** | `discendo-sdk/content` | [CONTENT.md](./CONTENT.md) | The content tree, publishing and versioning, prerequisite gating |

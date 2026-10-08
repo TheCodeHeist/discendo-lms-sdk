@@ -113,6 +113,7 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | --- | --- | --- | --- |
 | `enrollment.enrolled` | `EnrollmentService` | a **new** enrollment record is created (single `enroll` and each successful row of `bulkEnroll`) | `enrollmentId`, `userId`, `sectionId`, `status` (`'active'` or `'waitlisted'`) |
 | `enrollment.dropped` | `EnrollmentService.drop` | an enrollment is dropped | `enrollmentId`, `userId`, `sectionId` |
+| `enrollment.promoted` | `EnrollmentService.promoteFromWaitlist`, and `drop` with `promoteOnDrop` | a waitlisted person is made active | `enrollmentId`, `userId`, `sectionId`, `previousStatus` (`'waitlisted'`), `trigger` (`'manual'` or `'auto'`), `actorId?` (only a manual promotion with permissions enforced) |
 | `grading.gradePosted` | `GradingService.recordGrade` | a grade is recorded, including a regrade that supersedes an earlier one | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId` |
 | `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version` |
 | `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber` |
@@ -150,8 +151,9 @@ These are known gaps, planned as one round after the features land, so that the
 event shapes are designed together:
 
 - attendance recorded
-- enrollment status changes other than enroll and drop (for example a waitlisted
-  student becoming active)
+- enrollment status changes other than enroll, drop and promotion (the first of the
+  planned status-change events, `enrollment.promoted`, was added early because automatic
+  promotion would otherwise be invisible to a host)
 - content unpublished
 - an `orgId` on events, so a listener can filter by tenant
 - a `contentId` on `grading.gradePosted`
@@ -191,8 +193,8 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Seven event types.** The gaps listed under "Not emitted yet" are real: attendance,
-  other enrollment status changes, unpublishing, delegation and guardian changes.
+- **Eight event types.** The gaps listed under "Not emitted yet" are real: attendance,
+  other enrollment status changes (completion, say), unpublishing, delegation and guardian changes.
 - **No tenant on events.** An event carries no `orgId`, so a listener serving several
   organizations has to look it up.
 - **No ordering between handlers and no priorities.** Handlers are started in
@@ -209,6 +211,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 | --- | --- |
 | `test/core-events.test.ts` | the bus: delivery, ordering (specific before wildcard), failure isolation, `onHandlerError`, unsubscribe, wildcard, `once` |
 | `test/enrollment-events.test.ts` | `enrollment.enrolled` (active and waitlisted), `enrollment.dropped`, working with no bus |
+| `test/enrollment-waitlist.test.ts` | `enrollment.promoted`: manual and automatic, its payload and actor |
 | `test/grading-events.test.ts` | `grading.gradePosted` |
 | `test/content-events.test.ts` | `content.published` |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |

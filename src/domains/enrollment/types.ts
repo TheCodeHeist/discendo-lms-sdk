@@ -19,6 +19,12 @@ export interface BulkEnrollOptions {
   allowDraft?: boolean;
 }
 
+/** What `promoteFromWaitlist` accepts. */
+export interface PromoteOptions {
+  /** Promote in a section that is still a `draft`, as `EnrollOptions.allowDraft`. Archived sections never promote. */
+  allowDraft?: boolean;
+}
+
 /** The section is not taking new enrollments: it is still a draft, or it has been archived. */
 export class SectionNotOpenError extends Error {
   constructor(

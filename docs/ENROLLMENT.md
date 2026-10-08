@@ -1,8 +1,8 @@
 # Enrollment
 
 `src/domains/enrollment/` — putting people into sections and taking them out:
-enrolling with a role, waitlisting at capacity, dropping, listing a roster, and
-importing a roster in bulk. Subpath: `discendo-sdk/enrollment`.
+enrolling with a role, waitlisting at capacity and promoting people off the waitlist,
+dropping, listing a roster, and importing a roster in bulk. Subpath: `discendo-sdk/enrollment`.
 
 Enrollment is also the module the permission system leans on most. A person's role
 *in a section* is whatever their `active` enrollment says, so who may do what
@@ -12,10 +12,10 @@ everywhere else begins here.
 
 | | |
 | --- | --- |
-| **You import** | `EnrollmentService` and the types `EnrollOptions`, `BatchEnrollRow`, `BatchReport` |
+| **You import** | `EnrollmentService` and the types `EnrollOptions`, `PromoteOptions`, `BatchEnrollRow`, `BatchReport` |
 | **You implement** | the `core` repositories: `users`, `courses`, `enrollments` (the others in `RepositoryContext` are unused here) |
-| **Emits events** | `enrollment.enrolled`, `enrollment.dropped` |
-| **Permission actions** | `enrollment.enroll`, `enrollment.bulkEnroll`, `enrollment.drop`, `enrollment.viewRoster`, `enrollment.grantRole.<role>` |
+| **Emits events** | `enrollment.enrolled`, `enrollment.dropped`, `enrollment.promoted` |
+| **Permission actions** | `enrollment.enroll`, `enrollment.bulkEnroll`, `enrollment.drop`, `enrollment.viewRoster`, `enrollment.promoteWaitlist`, `enrollment.grantRole.<role>` |
 | **Enforcement** | opt-in: `new EnrollmentService(repos, bus, { policy })` |
 
 ## Types (`types.ts`)
@@ -25,8 +25,15 @@ interface EnrollOptions {
   userId: string;
   sectionId: string;
   role: Role;
-  /** If the section is at capacity, waitlist instead of throwing. */
+  /** If the section is at capacity (or people are already waiting), waitlist instead of throwing. */
   waitlistIfFull?: boolean;
+  /** Let this enrollment go into a section that is still a `draft`. Archived sections never take one. */
+  allowDraft?: boolean;
+}
+
+interface PromoteOptions {
+  /** Promote in a section that is still a `draft`. Archived sections never promote. */
+  allowDraft?: boolean;
 }
 
 interface BatchEnrollRow {
@@ -46,14 +53,17 @@ interface BatchReport {
 
 ```
                   ┌──────────────► waitlisted ──┐
- (none) ── enroll ┤                              ├── drop ──► dropped
-                  └──────────────► active ───────┘
+ (none) ── enroll ┤        │                     ├── drop ──► dropped
+                  │        └── promote ──┐       │
+                  └──────────────► active ◄──────┘
                                        │
                                        └── (set by your code) ──► completed
 ```
 
-- A new enrollment is `active`, or `waitlisted` when the section is full and the
-  caller asked for waitlisting.
+- A new enrollment is `active`, or `waitlisted` when the section is full **or people are
+  already waiting** and the caller asked for waitlisting.
+- A waitlisted person becomes `active` through `promoteFromWaitlist` (or automatically
+  after a drop, if you turned on `promoteOnDrop`), longest-waiting first.
 - `drop` moves an active or waitlisted enrollment to `dropped` and sets `droppedAt`. Nothing is ever
   deleted. A `completed` enrollment **cannot** be dropped: it is history.
 - **A dropped person who is enrolled again gets a brand-new record.** The old one
@@ -67,8 +77,10 @@ interface BatchReport {
 ## `EnrollmentService`
 
 ```ts
-new EnrollmentService(repos: RepositoryContext, events?: EventBus, options?: { policy?: PermissionPolicy })
+new EnrollmentService(repos: RepositoryContext, events?: EventBus, options?: { policy?: PermissionPolicy; promoteOnDrop?: boolean })
 ```
+
+`promoteOnDrop` turns on automatic promotion (see `drop` below). It is off by default.
 
 Every method takes a trailing `actor?: { actorId }`. It is required when a `policy`
 is configured and ignored otherwise.
@@ -100,13 +112,19 @@ Enrolls `opts.userId` into `opts.sectionId` with `opts.role`.
    "wrong organization", and after the idempotent shortcut, so someone already enrolled still gets
    their enrollment back after the section closes. Someone who **dropped** and tries again after it
    closed is refused.
-6. **Capacity.** If the section has a `capacity` and it is full: with `waitlistIfFull` the new
-   enrollment is `waitlisted`, otherwise it throws `Section <id> is at capacity`. A section with no
-   `capacity` is unlimited. How "full" is decided depends on your repository:
+6. **Capacity and the queue.** If the section has a `capacity`, people who are already waiting
+   come first: **a newcomer never takes a free seat while anyone is on the waitlist.** With
+   `waitlistIfFull` the newcomer is `waitlisted`; otherwise the call throws `Section <id> is at
+   capacity or has a waitlist`. (The seat is for the person at the front: call
+   `promoteFromWaitlist`, or use `promoteOnDrop`.) With nobody waiting, the section is checked
+   as before: if it is full, `waitlistIfFull` waitlists the newcomer, and otherwise it throws
+   `Section <id> is at capacity`. A section with no `capacity` is unlimited. How "full" is
+   decided depends on your repository:
    - **With `createIfSeatFree`** (recommended): the service hands the repository an `active`
      enrollment and the capacity, and the repository checks and takes the seat as **one atomic
      step**, returning `null` if the section is full. Two people cannot both get the last seat. The
-     waitlisted enrollment is then made with the ordinary `create`.
+     waitlisted enrollment is then made with the ordinary `create`. It is not called while
+     somebody is waiting.
    - **Without it**: the service reads `countActive` and then calls `create`, which is **not
      atomic** (see the limitations).
 7. Creates the record (`enrolledAt` is now) and emits `enrollment.enrolled`.
@@ -135,6 +153,42 @@ like a forbidden one.
   about the enrollment's state.
 - Without enforcement an unknown id throws `Enrollment <id> not found` instead of reaching your
   repository.
+- **With `promoteOnDrop` on, dropping an `active` enrollment promotes the next person.** The
+  freed seat goes to the longest-waiting person, exactly as `promoteFromWaitlist` would, and
+  `enrollment.promoted` is emitted (with `trigger: 'auto'` and no `actorId`) after
+  `enrollment.dropped`. Dropping a waitlisted, completed or already dropped enrollment promotes
+  nobody. It runs under the drop's own permission (a student who drops themselves does not need
+  `enrollment.promoteWaitlist`, and `drop` still returns only their own record). It skips a
+  draft or archived section. **It never fails the drop:** if the promotion throws, the drop
+  stands and the error is swallowed; call `promoteFromWaitlist` to catch up.
+
+### `promoteFromWaitlist(sectionId, actor?, options?): Promise<Enrollment[]>`
+
+Gives free seats to waiting people and returns the enrollments it promoted, in order.
+
+1. **(Enforcement on)** authorizes `enrollment.promoteWaitlist` in the section (admin and
+   instructor; **not** delegable). This comes first, so a stranger cannot tell a missing section
+   from a closed one.
+2. Looks up the section; throws `Section <id> not found` if it does not exist. An `archived`
+   section throws `SectionNotOpenError`, and so does a `draft` one unless `options.allowDraft`.
+3. **Free seats** are `capacity - countActive`. With no `capacity` the whole waitlist is
+   promoted. With no free seat, or nobody waiting, it returns `[]` and writes nothing.
+4. **Order:** the longest-waiting first, by `enrolledAt`, with the enrollment id breaking ties.
+   The service sorts, so your repository's own order does not matter.
+5. Each promotion sets `status: 'active'` through `promoteIfSeatFree` (see below) or, without
+   it, a plain `update`, then emits `enrollment.promoted` with `trigger: 'manual'` (and
+   `actorId` when permissions are enforced).
+
+It is **idempotent**: calling it again promotes nobody. Call it after you raise a section's
+`capacity` (the SDK has no service for editing sections), or as a catch-up after a failed
+`promoteOnDrop`. Every role on the waitlist counts the same: seats are counted by `countActive`,
+for staff and students alike.
+
+```ts
+await courses.setCapacity('sec-1', 40);                       // your own code
+const moved = await service.promoteFromWaitlist('sec-1', { actorId: teacher.id });
+moved.map((e) => e.userId);                                    // longest-waiting first
+```
 
 ### `listRoster(sectionId, status?, actor?): Promise<Enrollment[]>`
 
@@ -172,10 +226,12 @@ report.failed;           // [{ row: { userExternalRef: 'x42', role: 'student' },
 | `enroll` | `enrollment.enroll` and `enrollment.grantRole.<role>` | the section; the person being enrolled is the owner |
 | `drop` | `enrollment.drop` | the enrollment's section; its person is the owner (so a student may drop themselves) |
 | `listRoster` | `enrollment.viewRoster` | the section |
+| `promoteFromWaitlist` | `enrollment.promoteWaitlist` | the section |
 | `bulkEnroll` | `enrollment.bulkEnroll`, then `enrollment.grantRole.<role>` per row | the section |
 
 Under the default rules `enrollment.enroll` and `enrollment.grantRole.student` can be
-**delegated** to a TA, who can then enroll students and nothing more. See
+**delegated** to a TA, who can then enroll students and nothing more. `enrollment.promoteWaitlist`
+cannot be delegated. See
 [DELEGATION.md](./DELEGATION.md) and [PERMISSIONS.md](./PERMISSIONS.md).
 
 ## Events
@@ -184,6 +240,7 @@ Under the default rules `enrollment.enroll` and `enrollment.grantRole.student` c
 | --- | --- |
 | `enrollment.enrolled` | a new record is created, with `status` `'active'` or `'waitlisted'` (each successful `bulkEnroll` row too) |
 | `enrollment.dropped` | `drop` succeeds |
+| `enrollment.promoted` | a waitlisted person is made `active`: `trigger` is `'manual'` (`promoteFromWaitlist`, with `actorId` when permissions are enforced) or `'auto'` (`promoteOnDrop`, no actor) |
 
 No event for the idempotent shortcut, for a refused call, or for a cross-tenant
 rejection. See [EVENTS.md](./EVENTS.md).
@@ -199,14 +256,34 @@ rejection. See [EVENTS.md](./EVENTS.md).
   `INSERT ... WHERE (SELECT count(*) ... ) < capacity`), counting the same enrollments
   `countActive` counts, and return `null` when the section is full. Existing hosts that do not
   provide it keep working as before.
+- **`promoteIfSeatFree?(enrollmentId, capacity): Promise<Enrollment | null>`** is optional. Implement
+  it as one atomic step: set the enrollment to `active` only if it is **still `waitlisted`** and the
+  section has fewer than `capacity` active enrollments (counting what `countActive` counts), and
+  return the updated record, or `null` if nothing changed (the section is full, or someone else just
+  promoted that person). The service then moves on to the next person in line. Hosts without it keep
+  working, with the race noted below. It is not used for a section with no `capacity`.
+- `listBySection(sectionId, status?)` **must honor `status`**: the service lists only `waitlisted`
+  enrollments to promote and to decide whether a newcomer must queue.
 - `update(id, patch)` returns the updated record; `create` returns the stored one with
   its `id`.
 - `UserRepository.findByExternalRef(ref, orgId?)` stays within `orgId` when given.
 
 ## Known limitations
 
-- **No waitlist promotion.** Dropping an active student does not move anyone off the
-  waitlist; your code must do that (list with `status: 'waitlisted'`, then update).
+- **Promotion is not automatic unless you turn on `promoteOnDrop`,** and then it only reacts to
+  a drop. Freeing a seat any other way (raising `capacity`, changing an enrollment's status
+  yourself) needs a call to `promoteFromWaitlist`.
+- **A failed automatic promotion is silent.** `promoteOnDrop` swallows its errors so a drop never
+  fails; the waiting person stays waitlisted until the next `promoteFromWaitlist`. A
+  `deliveryFailed` event is planned for the events round.
+- **Without `promoteIfSeatFree`, promotion is not atomic.** It reads `countActive`, lists the
+  waitlist and then updates, so two simultaneous promotions into the last seat can both succeed. (A
+  test pins this: without it, two simultaneous promotions overfill a section by one.)
+- **Seats are counted for every role, and the waitlist is not split by role.** A TA or an instructor
+  added while the section is full, or while students are waiting, is waitlisted like anyone else, and
+  is promoted in the same order.
+- **A newcomer cannot jump the queue, but the queue is only read, not locked.** Someone who joins the
+  waitlist at the same instant a newcomer is checking can still be overtaken.
 - **Without `createIfSeatFree`, the capacity check is not atomic.** It reads `countActive` and
   then creates, so two simultaneous enrollments into the last seat can both succeed. Provide
   `createIfSeatFree` if seats are strict. (A test pins this: without it, two simultaneous
@@ -220,7 +297,7 @@ rejection. See [EVENTS.md](./EVENTS.md).
   enrollments as they are; only *new* enrollments are refused.
 - **Re-enrolling after a drop is refused once the section has closed**, even for someone who had
   a place before.
-- **No events for status changes** other than enroll and drop.
+- **No events for status changes** other than enroll, drop and promotion.
 
 ## Tests
 
@@ -231,4 +308,5 @@ rejection. See [EVENTS.md](./EVENTS.md).
 | `test/atomic-repositories.test.ts` | capacity races with and without `createIfSeatFree`: one last seat taken once, ten people into three seats, bulk import, and unchanged behaviour without it |
 | `test/enrollment-lifecycle.test.ts` | `drop` (idempotent, completed enrollments refused, unknown ids, with and without enforcement) and the section-status checks on `enroll` and `bulkEnroll` (draft, archived, `allowDraft`, ordering against the tenant check and the idempotent shortcut) |
 | `test/enrollment-events.test.ts` | the two events, with and without a bus |
+| `test/enrollment-waitlist.test.ts` | `promoteFromWaitlist` (order, free seats, raised capacity, idempotence, section status, races with and without `promoteIfSeatFree`, permissions and their ordering, the `enrollment.promoted` event), `promoteOnDrop`, and newcomers waiting behind the waitlist |
 | `test/delegation.test.ts` | a TA with delegated rights enrolling students through this service |

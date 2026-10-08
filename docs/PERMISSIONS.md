@@ -101,6 +101,7 @@ policy.
 | `enrollment.bulkEnroll` | admin | — | — | — |
 | `enrollment.drop` | admin, instructor | student | — | — |
 | `enrollment.viewRoster` | admin, instructor, ta | — | — | — |
+| `enrollment.promoteWaitlist` | admin, instructor | — | — | — |
 | `enrollment.grantRole.admin` | admin | — | — | — |
 | `enrollment.grantRole.instructor` | admin | — | — | — |
 | `enrollment.grantRole.ta` | admin, instructor | — | — | — |
@@ -175,7 +176,7 @@ build with `overrides` is free to break the nesting; the default table never doe
 | Role | By role | On their own resource |
 | --- | --- | --- |
 | **admin** | everything below, plus bulk enrollment, granting the admin and instructor roles, managing schedules, reading the audit log | — |
-| **instructor** | enrolling and dropping, granting `ta` and `student`, managing content, posting announcements, grading, viewing rosters, attempts, attendance, and delegating to TAs | — |
+| **instructor** | enrolling and dropping, promoting people off the waitlist, granting `ta` and `student`, managing content, posting announcements, grading, viewing rosters, attempts, attendance, and delegating to TAs | — |
 | **ta** | viewing rosters, grading, viewing attempts, attendance, content, schedules and the discussion; plus whatever an instructor has delegated | viewing their own delegations |
 | **student** | viewing content and schedules, taking part in discussion | dropping, submitting, starting attempts, viewing attempts, grades and attendance |
 

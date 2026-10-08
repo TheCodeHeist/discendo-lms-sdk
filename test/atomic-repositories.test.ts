@@ -38,7 +38,7 @@ function enrollmentWorld(opts: { atomic: boolean }) {
     findById: async (id) => rows.find((r) => r.id === id) ?? null,
     update: async (id, patch) => ({ ...rows.find((r) => r.id === id)!, ...patch }),
     findByUserAndSection: async (userId, sectionId) => [...rows].reverse().find((r) => r.userId === userId && r.sectionId === sectionId) ?? null,
-    listBySection: async (sectionId) => rows.filter((r) => r.sectionId === sectionId),
+    listBySection: async (sectionId, status) => rows.filter((r) => r.sectionId === sectionId && (!status || r.status === status)),
     countActive: async (sectionId) => {
       const n = rows.filter((r) => r.sectionId === sectionId && r.status === 'active').length;
       await tick(); // the gap in which another enrollment can slip in
