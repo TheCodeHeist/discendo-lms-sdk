@@ -61,7 +61,7 @@ Enrolling someone needs **both** `enrollment.enroll` *and* the grant for the rol
 being given, so a TA given both of the last two can enroll **students** and nothing
 else. They cannot enroll a TA, an instructor or an admin, and they cannot bulk
 enroll, drop anyone, or delegate onwards. Everything not on this list, such as
-`enrollment.bulkEnroll`, `enrollment.promoteWaitlist`, `scheduling.manage`, the scheduling settings and the delegation actions themselves,
+`enrollment.bulkEnroll`, `enrollment.promoteWaitlist`, `enrollment.reviewRequest`, `scheduling.manage`, the scheduling settings and the delegation actions themselves,
 can never be delegated.
 
 **Permissions never grow downwards.** An instructor can only hand over an action

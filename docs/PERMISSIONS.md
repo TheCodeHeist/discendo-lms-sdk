@@ -102,6 +102,7 @@ policy.
 | `enrollment.drop` | admin, instructor | student | — | — |
 | `enrollment.viewRoster` | admin, instructor, ta | — | — | — |
 | `enrollment.promoteWaitlist` | admin, instructor | — | — | — |
+| `enrollment.reviewRequest` | admin | — | — | — |
 | `enrollment.grantRole.admin` | admin | — | — | — |
 | `enrollment.grantRole.instructor` | admin | — | — | — |
 | `enrollment.grantRole.ta` | admin, instructor | — | — | — |

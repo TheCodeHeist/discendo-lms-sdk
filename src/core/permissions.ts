@@ -61,6 +61,9 @@ export const DEFAULT_RULES = {
   'enrollment.viewRoster': { roles: ['admin', 'instructor', 'ta'] },
   // Moves waitlisted people into free seats. Not delegable: who gets a seat is the instructor's call.
   'enrollment.promoteWaitlist': { roles: ['admin', 'instructor'] },
+  // Reviews students' own requests for a seat (list, accept, modify, reject). Admin only by default,
+  // and not delegable. A host that wants section instructors to review overrides this rule.
+  'enrollment.reviewRequest': { roles: ['admin'] },
   // Enrolling someone with a role ALSO requires the matching grantRole action,
   // so nobody can hand out a role beyond what they are allowed to grant.
   'enrollment.grantRole.admin': { roles: ['admin'] },

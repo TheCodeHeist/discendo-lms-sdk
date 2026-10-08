@@ -2,7 +2,8 @@
 
 `src/domains/enrollment/` — putting people into sections and taking them out:
 enrolling with a role, waitlisting at capacity and promoting people off the waitlist,
-dropping, listing a roster, and importing a roster in bulk. Subpath: `discendo-sdk/enrollment`.
+dropping, listing a roster, importing a roster in bulk, and students asking for a seat
+that an administrator then accepts, modifies or rejects. Subpath: `discendo-sdk/enrollment`.
 
 Enrollment is also the module the permission system leans on most. A person's role
 *in a section* is whatever their `active` enrollment says, so who may do what
@@ -12,11 +13,11 @@ everywhere else begins here.
 
 | | |
 | --- | --- |
-| **You import** | `EnrollmentService` and the types `EnrollOptions`, `PromoteOptions`, `BatchEnrollRow`, `BatchReport` |
-| **You implement** | the `core` repositories: `users`, `courses`, `enrollments` (the others in `RepositoryContext` are unused here) |
-| **Emits events** | `enrollment.enrolled`, `enrollment.dropped`, `enrollment.promoted` |
-| **Permission actions** | `enrollment.enroll`, `enrollment.bulkEnroll`, `enrollment.drop`, `enrollment.viewRoster`, `enrollment.promoteWaitlist`, `enrollment.grantRole.<role>` |
-| **Enforcement** | opt-in: `new EnrollmentService(repos, bus, { policy })` |
+| **You import** | `EnrollmentService`, `EnrollmentRequestService`, the errors `AlreadyEnrolledError`, `RequestNotPendingError`, `InvalidRequestModificationError`, `SectionNotOpenError`, and the types `EnrollOptions`, `PromoteOptions`, `RequestOptions`, `ReviewOptions`, `RejectOptions`, `BatchEnrollRow`, `BatchReport` |
+| **You implement** | the `core` repositories: `users`, `courses`, `enrollments`, and `enrollmentRequests` if you use requests (the others in `RepositoryContext` are unused here) |
+| **Emits events** | `enrollment.enrolled`, `enrollment.dropped`, `enrollment.promoted`, `enrollment.requested`, `enrollment.requestDecided` |
+| **Permission actions** | `enrollment.enroll`, `enrollment.bulkEnroll`, `enrollment.drop`, `enrollment.viewRoster`, `enrollment.promoteWaitlist`, `enrollment.reviewRequest`, `enrollment.grantRole.<role>` |
+| **Enforcement** | `EnrollmentService`: opt-in, `new EnrollmentService(repos, bus, { policy })`. `EnrollmentRequestService`: always on, a policy is required |
 
 ## Types (`types.ts`)
 
@@ -219,6 +220,80 @@ report.succeeded;        // 118
 report.failed;           // [{ row: { userExternalRef: 'x42', role: 'student' }, reason: 'user not found' }, ...]
 ```
 
+## `EnrollmentRequestService`
+
+A student asks for a seat; an administrator **accepts** it, **modifies** it (accepts the student into
+another section of the same course) or **rejects** it. The student's own methods are about identity,
+not roles, and the reviewer's methods are the `enrollment.reviewRequest` action.
+
+```ts
+new EnrollmentRequestService(
+  repos,        // authorization repositories + enrollmentRequests
+  enrollment,   // an EnrollmentService: accepting goes through its enroll()
+  bus?,
+  { policy },   // required: every method needs an { actorId }
+)
+```
+
+```ts
+interface EnrollmentRequest {
+  id; userId; sectionId;                 // the section asked for
+  status: 'pending' | 'accepted' | 'rejected' | 'withdrawn';
+  requestedAt; note?;                    // the student's words
+  reviewedAt?; reviewerId?; reviewNote?; // set when accepted or rejected
+  enrollmentId?;                         // set when accepted (the enrollment may be waitlisted)
+  grantedSectionId?;                     // set when accepted: sectionId, or the one a modify chose
+}
+```
+
+Requests are never deleted: a decided one stays as the record of who decided what.
+
+### The student's methods
+
+- **`request(sectionId, actor, { note? })`** asks for a seat, for the actor themself and always as a
+  `student`; nobody can request a TA or instructor seat, and nobody can ask on someone else's behalf.
+  It is not a permission action (a student has no role in a section they are not in yet), so the rules
+  are these, in order: the actor must be a known user with the `student` role, and the section must
+  exist, belong to the actor's organization, and not be a `draft`. **A missing section, another
+  organization's section and a draft are all the same `PermissionDeniedError`**, so none can be probed.
+  An `archived` section throws `SectionNotOpenError`. Someone who already holds an `active`,
+  `waitlisted` or `completed` place gets `AlreadyEnrolledError` (a dropped one may ask again). Asking
+  again while a request is pending returns that request, unchanged, with no new record and no event.
+  After a rejection or a withdrawal a new request can be made. Emits `enrollment.requested`.
+- **`withdraw(requestId, actor)`** takes back your own pending request; withdrawing twice changes
+  nothing. Someone else's request and one that does not exist are the same refusal. A request that was
+  accepted or rejected throws `RequestNotPendingError`. Emits `enrollment.requestDecided` (`withdrawn`).
+- **`listMine(actor)`** returns your own requests, in every status.
+
+### The reviewer's methods
+
+Each needs `enrollment.reviewRequest` in the request's section (admin only by default, not delegable;
+override the rule to let a section's instructors review). An unknown request is refused exactly like a
+forbidden one.
+
+- **`listRequests(sectionId, status?, actor)`** lists a section's requests. There is no organization-wide
+  list: a host that wants one loops over its own sections.
+- **`accept(requestId, actor, { note?, waitlistIfFull?, allowDraft? })`** enrolls the student as an
+  `active` student through `EnrollmentService.enroll`, so capacity, the waitlist queue, tenancy and the
+  section's status apply as for any enrollment. A full section, or one with people waiting, **waitlists**
+  the student by default (`waitlistIfFull: false` fails instead). The decision is recorded only after
+  the enrollment succeeds, so a failure leaves the request pending for the reviewer to retry or reject.
+  If the student got an enrollment some other way meanwhile, that one is reused.
+- **`modify(requestId, sectionId, actor, options)`** is `accept` into a **different section of the same
+  course**. The reviewer needs the permission in both sections. The same section, another course's
+  section and a missing one are refused (`InvalidRequestModificationError`, or the usual permission
+  refusal); the request keeps `sectionId` as asked and records `grantedSectionId`.
+- **`reject(requestId, actor, { note? })`** records the refusal; nobody is enrolled.
+
+Deciding twice the same way changes nothing and emits nothing; deciding the other way throws
+`RequestNotPendingError`. Accept, modify and reject emit `enrollment.requestDecided`.
+
+```ts
+const asked = await requests.request('sec-1', { actorId: student.id }, { note: 'I need this for my degree' });
+const pending = await requests.listRequests('sec-1', 'pending', { actorId: admin.id });
+await requests.modify(asked.id, 'sec-2', { actorId: admin.id }, { note: 'Moved to the evening class' });
+```
+
 ## Permissions at a glance
 
 | Method | Action | Checked against |
@@ -228,10 +303,13 @@ report.failed;           // [{ row: { userExternalRef: 'x42', role: 'student' },
 | `listRoster` | `enrollment.viewRoster` | the section |
 | `promoteFromWaitlist` | `enrollment.promoteWaitlist` | the section |
 | `bulkEnroll` | `enrollment.bulkEnroll`, then `enrollment.grantRole.<role>` per row | the section |
+| `EnrollmentRequestService.listRequests`, `accept`, `reject` | `enrollment.reviewRequest` | the request's section |
+| `EnrollmentRequestService.modify` | `enrollment.reviewRequest` | the request's section AND the section granted |
+| `EnrollmentRequestService.request`, `withdraw`, `listMine` | none: always the actor's own, as a `student` | — |
 
 Under the default rules `enrollment.enroll` and `enrollment.grantRole.student` can be
-**delegated** to a TA, who can then enroll students and nothing more. `enrollment.promoteWaitlist`
-cannot be delegated. See
+**delegated** to a TA, who can then enroll students and nothing more. `enrollment.promoteWaitlist` and
+`enrollment.reviewRequest` cannot be delegated. See
 [DELEGATION.md](./DELEGATION.md) and [PERMISSIONS.md](./PERMISSIONS.md).
 
 ## Events
@@ -240,6 +318,8 @@ cannot be delegated. See
 | --- | --- |
 | `enrollment.enrolled` | a new record is created, with `status` `'active'` or `'waitlisted'` (each successful `bulkEnroll` row too) |
 | `enrollment.dropped` | `drop` succeeds |
+| `enrollment.requested` | `request` creates a request (not for an idempotent repeat) |
+| `enrollment.requestDecided` | a request is accepted, modified (reported as `accepted`), rejected or withdrawn, once per decision. `accepted` carries `reviewerId`, `enrollmentId`, `enrollmentStatus` and `grantedSectionId`; `rejected` carries `reviewerId`; `withdrawn` carries neither |
 | `enrollment.promoted` | a waitlisted person is made `active`: `trigger` is `'manual'` (`promoteFromWaitlist`, with `actorId` when permissions are enforced) or `'auto'` (`promoteOnDrop`, no actor) |
 
 No event for the idempotent shortcut, for a refused call, or for a cross-tenant
@@ -262,6 +342,11 @@ rejection. See [EVENTS.md](./EVENTS.md).
   return the updated record, or `null` if nothing changed (the section is full, or someone else just
   promoted that person). The service then moves on to the next person in line. Hosts without it keep
   working, with the race noted below. It is not used for a section with no `capacity`.
+- **`EnrollmentRequestRepository`** (optional on `RepositoryContext`; needed for requests): `create`,
+  `findById`, `update`, `findPending(userId, sectionId)`, `listBySection(sectionId, status?)`,
+  `listByUser(userId)`, and optionally **`decideIfPending(id, patch)`**: apply the decision only if the
+  request is still `pending`, as one atomic step, returning the updated request or `null`. Add a
+  uniqueness rule for one pending request per person and section if your store can enforce it.
 - `listBySection(sectionId, status?)` **must honor `status`**: the service lists only `waitlisted`
   enrollments to promote and to decide whether a newcomer must queue.
 - `update(id, patch)` returns the updated record; `create` returns the stored one with
@@ -270,6 +355,19 @@ rejection. See [EVENTS.md](./EVENTS.md).
 
 ## Known limitations
 
+- **A request does not reserve anything.** Until it is accepted the student has no place and no seat,
+  and many students may ask for the last seat; the reviewer decides in whatever order they like.
+- **Without `decideIfPending`, two reviewers can both decide** the same request: the student is enrolled
+  once, but two decisions are recorded and announced. A test pins this.
+- **An accept that loses a race to a reject can leave the student enrolled.** Accepting enrolls first and
+  records second, so if another reviewer rejected the request in between, the accept fails with
+  `RequestNotPendingError` but the enrollment it made remains. An administrator can drop it.
+- **Duplicate pending requests are only prevented by a read.** Two simultaneous `request` calls from the
+  same student can both create one unless your store enforces uniqueness.
+- **No expiry, limits or reminders.** A pending request waits forever, and a student can have as many
+  pending requests as there are sections.
+- **Requests carry no role.** Self-enrollment is always as a `student`; staff are enrolled with
+  `EnrollmentService`.
 - **Promotion is not automatic unless you turn on `promoteOnDrop`,** and then it only reacts to
   a drop. Freeing a seat any other way (raising `capacity`, changing an enrollment's status
   yourself) needs a call to `promoteFromWaitlist`.
@@ -308,5 +406,6 @@ rejection. See [EVENTS.md](./EVENTS.md).
 | `test/atomic-repositories.test.ts` | capacity races with and without `createIfSeatFree`: one last seat taken once, ten people into three seats, bulk import, and unchanged behaviour without it |
 | `test/enrollment-lifecycle.test.ts` | `drop` (idempotent, completed enrollments refused, unknown ids, with and without enforcement) and the section-status checks on `enroll` and `bulkEnroll` (draft, archived, `allowDraft`, ordering against the tenant check and the idempotent shortcut) |
 | `test/enrollment-events.test.ts` | the two events, with and without a bus |
+| `test/enrollment-requests.test.ts` | `EnrollmentRequestService`: asking (identity, tenancy, probing, duplicates, re-asking), withdrawing, listing, accepting (waitlist, queue, idempotence, closed sections, races with and without `decideIfPending`), modifying, rejecting, permissions and the `enrollment.reviewRequest` rule |
 | `test/enrollment-waitlist.test.ts` | `promoteFromWaitlist` (order, free seats, raised capacity, idempotence, section status, races with and without `promoteIfSeatFree`, permissions and their ordering, the `enrollment.promoted` event), `promoteOnDrop`, and newcomers waiting behind the waitlist |
 | `test/delegation.test.ts` | a TA with delegated rights enrolling students through this service |

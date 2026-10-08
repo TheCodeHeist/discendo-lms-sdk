@@ -9,6 +9,8 @@ import type {
   Course,
   CourseSection,
   Enrollment,
+  EnrollmentRequest,
+  EnrollmentRequestStatus,
   ContentNode,
   AcademicTerm,
   Organization,
@@ -91,6 +93,22 @@ export interface DepartmentRepository {
   listByOrg(orgId: Id | undefined): Promise<Department[]>;
 }
 
+export interface EnrollmentRequestRepository {
+  create(request: Omit<EnrollmentRequest, 'id'>): Promise<EnrollmentRequest>;
+  findById(id: Id): Promise<EnrollmentRequest | null>;
+  update(id: Id, patch: Partial<Omit<EnrollmentRequest, 'id'>>): Promise<EnrollmentRequest>;
+  /** This person's `pending` request for this section, or null. There should never be two. */
+  findPending(userId: Id, sectionId: Id): Promise<EnrollmentRequest | null>;
+  listBySection(sectionId: Id, status?: EnrollmentRequestStatus): Promise<EnrollmentRequest[]>;
+  listByUser(userId: Id): Promise<EnrollmentRequest[]>;
+  /**
+   * OPTIONAL, and recommended: apply `patch` (the decision) **only if** the request is still
+   * `pending`, as one atomic step, and return the updated request, or `null` if it was no longer
+   * pending. Without it two reviewers deciding at the same moment can both record a decision.
+   */
+  decideIfPending?(id: Id, patch: Partial<Omit<EnrollmentRequest, 'id'>>): Promise<EnrollmentRequest | null>;
+}
+
 export interface DelegationRepository {
   create(grant: Omit<TaGrant, 'id'>): Promise<TaGrant>;
   findById(id: Id): Promise<TaGrant | null>;
@@ -136,6 +154,8 @@ export interface RepositoryContext {
   organizations?: OrganizationRepository;
   /** Only needed by hosts that group courses into departments. Nothing in the SDK requires it. */
   departments?: DepartmentRepository;
+  /** Only needed by hosts that let students request enrollment (`EnrollmentRequestService`). */
+  enrollmentRequests?: EnrollmentRequestRepository;
   /** Only needed by hosts whose instructors delegate actions to TAs. Without it a TA only has the TA defaults. */
   delegations?: DelegationRepository;
   /** Only needed by hosts with guardians. Without it a guardian can read nothing. */

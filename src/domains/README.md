@@ -12,7 +12,7 @@ summarizes what domain modules already produced, it belongs in
 ## What's here
 
 - **`enrollment/`** ([docs](../../docs/ENROLLMENT.md)) — the join entity between a user and a course section:
-  enrolling, dropping, waitlisting and promotion, bulk roster import.
+  enrolling, dropping, waitlisting and promotion, student enrollment requests, bulk roster import.
 - **`content/`** ([docs](../../docs/CONTENT.md)) — the content tree (pages, assignments, quizzes, files)
   a course section is built from: publishing, versioning, prerequisite
   gating.

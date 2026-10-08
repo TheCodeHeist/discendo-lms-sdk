@@ -24,7 +24,7 @@ that live in `core` have their own pages:
 
 | File | What it holds |
 | --- | --- |
-| `types.ts` | `Id`, `Timestamp`, `Role`, `Identity`, `Organization`, `Department`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, `GuardianLink`, `TaGrant` |
+| `types.ts` | `Id`, `Timestamp`, `Role`, `Identity`, `Organization`, `Department`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, `GuardianLink`, `TaGrant`, `EnrollmentRequest`, `EnrollmentRequestStatus` |
 | `repositories.ts` | The repository interfaces and the `RepositoryContext` bundle |
 | `events.ts` | `EventBus` and every `LmsEvent` variant |
 | `tenancy.ts` | `sameOrg`, `assertSameOrg`, `assertCourseDepartment`, `TenantMismatchError`, `UnknownDepartmentError` |
@@ -162,6 +162,7 @@ interface over whatever you use. These are the ones in `core`:
 | `TermRepository` | `findById(id)` | part of `RepositoryContext` |
 | `OrganizationRepository` | `findById(id)` | optional; nothing in the SDK requires it yet |
 | `DepartmentRepository` | `findById(id)`, `listByOrg(orgId)` | optional; for hosts that group courses |
+| `EnrollmentRequestRepository` | `create`, `findById`, `update`, `findPending`, `listBySection(sectionId, status?)`, `listByUser`, and optionally `decideIfPending(id, patch)` | optional; for student enrollment requests |
 | `DelegationRepository` | `create`, `findById`, `listActiveForEnrollment`, `revoke` | optional; for TA delegation |
 | `GuardianLinkRepository` | `findActive(guardianId, wardId)` | optional; for guardians |
 
@@ -201,6 +202,7 @@ interface RepositoryContext {
   terms: TermRepository;
   organizations?: OrganizationRepository;
   departments?: DepartmentRepository;
+  enrollmentRequests?: EnrollmentRequestRepository;
   delegations?: DelegationRepository;
   guardianLinks?: GuardianLinkRepository;
 }

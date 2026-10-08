@@ -58,6 +58,31 @@ export interface PromotedEvent {
   actorId?: string;
 }
 
+/** A student asked for a seat. Nothing has been decided: this is the cue to tell the reviewers. */
+export interface EnrollmentRequestedEvent {
+  type: 'enrollment.requested';
+  requestId: string;
+  userId: string;
+  sectionId: string;
+}
+/**
+ * A request was settled. `sectionId` is the section that was asked for. For `accepted`,
+ * `enrollmentId`, `enrollmentStatus` (`waitlisted` means the student has no seat yet) and
+ * `grantedSectionId` (different from `sectionId` when the reviewer modified the request) say what
+ * the student got. `reviewerId` is set for `accepted` and `rejected`, never for `withdrawn`.
+ */
+export interface EnrollmentRequestDecidedEvent {
+  type: 'enrollment.requestDecided';
+  requestId: string;
+  userId: string;
+  sectionId: string;
+  decision: 'accepted' | 'rejected' | 'withdrawn';
+  reviewerId?: string;
+  enrollmentId?: string;
+  enrollmentStatus?: 'active' | 'waitlisted' | 'dropped' | 'completed';
+  grantedSectionId?: string;
+}
+
 // --- grading events ---
 export interface GradePostedEvent {
   type: 'grading.gradePosted';
@@ -127,6 +152,8 @@ export type LmsEvent =
   | EnrolledEvent
   | DroppedEvent
   | PromotedEvent
+  | EnrollmentRequestedEvent
+  | EnrollmentRequestDecidedEvent
   | GradePostedEvent
   | ContentPublishedEvent
   | SubmissionReceivedEvent

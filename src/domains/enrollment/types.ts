@@ -25,6 +25,57 @@ export interface PromoteOptions {
   allowDraft?: boolean;
 }
 
+/** What a student can say when asking for a seat. */
+export interface RequestOptions {
+  note?: string;
+}
+
+/** What a reviewer can add when accepting or modifying a request. */
+export interface ReviewOptions {
+  /** Said to the student in the record, not sent anywhere by the SDK. */
+  note?: string;
+  /** If the section is full (or people are waiting), waitlist the student instead of failing. Default: true. */
+  waitlistIfFull?: boolean;
+  /** As `EnrollOptions.allowDraft`. */
+  allowDraft?: boolean;
+}
+
+/** What a reviewer can add when rejecting a request. */
+export interface RejectOptions {
+  note?: string;
+}
+
+/** The student already holds (or has completed) a place in the section they asked for. */
+export class AlreadyEnrolledError extends Error {
+  constructor(readonly sectionId: string) {
+    super(`Already enrolled in section ${sectionId}`);
+    this.name = 'AlreadyEnrolledError';
+  }
+}
+
+/** The request was already settled the other way (or is not pending), so this decision cannot be made. */
+export class RequestNotPendingError extends Error {
+  constructor(
+    readonly requestId: string,
+    readonly status: string,
+  ) {
+    super(`Enrollment request ${requestId} is ${status}, not pending`);
+    this.name = 'RequestNotPendingError';
+  }
+}
+
+/** `modify` named a section that cannot take this student's place: the same one, or another course's. */
+export class InvalidRequestModificationError extends Error {
+  constructor(readonly reason: 'same-section' | 'different-course') {
+    super(
+      reason === 'same-section'
+        ? 'A modified request must name a different section (use accept to keep the one asked for)'
+        : 'A modified request must stay in the same course',
+    );
+    this.name = 'InvalidRequestModificationError';
+  }
+}
+
 /** The section is not taking new enrollments: it is still a draft, or it has been archived. */
 export class SectionNotOpenError extends Error {
   constructor(
