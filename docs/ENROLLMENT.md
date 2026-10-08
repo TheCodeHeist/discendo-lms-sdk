@@ -54,7 +54,8 @@ interface BatchReport {
 
 - A new enrollment is `active`, or `waitlisted` when the section is full and the
   caller asked for waitlisting.
-- `drop` moves either to `dropped` and sets `droppedAt`. Nothing is ever deleted.
+- `drop` moves an active or waitlisted enrollment to `dropped` and sets `droppedAt`. Nothing is ever
+  deleted. A `completed` enrollment **cannot** be dropped: it is history.
 - **A dropped person who is enrolled again gets a brand-new record.** The old one
   stays as history. Anything attached to the old enrollment (TA grants, for example)
   does not carry over.
@@ -91,10 +92,24 @@ Enrolls `opts.userId` into `opts.sectionId` with `opts.role`.
    course, and an unknown person throws `User <id> not found`. A mismatch throws
    `TenantMismatchError` and creates nothing, *before* the capacity logic, so a
    cross-tenant person is not waitlisted.
-5. **Capacity.** If the section has a `capacity` and `countActive` has reached it:
-   with `waitlistIfFull` the new enrollment is `waitlisted`, otherwise it throws
-   `Section <id> is at capacity`. A section with no `capacity` is unlimited.
-6. Creates the record (`enrolledAt` is now) and emits `enrollment.enrolled`.
+5. **Section status.** A section only takes new enrollments while it is **published**. An
+   `archived` section never does, and a `draft` one does not unless the call passes
+   `allowDraft: true`, which is how staff load a roster before the section opens. A closed
+   section throws `SectionNotOpenError` (with `sectionId` and `status`) and creates nothing and
+   emits nothing. This comes after the tenant check, so a person of another organization is told
+   "wrong organization", and after the idempotent shortcut, so someone already enrolled still gets
+   their enrollment back after the section closes. Someone who **dropped** and tries again after it
+   closed is refused.
+6. **Capacity.** If the section has a `capacity` and it is full: with `waitlistIfFull` the new
+   enrollment is `waitlisted`, otherwise it throws `Section <id> is at capacity`. A section with no
+   `capacity` is unlimited. How "full" is decided depends on your repository:
+   - **With `createIfSeatFree`** (recommended): the service hands the repository an `active`
+     enrollment and the capacity, and the repository checks and takes the seat as **one atomic
+     step**, returning `null` if the section is full. Two people cannot both get the last seat. The
+     waitlisted enrollment is then made with the ordinary `create`.
+   - **Without it**: the service reads `countActive` and then calls `create`, which is **not
+     atomic** (see the limitations).
+7. Creates the record (`enrolledAt` is now) and emits `enrollment.enrolled`.
 
 ```ts
 const enrollment = await service.enroll(
@@ -112,17 +127,28 @@ it is in, and needs `enrollment.drop` there: **a student may drop themselves**, 
 admins and instructors may drop anyone. An unknown enrollment id is refused exactly
 like a forbidden one.
 
+- **It is idempotent.** Dropping an enrollment that is already dropped returns it unchanged: no
+  new `droppedAt`, no second event, no write.
+- **Only active and waitlisted enrollments can be dropped.** A `completed` one throws
+  `EnrollmentNotDroppableError`, so a finished course cannot be turned into a dropped one and
+  lose its completion. This is checked after the permission check, so a stranger learns nothing
+  about the enrollment's state.
+- Without enforcement an unknown id throws `Enrollment <id> not found` instead of reaching your
+  repository.
+
 ### `listRoster(sectionId, status?, actor?): Promise<Enrollment[]>`
 
 The section's enrollments, optionally only those with one `status`. Needs
 `enrollment.viewRoster` (admin, instructor, TA).
 
-### `bulkEnroll(sectionId, rows, actor?): Promise<BatchReport>`
+### `bulkEnroll(sectionId, rows, actor?, options?): Promise<BatchReport>`
 
 Imports a roster feed. Each row names a person by the **host's own reference**
 (`userExternalRef`); the service resolves it with `UserRepository.findByExternalRef`,
 passing the course's organization so two institutions can reuse a reference. Rows are
-enrolled with `waitlistIfFull: true`.
+enrolled with `waitlistIfFull: true`. `options.allowDraft` applies to every row, as on `enroll`;
+without it, every row of a draft or archived section fails with the reason from
+`SectionNotOpenError`.
 
 - It **never throws for a bad row.** Each failure is reported with a reason and the
   rest continue: `'user not found'`, `'not permitted'` (enforcement: the actor may
@@ -166,7 +192,13 @@ rejection. See [EVENTS.md](./EVENTS.md).
 
 - `EnrollmentRepository.findByUserAndSection` returns the **most recent** record when
   a person has several for the section (a dropped one, then a later one).
-- `countActive(sectionId)` counts `active` enrollments only. It decides capacity.
+- `countActive(sectionId)` counts `active` enrollments only. It decides capacity when
+  `createIfSeatFree` is not provided.
+- **`createIfSeatFree?(enrollment, capacity): Promise<Enrollment | null>`** is optional. Implement
+  it as one atomic step (a transaction with a row lock, or a conditional insert such as
+  `INSERT ... WHERE (SELECT count(*) ... ) < capacity`), counting the same enrollments
+  `countActive` counts, and return `null` when the section is full. Existing hosts that do not
+  provide it keep working as before.
 - `update(id, patch)` returns the updated record; `create` returns the stored one with
   its `id`.
 - `UserRepository.findByExternalRef(ref, orgId?)` stays within `orgId` when given.
@@ -175,15 +207,19 @@ rejection. See [EVENTS.md](./EVENTS.md).
 
 - **No waitlist promotion.** Dropping an active student does not move anyone off the
   waitlist; your code must do that (list with `status: 'waitlisted'`, then update).
-- **The capacity check is not atomic.** It reads `countActive` and then creates, so
-  two simultaneous enrollments into the last seat can both succeed. If seats are
-  strict, enforce capacity in your repository as well.
+- **Without `createIfSeatFree`, the capacity check is not atomic.** It reads `countActive` and
+  then creates, so two simultaneous enrollments into the last seat can both succeed. Provide
+  `createIfSeatFree` if seats are strict. (A test pins this: without it, two simultaneous
+  enrollments both take a one-seat section.)
+- **Enrolling the same person twice at once is not guarded either.** Two simultaneous calls can
+  both find no existing enrollment and each create one. A unique constraint on `(userId,
+  sectionId)` for non-dropped enrollments in your database prevents it.
 - **`countActive` decides what consumes a seat.** If your implementation counts staff
   as well as students, enrolling a TA uses a student seat.
-- **`drop` is not idempotent.** Dropping an already dropped enrollment sets
-  `droppedAt` again and emits another event.
-- **Section status is not checked.** Nothing stops an enrollment into a `draft` or
-  `archived` section.
+- **Closing a section does not touch existing enrollments.** Archiving a section leaves its
+  enrollments as they are; only *new* enrollments are refused.
+- **Re-enrolling after a drop is refused once the section has closed**, even for someone who had
+  a place before.
 - **No events for status changes** other than enroll and drop.
 
 ## Tests
@@ -192,5 +228,7 @@ rejection. See [EVENTS.md](./EVENTS.md).
 | --- | --- |
 | `test/enrollment-permissions.test.ts` | every method with enforcement on: who may do what, role escalation, bulk rows, courses with no organization |
 | `test/enrollment-tenancy.test.ts` | the tenant check (including strict handling of courses with no organization), bulk import with organization hints, cross-department enrollment |
+| `test/atomic-repositories.test.ts` | capacity races with and without `createIfSeatFree`: one last seat taken once, ten people into three seats, bulk import, and unchanged behaviour without it |
+| `test/enrollment-lifecycle.test.ts` | `drop` (idempotent, completed enrollments refused, unknown ids, with and without enforcement) and the section-status checks on `enroll` and `bulkEnroll` (draft, archived, `allowDraft`, ordering against the tenant check and the idempotent shortcut) |
 | `test/enrollment-events.test.ts` | the two events, with and without a bus |
 | `test/delegation.test.ts` | a TA with delegated rights enrolling students through this service |

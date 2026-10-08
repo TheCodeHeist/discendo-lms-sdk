@@ -48,6 +48,15 @@ export interface EnrollmentRepository {
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(sectionId: Id, status?: Enrollment['status']): Promise<Enrollment[]>;
   countActive(sectionId: Id): Promise<number>;
+  /**
+   * OPTIONAL, and strongly recommended whenever a section has a capacity: create the enrollment
+   * (the `active` one it is given) **only if** the section has fewer than `capacity` active
+   * enrollments, as ONE atomic step (a transaction, a conditional insert, a row lock), and return
+   * `null` if it is full. Count the same enrollments `countActive` counts. Without it the service
+   * checks `countActive` and then calls `create`, so two simultaneous enrollments into the last
+   * seat can both succeed. With it, the service waitlists the person (or throws) on `null`.
+   */
+  createIfSeatFree?(enrollment: Omit<Enrollment, 'id'>, capacity: number): Promise<Enrollment | null>;
 }
 
 export interface ContentRepository {

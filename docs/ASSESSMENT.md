@@ -71,6 +71,8 @@ The file itself, the text or the URL is never interpreted by the SDK. It stores 
 interface SubmissionRepository {
   create(sub: Omit<Submission, 'id'>): Promise<Submission>;
   countAttempts(contentId: string, userId: string): Promise<number>;
+  // optional, recommended: take the next attempt number and check the limit in ONE atomic step
+  createAttempt?(draft: Omit<Submission, 'id' | 'attemptNumber'>, maxAttempts?: number): Promise<Submission | null>;
 }
 
 interface QuizRepository {
@@ -78,6 +80,15 @@ interface QuizRepository {
   createAttempt(attempt: Omit<QuizAttempt, 'id'>): Promise<QuizAttempt>;
 }
 ```
+
+**`createAttempt?(draft, maxAttempts?)`** is optional, and recommended wherever an attempt limit
+matters. Implement it as **one atomic step** (a transaction, a lock, or a conditional insert): the
+repository assigns `attemptNumber` (the person's existing attempts for that content, plus one),
+and if `maxAttempts` is given and they already have that many it stores nothing and returns
+`null`, which the service reports as `No attempts remaining`. `submit` uses it (passing the limit),
+and so does `recordOffline` (no limit, since staff are not capped), so a student's own submission
+and a staff-recorded one racing each other get distinct numbers. Without it everything works as
+before, with the race described in the limitations.
 
 ## `AssessmentService`
 
@@ -236,9 +247,10 @@ after each stored submission. A failing listener never fails the submission. See
 
 ## Known limitations
 
-- **The attempt limit is not atomic.** `countAttempts` and `create` are separate calls,
-  so two simultaneous submissions can both pass the check. If the limit is strict,
-  enforce it in your repository as well.
+- **Without `createAttempt`, the attempt limit and the attempt numbers are not atomic.**
+  `countAttempts` and `create` are separate calls, so two simultaneous submissions can both pass
+  the limit and can share an attempt number. Provide `createAttempt` if the limit is strict (see
+  below).
 - **A failing plagiarism hook is swallowed without a trace** (see above), and its
   result is discarded. The SDK has no error channel for it yet.
 - **Quiz answers are not handled.** The module generates attempts but does not record
@@ -257,6 +269,7 @@ after each stored submission. A failing listener never fails the submission. See
 
 | File | Covers |
 | --- | --- |
+| `test/atomic-repositories.test.ts` | attempt-limit and attempt-number races with and without `createAttempt`, including a staff-recorded offline submission racing a student's own |
 | `test/assessment-permissions.test.ts` | all four methods with enforcement on, including `recordOffline` (who may, delegation, active-student target, numbering, no hook or event): own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/assessment-plagiarism.test.ts` | the hook receives the stored submission, is not awaited, and a rejecting or synchronously throwing hook neither fails the submission, leaks an unhandled rejection, nor stops the event |

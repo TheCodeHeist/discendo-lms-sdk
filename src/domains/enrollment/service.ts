@@ -6,7 +6,8 @@ import { authorize } from '../../core/permissions.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { authorizeInSection } from '../../core/authorization.js';
 import type { Authorized } from '../../core/authorization.js';
-import type { EnrollOptions, BatchEnrollRow, BatchReport } from './types.js';
+import { EnrollmentNotDroppableError, SectionNotOpenError } from './types.js';
+import type { EnrollOptions, BatchEnrollRow, BatchReport, BulkEnrollOptions } from './types.js';
 
 export interface EnrollmentServiceOptions {
   /**
@@ -41,14 +42,23 @@ export class EnrollmentService {
   }
 
   async drop(enrollmentId: string, actor?: ActorContext): Promise<Enrollment> {
+    let existing: Enrollment | null;
     if (this.options.policy) {
       // Only needed to find out whose enrollment this is and which section it is in.
-      const existing = actor ? await this.repos.enrollments.findById(enrollmentId) : null;
+      existing = actor ? await this.repos.enrollments.findById(enrollmentId) : null;
       await this.authorizeOn('enrollment.drop', actor, {
         sectionId: existing?.sectionId,
         ownerId: existing?.userId,
       });
+    } else {
+      existing = await this.repos.enrollments.findById(enrollmentId);
     }
+    // (With permissions on, an unknown enrollment was already refused above, like a forbidden one.)
+    if (!existing) throw new Error(`Enrollment ${enrollmentId} not found`);
+    // Dropping twice changes nothing: no new time, no second event.
+    if (existing.status === 'dropped') return existing;
+    // A completed enrollment is history, and dropping it would erase the completion.
+    if (existing.status === 'completed') throw new EnrollmentNotDroppableError(enrollmentId, existing.status);
 
     // Never hard-delete — preserve history for audit/reporting.
     const dropped = await this.repos.enrollments.update(enrollmentId, {
@@ -89,6 +99,7 @@ export class EnrollmentService {
     sectionId: string,
     rows: BatchEnrollRow[],
     actor?: ActorContext,
+    options: BulkEnrollOptions = {},
   ): Promise<BatchReport> {
     const auth = await this.authorizeOn('enrollment.bulkEnroll', actor, { sectionId });
     const report: BatchReport = { succeeded: 0, failed: [] };
@@ -116,6 +127,7 @@ export class EnrollmentService {
           sectionId,
           role: row.role,
           waitlistIfFull: true,
+          ...(options.allowDraft ? { allowDraft: true } : {}),
         });
         report.succeeded++;
       } catch (err) {
@@ -145,24 +157,47 @@ export class EnrollmentService {
 
     await this.assertSameTenant(opts.userId, section);
 
+    // Checked after the organization, so a person of another organization hears "wrong organization".
+    if (section.status === 'archived') throw new SectionNotOpenError(section.id, 'archived');
+    if (section.status === 'draft' && !opts.allowDraft) throw new SectionNotOpenError(section.id, 'draft');
+
     let status: Enrollment['status'] = 'active';
+    let seated: Enrollment | undefined;
     if (section.capacity !== undefined) {
-      const activeCount = await this.repos.enrollments.countActive(opts.sectionId);
-      if (activeCount >= section.capacity) {
-        if (!opts.waitlistIfFull) {
-          throw new Error(`Section ${opts.sectionId} is at capacity`);
+      if (this.repos.enrollments.createIfSeatFree) {
+        // The repository checks the seat and takes it in one atomic step, so two people cannot both
+        // get the last one.
+        const taken = await this.repos.enrollments.createIfSeatFree(
+          { userId: opts.userId, sectionId: opts.sectionId, role: opts.role, status: 'active', enrolledAt: new Date() },
+          section.capacity,
+        );
+        if (taken) {
+          seated = taken;
+        } else {
+          if (!opts.waitlistIfFull) throw new Error(`Section ${opts.sectionId} is at capacity`);
+          status = 'waitlisted';
         }
-        status = 'waitlisted';
+      } else {
+        // Check, then write: not atomic, so the last seat can be taken twice (see the docs).
+        const activeCount = await this.repos.enrollments.countActive(opts.sectionId);
+        if (activeCount >= section.capacity) {
+          if (!opts.waitlistIfFull) {
+            throw new Error(`Section ${opts.sectionId} is at capacity`);
+          }
+          status = 'waitlisted';
+        }
       }
     }
 
-    const enrollment = await this.repos.enrollments.create({
-      userId: opts.userId,
-      sectionId: opts.sectionId,
-      role: opts.role,
-      status,
-      enrolledAt: new Date(),
-    });
+    const enrollment =
+      seated ??
+      (await this.repos.enrollments.create({
+        userId: opts.userId,
+        sectionId: opts.sectionId,
+        role: opts.role,
+        status,
+        enrolledAt: new Date(),
+      }));
 
     // Fire-and-forget — a slow or failing listener should never delay or
     // break the enrollment itself (see EventBus's failure-isolation note).

@@ -72,8 +72,11 @@ new GradingService(
   grades: GradeRepository,
   events?: EventBus,
   enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos; submissions: SubmissionLocator },
+  options?: { allowExtraCredit?: boolean },
 )
 ```
+
+`allowExtraCredit` (off by default) lets a score exceed the maximum; see `recordGrade` below.
 
 Every method takes a trailing `actor?: { actorId }`, required when `enforcement` is set.
 
@@ -89,7 +92,17 @@ await grading.recordGrade('sub-1', 'stu-1', 90, 100, teacher.id, entry.id, { act
 ```
 
 1. **(Enforcement on)** the permission checks below.
-2. **`previousEntryId`, if given, must be the current entry for *this* submission.**
+2. **The numbers must make a grade**, checked **after** the permission check (so a stranger is
+   told "not permitted", not what is wrong with the numbers). Otherwise it throws
+   `InvalidGradeError`, and nothing is stored, superseded or announced:
+   - `maxScore` must be a finite number **above zero**;
+   - `score` must be a finite number that is **not negative** (zero is a real score);
+   - `score` must **not be above `maxScore`**, unless the service was built with
+     `{ allowExtraCredit: true }`. This is off by default so that a typo such as 850 for 85 is
+     refused instead of silently inflating a grade. With it on, 120 out of 100 is accepted and
+     counts as 120%, so a final grade can then exceed 100. A negative or non-finite number, and a
+     maximum of zero or less, are refused either way.
+3. **`previousEntryId`, if given, must be the current entry for *this* submission.**
    Otherwise the call throws, and nothing is written:
    - `Previous grade entry <id> not found`
    - `Previous grade entry belongs to a different submission`
@@ -97,7 +110,7 @@ await grading.recordGrade('sub-1', 'stu-1', 90, 100, teacher.id, entry.id, { act
 
    These integrity checks apply with or without enforcement, because superseding the
    wrong entry would silently erase another grade from the gradebook.
-3. Creates the entry (`gradedAt` is now), then marks the previous one superseded.
+4. Creates the entry (`gradedAt` is now), then marks the previous one superseded.
 4. Emits `grading.gradePosted`.
 
 ### `computeFinalGradeForUser(userId, sectionId, scheme, actor?): Promise<number>`
@@ -119,10 +132,21 @@ interface GradeRepository {
   create(entry: Omit<GradeEntry, 'id'>): Promise<GradeEntry>;
   findById(id: string): Promise<GradeEntry | null>;
   markSuperseded(id: string, byId: string): Promise<void>;
+  // optional, recommended: supersede ONLY IF still current, as one atomic compare-and-set
+  supersedeIfCurrent?(id: string, byId: string): Promise<boolean>;
   listForUserInSection(userId: string, sectionId: string):
     Promise<Array<GradeEntry & { category: string }>>;
 }
 ```
+
+**`supersedeIfCurrent?(id, byId): Promise<boolean>`** is optional and recommended. Implement it as
+one atomic compare-and-set (`UPDATE ... SET superseded_by = ? WHERE id = ? AND superseded_by IS
+NULL`, returning whether a row changed). When it is provided, `recordGrade` uses it instead of
+`markSuperseded`, so **only one of two simultaneous regrades of an entry can win**. The loser's
+entry is kept, marked as superseded by the winner's (so exactly one entry stays current and nothing
+is deleted), nothing is announced for it, and the caller gets a **`GradeConflictError`** with
+`winnerId` (the entry that won), `entryId` (the loser's own entry) and `previousEntryId`. To change
+the grade anyway, regrade again with `winnerId` as the `previousEntryId`.
 
 `findById` is required (it backs the `previousEntryId` check). Categories are not
 invented by the SDK: **your repository decides which category each entry belongs to**
@@ -197,6 +221,12 @@ entries but **not in the scheme is ignored**; the weights are not required to su
 (the division by the weight used means only their proportions matter); and scores above
 the maximum are **not clamped** (120/100 counts as 120%).
 
+**An entry that cannot be a grade is ignored**, as if it were not there: a maximum of zero or
+less, a negative score, or a number that is not finite. One bad row therefore cannot turn a whole
+grade into `Infinity` or `NaN`, and a category with only such entries counts as having no grades
+yet. `recordGrade` refuses to store these, so this only matters for rows written some other way.
+It is silent, so validate imported data.
+
 ### `applyLatePolicy(score, maxScore, daysLate, policy): number`
 
 Returns the score after a late penalty.
@@ -228,12 +258,18 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 
 ## Known limitations
 
-- **No validation of the numbers.** `recordGrade` accepts a negative score, a score above
-  `maxScore`, and a `maxScore` of zero or less. A `maxScore` of 0 makes
-  `computeFinalGrade` return `Infinity` (or `NaN` for 0/0). Validate before recording.
-- **Regrading is not atomic.** The check of `previousEntryId`, the create and the
-  `markSuperseded` are separate calls; two simultaneous regrades of one entry could both
-  succeed. If that can happen, guard it in your repository.
+- **Bad rows already in your gradebook are skipped, not reported.** The calculation ignores an
+  entry with an impossible maximum or score instead of failing, so a corrupt row quietly stops
+  counting.
+- **`applyLatePolicy` does not validate its inputs.** A non-finite score or maximum gives a
+  non-finite result.
+- **Without `supersedeIfCurrent`, regrading is not atomic.** The check of `previousEntryId`,
+  the create and the `markSuperseded` are separate calls, so two simultaneous regrades of one
+  entry can both succeed and leave two current entries (both would count towards the final grade).
+  Provide `supersedeIfCurrent` if that can happen.
+- **Two simultaneous *first* grades of one submission are not guarded** even with it: neither
+  supersedes anything. A unique constraint on the current grade per submission in your database
+  prevents that.
 - **No grade release.** A grade is visible to the student, through `grading.view`, as
   soon as it is recorded. There is no "hold until released" state.
 - **A completed student can still read their own grades** (final and letter grade), and so
@@ -247,5 +283,7 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | File | Covers |
 | --- | --- |
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
+| `test/atomic-repositories.test.ts` | regrading races with and without `supersedeIfCurrent` (one winner, the loser kept as history and told who won, only the winner announced and counted), alongside the capacity and attempt-limit races |
+| `test/grading-validation.test.ts` | the number checks in `recordGrade` (each bad case, the boundaries, extra credit on and off, a refused regrade leaving the current grade alone, the permission check coming first) and `computeFinalGrade` skipping entries that cannot be a grade |
 | `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, completed students and their guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |
 | `test/grading-events.test.ts` | `grading.gradePosted`, including once per regrade |

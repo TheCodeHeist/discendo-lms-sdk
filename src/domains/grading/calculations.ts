@@ -44,7 +44,12 @@ export function computeFinalGrade(
     const entries = entriesByCategory.get(category.name) ?? [];
     if (entries.length === 0) continue;
 
+    // An entry that cannot be a grade (a maximum of zero or less, a negative score, or a number that
+    // is not finite) is ignored, as if it were not there: one bad row must not turn a whole
+    // student's grade into Infinity or NaN. `recordGrade` refuses to store such entries, so this
+    // only matters for data that was written some other way.
     const percentages = entries
+      .filter(isCountable)
       .map((e) => e.score / e.maxScore)
       .sort((a, b) => a - b);
 
@@ -60,6 +65,10 @@ export function computeFinalGrade(
   // Renormalize if some categories had no grades yet, so a partially-graded
   // course doesn't unfairly tank toward zero.
   return weightUsed > 0 ? (total / weightUsed) * 100 : 0;
+}
+
+function isCountable(e: GradeEntry): boolean {
+  return Number.isFinite(e.score) && Number.isFinite(e.maxScore) && e.score >= 0 && e.maxScore > 0;
 }
 
 export function toLetterGrade(percent: number, scale: GradeScale): string {

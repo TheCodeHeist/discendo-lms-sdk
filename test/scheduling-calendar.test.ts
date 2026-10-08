@@ -68,14 +68,18 @@ describe('CalendarService.getAvailability', () => {
 describe('CalendarService.toIcal', () => {
   const service = new CalendarService();
   const CRLF = '\r\n';
+  /** Undoes folding (RFC 5545 section 3.1), then splits into logical lines, without the final empty one. */
+  const logical = (text: string) => text.replace(/\r\n[ \t]/g, '').split(CRLF).slice(0, -1);
 
   function icalFor(events: Array<{ id: string; title: string; dueAt: Date }>): string {
     setSystemTime(NOW);
     return service.toIcal(events);
   }
 
+  const one = (title: string, id = 'a1') => icalFor([{ id, title, dueAt: new Date('2026-10-05T10:00:00Z') }]);
+
   it('produces just the calendar shell for an empty list', () => {
-    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN', 'END:VCALENDAR'].join(CRLF));
+    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//DiscendoLMS//discendo-sdk//EN', 'END:VCALENDAR'].join(CRLF) + CRLF);
   });
 
   it('renders one event with UID, DTSTAMP, DTSTART and SUMMARY', () => {
@@ -84,7 +88,7 @@ describe('CalendarService.toIcal', () => {
       [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//lms-sdk//EN',
+        'PRODID:-//DiscendoLMS//discendo-sdk//EN',
         'BEGIN:VEVENT',
         'UID:a1',
         'DTSTAMP:20260930T120000Z',
@@ -92,7 +96,7 @@ describe('CalendarService.toIcal', () => {
         'SUMMARY:Essay 1',
         'END:VEVENT',
         'END:VCALENDAR',
-      ].join(CRLF),
+      ].join(CRLF) + CRLF,
     );
   });
 
@@ -133,9 +137,6 @@ describe('CalendarService.toIcal', () => {
   });
 
   describe('text escaping (RFC 5545 section 3.3.11)', () => {
-    const one = (title: string, id = 'a1') =>
-      icalFor([{ id, title, dueAt: new Date('2026-10-05T10:00:00Z') }]);
-
     it('escapes commas and semicolons in the title', () => {
       expect(one('Quiz 1, part 2; final')).toContain('SUMMARY:Quiz 1\\, part 2\\; final');
     });
@@ -151,7 +152,7 @@ describe('CalendarService.toIcal', () => {
     });
 
     it('cannot be used to inject extra properties or events through the title', () => {
-      const lines = one('Quiz\r\nBEGIN:VEVENT\r\nUID:evil\r\nSUMMARY:pwned').split(CRLF);
+      const lines = logical(one('Quiz\r\nBEGIN:VEVENT\r\nUID:evil\r\nSUMMARY:pwned'));
       // The injected text may survive as escaped characters inside SUMMARY,
       // but it must not become lines of its own.
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
@@ -161,7 +162,7 @@ describe('CalendarService.toIcal', () => {
     });
 
     it('cannot be used to inject lines through the id either', () => {
-      const lines = one('T', 'x\r\nBEGIN:VEVENT').split(CRLF);
+      const lines = logical(one('T', 'x\r\nBEGIN:VEVENT'));
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
       expect(lines).toHaveLength(10);
     });
@@ -171,12 +172,97 @@ describe('CalendarService.toIcal', () => {
     });
   });
 
-  // Known RFC 5545 gaps, deliberately not implemented yet. The bodies throw so
-  // that running with `bun test --todo` reports them as unimplemented rather
-  // than as accidental passes.
-  const notImplemented = () => {
-    throw new Error('not implemented');
-  };
-  it.todo('folds content lines longer than 75 octets (RFC 5545 section 3.1)', notImplemented);
-  it.todo('terminates the final line (END:VCALENDAR) with CRLF like every other line', notImplemented);
+  describe('line termination (RFC 5545 section 3.1)', () => {
+    it('ends every line with CRLF, the last one included, and does not end with a blank line', () => {
+      for (const out of [icalFor([]), one('Essay 1')]) {
+        expect(out.endsWith(`END:VCALENDAR${CRLF}`)).toBe(true);
+        expect(out.endsWith(CRLF + CRLF)).toBe(false);
+      }
+    });
+
+    it('names this SDK in the PRODID', () => {
+      expect(icalFor([])).toContain('PRODID:-//DiscendoLMS//discendo-sdk//EN');
+      expect(icalFor([])).not.toContain('lms-sdk//EN');
+    });
+  });
+
+  describe('line folding (RFC 5545 section 3.1)', () => {
+    const octets = (text: string) => new TextEncoder().encode(text).length;
+    const physical = (text: string) => text.split(CRLF).slice(0, -1);
+    const strictDecode = (bytes: Uint8Array) => new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+
+    it('leaves a line of exactly 75 octets alone, and folds one octet more', () => {
+      const exactly75 = 'a'.repeat(75 - 'SUMMARY:'.length);
+      expect(physical(one(exactly75)).filter((l) => l.startsWith('SUMMARY:'))).toEqual([`SUMMARY:${exactly75}`]);
+      const out = physical(one(exactly75 + 'b'));
+      const at = out.findIndex((l) => l.startsWith('SUMMARY:'));
+      expect(octets(out[at]!)).toBe(75);
+      expect(out[at + 1]).toBe(' b');
+    });
+
+    it('folds a long line so that no line is longer than 75 octets, each continuation starting with one space', () => {
+      const out = one('x'.repeat(300));
+      for (const line of physical(out)) expect(octets(line)).toBeLessThanOrEqual(75);
+      const summary = physical(out).filter((l, i, all) => l.startsWith('SUMMARY:') || (l.startsWith(' ') && all[i - 1] !== undefined));
+      expect(summary.length).toBe(5); // 308 octets: 75 + 74 + 74 + 74 + 11
+      expect(summary.slice(1).every((l) => l.startsWith(' ') && !l.startsWith('  '))).toBe(true);
+    });
+
+    it('unfolds back to exactly the original line', () => {
+      const title = 'Midterm: ' + 'long title, with; every escape \\ ' .repeat(12);
+      const unfolded = logical(one(title));
+      expect(unfolded.find((l) => l.startsWith('SUMMARY:'))).toBe(
+        `SUMMARY:${title.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,')}`,
+      );
+    });
+
+    it('never splits a multi-byte character: three-byte text', () => {
+      const title = '✓'.repeat(100);
+      const out = one(title);
+      for (const line of physical(out)) {
+        expect(octets(line)).toBeLessThanOrEqual(75);
+        strictDecode(new TextEncoder().encode(line)); // throws on a broken sequence
+      }
+      expect(logical(out).find((l) => l.startsWith('SUMMARY:'))).toBe(`SUMMARY:${title}`);
+    });
+
+    it('never splits a multi-byte character: four-byte text (a surrogate pair in JavaScript), wherever the fold falls', () => {
+      for (const prefix of ['', 'a', 'ab', 'abc', 'abcd']) {
+        const title = prefix + '😀'.repeat(60);
+        const out = one(title);
+        for (const line of physical(out)) {
+          expect(octets(line)).toBeLessThanOrEqual(75);
+          // a lone surrogate (half of a split pair) makes encodeURIComponent throw
+          expect(() => encodeURIComponent(line), JSON.stringify(line)).not.toThrow();
+        }
+        expect(logical(out).find((l) => l.startsWith('SUMMARY:'))).toBe(`SUMMARY:${title}`);
+      }
+    });
+
+    it('folds mixed text at the right octet, keeping a character that straddles the limit whole', () => {
+      const title = 'ab' + 'é'.repeat(80); // two-byte letters, so the 75-octet limit can fall inside one
+      const out = one(title);
+      for (const line of physical(out)) expect(octets(line)).toBeLessThanOrEqual(75);
+      expect(logical(out).find((l) => l.startsWith('SUMMARY:'))).toBe(`SUMMARY:${title}`);
+    });
+
+    it('folds any line, the UID included', () => {
+      const out = one('T', 'id-'.repeat(40));
+      for (const line of physical(out)) expect(octets(line)).toBeLessThanOrEqual(75);
+      expect(logical(out).find((l) => l.startsWith('UID:'))).toBe(`UID:${'id-'.repeat(40)}`);
+    });
+
+    it('does not let a long title with line breaks inject lines, once unfolded', () => {
+      const title = ('Quiz\r\nBEGIN:VEVENT\r\nUID:evil\r\n' + 'z'.repeat(120)).repeat(2);
+      const lines = logical(one(title));
+      expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
+      expect(lines.filter((l) => l.startsWith('UID:'))).toEqual(['UID:a1']);
+      expect(lines.filter((l) => l.startsWith('SUMMARY:'))).toHaveLength(1);
+      expect(lines).toHaveLength(10);
+    });
+
+    it('does not fold short lines, so ordinary output is unchanged', () => {
+      expect(physical(one('Essay 1')).every((l) => !l.startsWith(' '))).toBe(true);
+    });
+  });
 });

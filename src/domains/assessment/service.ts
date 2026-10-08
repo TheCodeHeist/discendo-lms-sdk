@@ -15,6 +15,18 @@ import type {
 export interface SubmissionRepository {
   create(sub: Omit<Submission, 'id'>): Promise<Submission>;
   countAttempts(contentId: string, userId: string): Promise<number>;
+  /**
+   * OPTIONAL, and strongly recommended: store the submission as the person's NEXT attempt, as ONE
+   * atomic step (a transaction, a lock, a conditional insert). The repository assigns
+   * `attemptNumber` (their existing attempts for this content, plus one), and if `maxAttempts` is
+   * given and they already have that many, stores nothing and returns `null`. Without it the
+   * service counts and then creates, so two simultaneous submissions can both pass a limit and can
+   * share an attempt number. With it, a `null` is reported as "No attempts remaining".
+   */
+  createAttempt?(
+    draft: Omit<Submission, 'id' | 'attemptNumber'>,
+    maxAttempts?: number,
+  ): Promise<Submission | null>;
 }
 
 export interface QuizRepository {
@@ -67,18 +79,29 @@ export class AssessmentService {
       throw new Error('A "none" submission is recorded by staff with recordOffline, not submitted');
     }
 
-    const priorAttempts = await this.submissions.countAttempts(contentId, userId);
-    if (maxAttempts !== undefined && priorAttempts >= maxAttempts) {
-      throw new Error('No attempts remaining');
-    }
+    let submission: Submission;
+    if (this.submissions.createAttempt) {
+      // The repository checks the limit and numbers the attempt in one atomic step.
+      const stored = await this.submissions.createAttempt(
+        { contentId, userId, payload, submittedAt: new Date() },
+        maxAttempts,
+      );
+      if (!stored) throw new Error('No attempts remaining');
+      submission = stored;
+    } else {
+      const priorAttempts = await this.submissions.countAttempts(contentId, userId);
+      if (maxAttempts !== undefined && priorAttempts >= maxAttempts) {
+        throw new Error('No attempts remaining');
+      }
 
-    const submission = await this.submissions.create({
-      contentId,
-      userId,
-      payload,
-      submittedAt: new Date(),
-      attemptNumber: priorAttempts + 1,
-    });
+      submission = await this.submissions.create({
+        contentId,
+        userId,
+        payload,
+        submittedAt: new Date(),
+        attemptNumber: priorAttempts + 1,
+      });
+    }
 
     if (this.plagiarismHook) {
       // Fire-and-forget by design — don't block submission on a slow external check. A hook
@@ -134,6 +157,17 @@ export class AssessmentService {
       const membership = await this.enforcement!.repos.enrollments.findByUserAndSection(userId, authorized.sectionId);
       if (activeSectionRole(membership) !== 'student') throw new PermissionDeniedError('assessment.recordOffline');
     }
+    const recordedBy = actor ? { recordedBy: actor.actorId } : {};
+    if (this.submissions.createAttempt) {
+      // Numbered by the repository in one atomic step (no limit: staff are not capped by maxAttempts).
+      const stored = await this.submissions.createAttempt(
+        { contentId, userId, payload: { kind: 'none' }, submittedAt: new Date(), ...recordedBy },
+        undefined,
+      );
+      // With no limit given the repository has no reason to return null; if it does, say so loudly.
+      if (!stored) throw new Error('The submission repository did not store the attempt');
+      return stored;
+    }
     const attemptNumber = (await this.submissions.countAttempts(contentId, userId)) + 1;
     return this.submissions.create({
       contentId,
@@ -141,7 +175,7 @@ export class AssessmentService {
       payload: { kind: 'none' },
       submittedAt: new Date(),
       attemptNumber,
-      ...(actor ? { recordedBy: actor.actorId } : {}),
+      ...recordedBy,
     });
   }
 

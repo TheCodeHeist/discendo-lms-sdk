@@ -157,7 +157,7 @@ interface over whatever you use. These are the ones in `core`:
 | --- | --- | --- |
 | `UserRepository` | `findById(id)`, `findByExternalRef(ref, orgId?)` | enrollment, every enforcing service |
 | `CourseRepository` | `findCourse(id)`, `findSection(id)`, `listSections(courseId)` | enrollment, every enforcing service |
-| `EnrollmentRepository` | `create`, `findById`, `update`, `findByUserAndSection`, `listBySection(sectionId, status?)`, `countActive(sectionId)` | enrollment, every enforcing service |
+| `EnrollmentRepository` | `create`, `findById`, `update`, `findByUserAndSection`, `listBySection(sectionId, status?)`, `countActive(sectionId)`, and optionally `createIfSeatFree(enrollment, capacity)` | enrollment, every enforcing service |
 | `ContentRepository` | `findById`, `listBySection`, `create`, `update`, `reorder` | content, assessment (when enforcing) |
 | `TermRepository` | `findById(id)` | part of `RepositoryContext` |
 | `OrganizationRepository` | `findById(id)` | optional; nothing in the SDK requires it yet |
