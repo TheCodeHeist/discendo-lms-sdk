@@ -1,3 +1,4 @@
+import { unusedQuizAttempts } from './helpers/quiz-store.js';
 import { describe, it, expect } from 'bun:test';
 import { EnrollmentService } from '../src/domains/enrollment/index.js';
 import { AssessmentService } from '../src/domains/assessment/index.js';
@@ -176,7 +177,7 @@ function assessmentWorld(opts: { atomic: boolean }) {
         }
       : {}),
   };
-  const quizzes: QuizRepository = { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'q1' }) };
+  const quizzes: QuizRepository = { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'q1' }), ...unusedQuizAttempts };
   const bus = new EventBus();
   const received: unknown[] = [];
   bus.on('assessment.submissionReceived', (e) => void received.push(e));

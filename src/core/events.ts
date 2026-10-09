@@ -111,6 +111,22 @@ export interface SubmissionReceivedEvent {
   attemptNumber: number;
 }
 
+/**
+ * A student submitted a quiz attempt and it was scored. A `Submission` (payload kind `quiz`) now
+ * exists for grading to attach to; it does NOT also emit `assessment.submissionReceived`. Sent once per
+ * attempt, when that submission is stored.
+ */
+export interface QuizSubmittedEvent {
+  type: 'assessment.quizSubmitted';
+  attemptId: string;
+  quizId: string;
+  submissionId: string;
+  userId: string;
+  score: number;
+  maxScore: number;
+  late: boolean;
+}
+
 // --- scheduling events ---
 export interface OccurrenceCancelledEvent {
   type: 'scheduling.occurrenceCancelled';
@@ -154,6 +170,7 @@ export type LmsEvent =
   | PromotedEvent
   | EnrollmentRequestedEvent
   | EnrollmentRequestDecidedEvent
+  | QuizSubmittedEvent
   | GradePostedEvent
   | ContentPublishedEvent
   | SubmissionReceivedEvent

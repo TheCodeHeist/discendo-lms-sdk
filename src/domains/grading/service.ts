@@ -66,6 +66,19 @@ export interface GradingServiceOptions {
    * and a maximum of zero or less, are refused either way.
    */
   allowExtraCredit?: boolean;
+  /**
+   * The system grader names (each starting with `system:`, such as `'system:quiz'`) that may post
+   * grades through `recordSystemGrade`, which needs no actor. Empty by default: nothing can.
+   */
+  systemGraders?: string[];
+}
+
+/** `recordSystemGrade` was called with a grader name the host has not allowed (or one that is not a `system:` name). */
+export class SystemGraderNotAllowedError extends Error {
+  constructor(readonly source: string) {
+    super(`'${source}' is not an allowed system grader`);
+    this.name = 'SystemGraderNotAllowedError';
+  }
 }
 
 /**
@@ -180,6 +193,52 @@ export class GradingService {
       graderId: entry.graderId,
     });
 
+    return entry;
+  }
+
+  /**
+   * Records a grade made by the system rather than a person, such as a quiz's automatic score. It
+   * takes no actor and checks no permission, so it is for SDK code and your own server code only;
+   * never expose it to a client. To keep that safe, the grader name `source` must start with
+   * `system:` and be listed in the service's `systemGraders` option, or it throws
+   * `SystemGraderNotAllowedError` and stores nothing. With enforcement on, the submission must exist and
+   * belong to `userId`. The score is checked like any grade. It is always a new entry (there is no
+   * regrade here) and `grading.gradePosted` is emitted with the source as `graderId`.
+   */
+  async recordSystemGrade(
+    submissionId: string,
+    userId: string,
+    score: number,
+    maxScore: number,
+    source: string,
+  ): Promise<GradeEntry> {
+    if (!source.startsWith('system:') || !(this.options.systemGraders ?? []).includes(source)) {
+      throw new SystemGraderNotAllowedError(source);
+    }
+    if (this.enforcement) {
+      const located = await this.enforcement.submissions.locate(submissionId);
+      if (!located) throw new Error(`Submission ${submissionId} not found`);
+      if (located.userId !== userId) throw new Error('The submission does not belong to that user');
+    }
+    this.validateNumbers(score, maxScore);
+
+    const entry = await this.grades.create({
+      submissionId,
+      userId,
+      score,
+      maxScore,
+      graderId: source,
+      gradedAt: new Date(),
+    });
+    void this.events?.emit({
+      type: 'grading.gradePosted',
+      gradeEntryId: entry.id,
+      submissionId: entry.submissionId,
+      userId: entry.userId,
+      score: entry.score,
+      maxScore: entry.maxScore,
+      graderId: entry.graderId,
+    });
     return entry;
   }
 

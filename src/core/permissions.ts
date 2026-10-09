@@ -76,6 +76,9 @@ export const DEFAULT_RULES = {
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
   'assessment.startAttempt': { ownRoles: ['student'] },
+  // Answering and submitting a quiz attempt are the attempt's own student's alone: staff cannot answer for them.
+  'assessment.answerQuiz': { ownRoles: ['student'] },
+  'assessment.submitQuiz': { ownRoles: ['student'] },
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },

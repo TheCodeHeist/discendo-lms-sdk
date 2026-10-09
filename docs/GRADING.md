@@ -17,10 +17,10 @@ The module has two halves that are deliberately separate:
 
 | | |
 | --- | --- |
-| **You import** | `GradingService`, `computeFinalGrade`, `applyLatePolicy`, `toLetterGrade`, and the types in `types.ts` |
+| **You import** | `GradingService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `toLetterGrade`, and the types in `types.ts` |
 | **You implement** | `GradeRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
 | **Emits events** | `grading.gradePosted` |
-| **Permission actions** | `grading.record`, `grading.view` |
+| **Permission actions** | `grading.record`, `grading.view` (and `recordSystemGrade`, which takes no actor: see below) |
 | **Enforcement** | opt-in: the third constructor argument, `{ policy, repos, submissions }` |
 
 ## Types (`types.ts`)
@@ -72,11 +72,12 @@ new GradingService(
   grades: GradeRepository,
   events?: EventBus,
   enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos; submissions: SubmissionLocator },
-  options?: { allowExtraCredit?: boolean },
+  options?: { allowExtraCredit?: boolean; systemGraders?: string[] },
 )
 ```
 
 `allowExtraCredit` (off by default) lets a score exceed the maximum; see `recordGrade` below.
+`systemGraders` (empty by default) names the `system:` graders that may use `recordSystemGrade`.
 
 Every method takes a trailing `actor?: { actorId }`, required when `enforcement` is set.
 
@@ -112,6 +113,23 @@ await grading.recordGrade('sub-1', 'stu-1', 90, 100, teacher.id, entry.id, { act
    wrong entry would silently erase another grade from the gradebook.
 4. Creates the entry (`gradedAt` is now), then marks the previous one superseded.
 4. Emits `grading.gradePosted`.
+
+### `recordSystemGrade(submissionId, userId, score, maxScore, source): Promise<GradeEntry>`
+
+Records a grade made by the system instead of a person, such as the automatic score of a quiz
+(see `autoGrade` in [ASSESSMENT.md](./ASSESSMENT.md)). **It takes no actor and checks no permission**, so
+it is for SDK code and your own server code only: never expose it to a client. Two guards keep that
+from being a back door:
+
+- `source` (the `graderId` of the entry) must start with `system:` **and** be listed in the
+  service's `systemGraders`, or it throws `SystemGraderNotAllowedError` and stores nothing. With no
+  `systemGraders`, nothing can use it, so a host that never turns on `autoGrade` is not exposed.
+  A `system:` name can never be mistaken for a person's id.
+- With enforcement on, the submission must exist and belong to `userId` (the `SubmissionLocator` is
+  used), or it throws and stores nothing.
+
+The score is validated like any grade (`InvalidGradeError`, `allowExtraCredit`). It is always a new
+entry (no regrade), and `grading.gradePosted` is emitted with the source as `graderId`.
 
 ### `computeFinalGradeForUser(userId, sectionId, scheme, actor?): Promise<number>`
 
@@ -283,6 +301,7 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | File | Covers |
 | --- | --- |
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
+| `test/grading-system.test.ts` | `recordSystemGrade`: the `system:` prefix and allow-list, the numbers, no actor needed, the submission-owner check with enforcement, the event |
 | `test/atomic-repositories.test.ts` | regrading races with and without `supersedeIfCurrent` (one winner, the loser kept as history and told who won, only the winner announced and counted), alongside the capacity and attempt-limit races |
 | `test/grading-validation.test.ts` | the number checks in `recordGrade` (each bad case, the boundaries, extra credit on and off, a refused regrade leaving the current grade alone, the permission check coming first) and `computeFinalGrade` skipping entries that cannot be a grade |
 | `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, completed students and their guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |

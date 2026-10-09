@@ -111,6 +111,8 @@ policy.
 | `content.manage` | admin, instructor | — | — | yes |
 | `assessment.submit` | — | student | — | — |
 | `assessment.startAttempt` | — | student | — | — |
+| `assessment.answerQuiz` | — | student | — | — |
+| `assessment.submitQuiz` | — | student | — | — |
 | `assessment.viewAttempts` | admin, instructor, ta | student | — | — |
 | `assessment.recordOffline` | admin, instructor | — | — | yes |
 | `grading.record` | admin, instructor, ta | — | — | — |

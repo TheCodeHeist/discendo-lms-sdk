@@ -1,3 +1,4 @@
+import { unusedQuizAttempts } from './helpers/quiz-store.js';
 import { describe, it, expect } from 'bun:test';
 import { AssessmentService } from '../src/domains/assessment/index.js';
 import type {
@@ -148,6 +149,7 @@ async function buildWorld(opts: { policy?: PermissionPolicy; grants?: TaGrant[];
       calls.attempt++;
       return { ...a, id: `attempt-${calls.attempt}` };
     },
+    ...unusedQuizAttempts,
   };
 
   const bus = new EventBus();
@@ -380,7 +382,7 @@ describe('AssessmentService without enforcement', () => {
   it('still accepts a "none" submission from submit, as before', async () => {
     const plain = new AssessmentService(
       { create: async (s) => ({ ...s, id: 's1' }), countAttempts: async () => 0 },
-      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }) },
+      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }), ...unusedQuizAttempts },
     );
     await expect(plain.submit('c', 'u', { kind: 'none' })).resolves.toMatchObject({ payload: { kind: 'none' } });
   });
@@ -389,7 +391,7 @@ describe('AssessmentService without enforcement', () => {
     const w = await buildWorld();
     const plain = new AssessmentService(
       { create: async (s) => ({ ...s, id: 's1' }), countAttempts: async () => 0 },
-      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }) },
+      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }), ...unusedQuizAttempts },
     );
     await expect(plain.submit('anything', 'anyone', text)).resolves.toMatchObject({ userId: 'anyone' });
     await expect(plain.attemptsRemaining('anything', 'anyone', 2)).resolves.toBe(2);
@@ -522,7 +524,7 @@ describe('AssessmentService.recordOffline (staff record work done offline)', () 
     const stored: Array<Omit<Submission, 'id'>> = [];
     const plain = new AssessmentService(
       { create: async (s) => (stored.push(s), { ...s, id: 's1' }), countAttempts: async () => 2 },
-      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }) },
+      { getQuestions: async () => [], createAttempt: async (a) => ({ ...a, id: 'a1' }), ...unusedQuizAttempts },
     );
     const sub = await plain.recordOffline('anything', 'anyone');
     expect(sub).toMatchObject({ userId: 'anyone', payload: { kind: 'none' }, attemptNumber: 3 });
