@@ -288,7 +288,7 @@ export class AssessmentService {
     const attempt = await this.loadAttempt(attemptId, actor);
     await this.authorizeAttempt('assessment.answerQuiz', actor, attempt);
     if (!attempt) throw new Error(`Quiz attempt ${attemptId} not found`);
-    const limit = checkedLimit(options.timeLimitSeconds);
+    const limit = await this.effectiveLimit(attempt, options.timeLimitSeconds);
 
     if (attempt.submittedAt !== undefined) throw new AttemptClosedError(attempt.id);
     if (isLate(attempt, limit)) throw new AttemptExpiredError(attempt.id);
@@ -328,7 +328,7 @@ export class AssessmentService {
     const attempt = await this.loadAttempt(attemptId, actor);
     await this.authorizeAttempt('assessment.submitQuiz', actor, attempt);
     if (!attempt) throw new Error(`Quiz attempt ${attemptId} not found`);
-    const limit = checkedLimit(options.timeLimitSeconds);
+    const limit = await this.effectiveLimit(attempt, options.timeLimitSeconds);
 
     let current = attempt;
     if (attempt.submittedAt === undefined) {
@@ -367,6 +367,15 @@ export class AssessmentService {
     if (!attempt) throw new Error(`Quiz attempt ${attemptId} not found`);
     if (attempt.submittedAt === undefined) throw new AttemptNotSubmittedError(attempt.id);
     return this.resultOf(attempt, options.revealAnswers === true || auth?.staff === true);
+  }
+
+  /** The time limit this student really has: the host's limit plus their extension, if there is a source for one. */
+  private async effectiveLimit(attempt: QuizAttempt, seconds: number | undefined): Promise<number | undefined> {
+    const base = checkedLimit(seconds);
+    if (base === undefined || !this.options.extensions) return base;
+    const extension = await this.options.extensions.findActive(attempt.userId, attempt.quizId);
+    const extra = extension?.extraSeconds;
+    return typeof extra === 'number' && Number.isFinite(extra) && extra > 0 ? base + extra : base;
   }
 
   /** Stores the quiz submission and the automatic grade, each only if it is not there yet. */

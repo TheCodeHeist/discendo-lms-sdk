@@ -76,3 +76,31 @@ export function toLetterGrade(percent: number, scale: GradeScale): string {
   const band = sorted.find((b) => percent >= b.minPercent);
   return band?.label ?? 'N/A';
 }
+
+/**
+ * The deadline a student really has: `dueAt` plus their extension, if any. Returns a new date.
+ * `extraSeconds` must be a finite number from 0 up.
+ */
+export function effectiveDueAt(dueAt: Date, extension?: { extraSeconds: number } | null): Date {
+  if (!extension) return new Date(dueAt.getTime());
+  const { extraSeconds } = extension;
+  if (typeof extraSeconds !== 'number' || !Number.isFinite(extraSeconds) || extraSeconds < 0) {
+    throw new Error('extraSeconds must be a finite number from zero up');
+  }
+  return new Date(dueAt.getTime() + extraSeconds * 1000);
+}
+
+/**
+ * How many days late a submission is, as whole days: a day that has started counts, so one second
+ * late is 1 day and a day and a second is 2. On time, or exactly at the deadline, is 0. The deadline is
+ * the student's own (`effectiveDueAt`), so an extension is already taken into account. The result is
+ * what `applyLatePolicy` takes.
+ */
+export function daysLate(
+  submittedAt: Date,
+  dueAt: Date,
+  extension?: { extraSeconds: number } | null,
+): number {
+  const deadline = effectiveDueAt(dueAt, extension).getTime();
+  return Math.max(0, Math.ceil((submittedAt.getTime() - deadline) / 86_400_000));
+}

@@ -138,7 +138,20 @@ export interface QuizGradeSink {
   ): Promise<{ id: string }>;
 }
 
+/**
+ * Where to look up a student's extra time. `AccommodationService`'s `extensions` repository fits
+ * as it is.
+ */
+export interface ExtensionSource {
+  findActive(userId: string, contentId: string): Promise<{ extraSeconds: number } | null>;
+}
+
 export interface AssessmentOptions {
+  /**
+   * When set, a student's active extension on the quiz is added to the `timeLimitSeconds` you pass, in
+   * `saveAnswer` and `submitAttempt`. It does nothing when you pass no limit: the quiz is untimed.
+   */
+  extensions?: ExtensionSource;
   /**
    * Turns on automatic grading: when a quiz is submitted, its score is recorded as a grade for its
    * submission. `source` is the grader name, default `'system:quiz'`.

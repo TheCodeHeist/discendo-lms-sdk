@@ -5,6 +5,7 @@ import { PermissionDeniedError, ActorRequiredError } from '../../core/permission
 import { authorizeInSection } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
 import { computeFinalGrade, toLetterGrade } from './calculations.js';
+import type { ExcusalRepository } from './accommodations.js';
 
 export interface GradeRepository {
   create(entry: Omit<GradeEntry, 'id'>): Promise<GradeEntry>;
@@ -22,7 +23,7 @@ export interface GradeRepository {
   listForUserInSection(
     userId: string,
     sectionId: string,
-  ): Promise<Array<GradeEntry & { category: string }>>;
+  ): Promise<Array<GradeEntry & { category: string; contentId?: string }>>;
 }
 
 /** Where a submission lives and who made it. */
@@ -71,6 +72,13 @@ export interface GradingServiceOptions {
    * grades through `recordSystemGrade`, which needs no actor. Empty by default: nothing can.
    */
   systemGraders?: string[];
+  /**
+   * Where to look up excused work. When set, an entry whose content is excused for the student is left
+   * out of their final and letter grade (not counted as zero). Then `listForUserInSection` must return a
+   * `contentId` on each entry: if the student has an excusal and an entry has none, the calculation throws.
+   * An `AccommodationService`'s `excusals` repository fits.
+   */
+  excusals?: Pick<ExcusalRepository, 'listForUser'>;
 }
 
 /** `recordSystemGrade` was called with a grader name the host has not allowed (or one that is not a `system:` name). */
@@ -276,9 +284,20 @@ export class GradingService {
     scheme: GradingScheme,
   ): Promise<number> {
     const entries = await this.grades.listForUserInSection(userId, sectionId);
+    const excused = new Set(
+      ((await this.options.excusals?.listForUser(userId, sectionId)) ?? [])
+        .filter((x) => x.revokedAt === undefined)
+        .map((x) => x.contentId),
+    );
     const byCategory = new Map<string, GradeEntry[]>();
     for (const e of entries) {
       if (e.supersededBy) continue; // only count current entries
+      if (excused.size > 0) {
+        if (e.contentId === undefined) {
+          throw new Error('listForUserInSection must return a contentId on every entry when the student has excused work');
+        }
+        if (excused.has(e.contentId)) continue; // excused: left out, not counted as zero
+      }
       const bucket = byCategory.get(e.category) ?? [];
       bucket.push(e);
       byCategory.set(e.category, bucket);

@@ -82,6 +82,7 @@ function buildWorld(
     gradeSource?: string;
     gradeFailsOnce?: boolean;
     slowQuestions?: boolean;
+    extension?: { userId: string; quizId: string; extraSeconds: number };
     atomicSubmissions?: boolean | 'refuses';
     submissionFailsOnce?: boolean;
     seed?: Parameters<typeof makeQuizStore>[1] extends infer O ? (O extends { seed?: infer S } ? S : never) : never;
@@ -184,6 +185,7 @@ function buildWorld(
     ...(opts.seed ? { seed: opts.seed } : {}),
   });
 
+  const extensionLookups: Array<[string, string]> = [];
   const grades: Array<{ submissionId: string; userId: string; score: number; maxScore: number; source: string }> = [];
   let failGrade = opts.gradeFailsOnce === true;
   const grading: QuizGradeSink = {
@@ -207,10 +209,23 @@ function buildWorld(
     undefined,
     bus,
     opts.enforce === false ? undefined : { policy, repos },
-    opts.autoGrade ? { autoGrade: { grading, ...(opts.gradeSource ? { source: opts.gradeSource } : {}) } } : {},
+    {
+      ...(opts.autoGrade ? { autoGrade: { grading, ...(opts.gradeSource ? { source: opts.gradeSource } : {}) } } : {}),
+      ...(opts.extension
+        ? {
+            extensions: {
+              findActive: async (userId: string, contentId: string) => {
+                extensionLookups.push([userId, contentId]);
+                const x = opts.extension!;
+                return x.userId === userId && x.quizId === contentId ? { extraSeconds: x.extraSeconds } : null;
+              },
+            },
+          }
+        : {}),
+    },
   );
   const ofType = <T extends LmsEvent['type']>(type: T) => events.filter((e) => e.type === type);
-  return { service, store, subs, subCalls, grades, events, ofType, nodes };
+  return { service, store, subs, subCalls, grades, events, ofType, nodes, extensionLookups };
 }
 
 /** Starts an attempt for `stu` on quiz-1 in a fixed question order and returns it. */
@@ -504,6 +519,60 @@ describe('submitAttempt: numbering the submission', () => {
     const a2 = await start(w);
     await w.service.submitAttempt(a2.id, as('stu'));
     expect(w.subs.map((s) => s.attemptNumber)).toEqual([1, 2]);
+  });
+});
+
+describe('time extensions on a quiz', () => {
+  const ago = (seconds: number) => new Date(Date.now() - seconds * 1000);
+  const withExtension = (startedSecondsAgo: number, extraSeconds: number, who = { userId: 'stu', quizId: 'quiz-1' }) =>
+    buildWorld({
+      extension: { ...who, extraSeconds },
+      seed: [{ quizId: 'quiz-1', userId: 'stu', startedAt: ago(startedSecondsAgo) }],
+    });
+
+  it('lets the student keep answering past the host\'s limit, up to the limit plus their extra time', async () => {
+    const w = withExtension(90, 60); // limit 60 + extra 60 = 120 seconds; 90 have passed
+    const [a] = w.store.attempts;
+    await expect(w.service.saveAnswer(a!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).resolves.toBeDefined();
+    const over = withExtension(130, 60); // 130 seconds: past even the extended limit
+    await expect(over.service.saveAnswer(over.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).rejects.toBeInstanceOf(AttemptExpiredError);
+  });
+
+  it('without an extension the same moment is already too late', async () => {
+    const w = buildWorld({ seed: [{ quizId: 'quiz-1', userId: 'stu', startedAt: ago(90) }] });
+    await expect(w.service.saveAnswer(w.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).rejects.toBeInstanceOf(AttemptExpiredError);
+  });
+
+  it('flags a submission late only after the extended limit', async () => {
+    const ok = withExtension(90, 60);
+    await expect(ok.service.submitAttempt(ok.store.attempts[0]!.id, as('stu'), { timeLimitSeconds: 60 })).resolves.toMatchObject({ late: false });
+    const late = withExtension(130, 60);
+    await expect(late.service.submitAttempt(late.store.attempts[0]!.id, as('stu'), { timeLimitSeconds: 60 })).resolves.toMatchObject({ late: true });
+  });
+
+  it('does nothing for a quiz with no limit, and does not even look one up', async () => {
+    const w = withExtension(10_000, 60);
+    await expect(w.service.saveAnswer(w.store.attempts[0]!.id, 'q1', 0, as('stu'))).resolves.toBeDefined();
+    await expect(w.service.submitAttempt(w.store.attempts[0]!.id, as('stu'))).resolves.toMatchObject({ late: false });
+    expect(w.extensionLookups).toEqual([]);
+  });
+
+  it('is looked up for the attempt\'s own student and quiz, so another student\'s or another quiz\'s extension does not help', async () => {
+    const other = withExtension(90, 60, { userId: 'stu-2', quizId: 'quiz-1' });
+    await expect(other.service.saveAnswer(other.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).rejects.toBeInstanceOf(AttemptExpiredError);
+    const elsewhere = withExtension(90, 60, { userId: 'stu', quizId: 'quiz-b' });
+    await expect(elsewhere.service.saveAnswer(elsewhere.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).rejects.toBeInstanceOf(AttemptExpiredError);
+    expect(other.extensionLookups).toEqual([['stu', 'quiz-1']]);
+  });
+
+  it('ignores an extension amount that makes no sense', async () => {
+    for (const bad of [0, -30, Number.NaN]) {
+      const w = withExtension(90, bad);
+      await expect(w.service.saveAnswer(w.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).rejects.toBeInstanceOf(AttemptExpiredError);
+    }
+    // a negative amount must not shorten the limit either
+    const w = withExtension(50, -30);
+    await expect(w.service.saveAnswer(w.store.attempts[0]!.id, 'q1', 0, as('stu'), { timeLimitSeconds: 60 })).resolves.toBeDefined();
   });
 });
 

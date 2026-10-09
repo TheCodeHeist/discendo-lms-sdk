@@ -127,6 +127,30 @@ export interface QuizSubmittedEvent {
   late: boolean;
 }
 
+// --- grading events ---
+/** A student was given extra time on a piece of work (a later deadline, or a longer quiz). */
+export interface ExtensionGrantedEvent {
+  type: 'grading.extensionGranted';
+  extensionId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  extraSeconds: number;
+  /** Who granted it (oversight: a delegated TA is named here). */
+  grantedBy: string;
+  /** Set when this replaced an earlier extension for the same student and content. */
+  replacedExtensionId?: string;
+}
+/** A student was excused from a piece of work, so it no longer counts in their final grade. */
+export interface ExcusedEvent {
+  type: 'grading.excused';
+  excusalId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  excusedBy: string;
+}
+
 // --- scheduling events ---
 export interface OccurrenceCancelledEvent {
   type: 'scheduling.occurrenceCancelled';
@@ -171,6 +195,8 @@ export type LmsEvent =
   | EnrollmentRequestedEvent
   | EnrollmentRequestDecidedEvent
   | QuizSubmittedEvent
+  | ExtensionGrantedEvent
+  | ExcusedEvent
   | GradePostedEvent
   | ContentPublishedEvent
   | SubmissionReceivedEvent

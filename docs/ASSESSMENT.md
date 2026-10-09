@@ -16,7 +16,7 @@ attaches a score to a submission this module created.
 | --- | --- |
 | **You import** | `AssessmentService`, `scoreQuiz`, the errors `AttemptClosedError`, `AttemptExpiredError`, `AttemptNotSubmittedError`, `InvalidAnswerError`, and the types in `types.ts` |
 | **You implement** | `SubmissionRepository` and `QuizRepository` (defined here), plus, to enforce permissions, the `core` repositories `users`, `courses`, `enrollments`, `content` |
-| **Optional seams** | a `PlagiarismCheckHook`; an `EventBus`; `autoGrade`, a `QuizGradeSink` (a `GradingService` fits) |
+| **Optional seams** | a `PlagiarismCheckHook`; an `EventBus`; `autoGrade`, a `QuizGradeSink` (a `GradingService` fits); `extensions`, an `ExtensionSource` (extra quiz time) |
 | **Emits events** | `assessment.submissionReceived`, `assessment.quizSubmitted` |
 | **Permission actions** | `assessment.submit`, `assessment.startAttempt`, `assessment.answerQuiz`, `assessment.submitQuiz`, `assessment.viewAttempts`, `assessment.recordOffline` |
 | **Enforcement** | opt-in: the fifth constructor argument, `{ policy, repos }` |
@@ -281,6 +281,20 @@ scored, in that order, and a question removed from the quiz is skipped, so `maxS
 attempt could have earned. `points` must be a finite number from 0 up, or it throws. One choice per
 question; there are no multi-select or written answers yet.
 
+### Extra time: the `extensions` option
+
+```ts
+const assessment = new AssessmentService(subs, quizzes, hook, bus, enforcement, {
+  extensions: accommodationExtensions,   // anything with findActive(userId, contentId): { extraSeconds } | null
+});
+```
+
+With it, a student's active extension on the quiz (see `AccommodationService` in [GRADING.md](./GRADING.md); its
+`extensions` repository fits as it is) is **added to the `timeLimitSeconds` you pass**, in `saveAnswer` and
+`submitAttempt`: the limit that decides when answers are refused and when a submission is `late`. It looks up the
+attempt's own student and quiz, and is not used at all when you pass no limit (the quiz is untimed). An amount that is
+not a finite number above zero is ignored.
+
 ### Automatic grading: the `autoGrade` option
 
 ```ts
@@ -419,5 +433,5 @@ after each stored submission. A failing listener never fails the submission.
 | `test/assessment-permissions.test.ts` | all four methods with enforcement on, including `recordOffline` (who may, delegation, active-student target, numbering, no hook or event): own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/assessment-plagiarism.test.ts` | the hook receives the stored submission, is not awaited, and a rejecting or synchronously throwing hook neither fails the submission, leaks an unhandled rejection, nor stops the event |
-| `test/assessment-quiz.test.ts` | `scoreQuiz`; resuming an open attempt; the answer-key-free view; saving answers (validation, closed, expired, races); submitting (scoring, the quiz submission and its numbering, idempotence, double submit, late flag, half-done recovery); `autoGrade`; `getResult` and who sees the breakdown; the two new student-only actions |
+| `test/assessment-quiz.test.ts` | extra quiz time from extensions; `scoreQuiz`; resuming an open attempt; the answer-key-free view; saving answers (validation, closed, expired, races); submitting (scoring, the quiz submission and its numbering, idempotence, double submit, late flag, half-done recovery); `autoGrade`; `getResult` and who sees the breakdown; the two new student-only actions |
 | `test/core-permissions.test.ts` | the three assessment rules ("assessment rules") |

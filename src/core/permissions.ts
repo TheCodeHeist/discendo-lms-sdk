@@ -83,6 +83,9 @@ export const DEFAULT_RULES = {
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
+  // Per-student exceptions. Delegable: an instructor may hand them to a TA, who then acts under their own name.
+  'grading.grantExtension': { roles: ['admin', 'instructor'], delegable: true },
+  'grading.excuse': { roles: ['admin', 'instructor'], delegable: true },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades', afterCompletion: true },
   // communication
   // Announcements have two separate channels: one addressed to the students and one to the

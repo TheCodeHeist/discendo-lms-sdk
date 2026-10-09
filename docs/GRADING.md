@@ -4,7 +4,7 @@
 student's recorded grades into a final percentage and a letter. Subpath:
 `discendo-sdk/grading`.
 
-The module has two halves that are deliberately separate:
+The module has three parts:
 
 - **`GradingService`** records grades and computes a student's final grade. It owns
   persistence (through a repository), permissions and events.
@@ -12,15 +12,17 @@ The module has two halves that are deliberately separate:
   categories with dropped lowest scores, letter grades. They touch no repository and
   have no side effects, so they are trivial to test and to reuse (for example to preview
   a grade before committing it).
+- **`AccommodationService`** records per-student exceptions: **extra time** (extensions) and
+  **excusals** from a piece of work. It has its own repositories, permissions and events.
 
 ## At a glance
 
 | | |
 | --- | --- |
-| **You import** | `GradingService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `toLetterGrade`, and the types in `types.ts` |
+| **You import** | `GradingService`, `AccommodationService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, and the types in `types.ts` |
 | **You implement** | `GradeRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
-| **Emits events** | `grading.gradePosted` |
-| **Permission actions** | `grading.record`, `grading.view` (and `recordSystemGrade`, which takes no actor: see below) |
+| **Emits events** | `grading.gradePosted`, `grading.extensionGranted`, `grading.excused` |
+| **Permission actions** | `grading.record`, `grading.view`, `grading.grantExtension`, `grading.excuse` (and `recordSystemGrade`, which takes no actor: see below) |
 | **Enforcement** | opt-in: the third constructor argument, `{ policy, repos, submissions }` |
 
 ## Types (`types.ts`)
@@ -143,6 +145,99 @@ Both ask `GradeRepository.listForUserInSection`, ignore superseded entries, grou
 rest by **category** (which your repository supplies on each entry), and run
 `computeFinalGrade`.
 
+**Excused work.** With the `excusals` option (an `ExcusalRepository`, such as the one behind
+`AccommodationService`), an entry whose content is excused for that student is **left out**, as if it did
+not exist, not counted as zero. This happens before the drop-lowest rule, so what is dropped is
+chosen among the work that still counts. A revoked excusal counts for nothing. It needs to know which
+content each entry belongs to, so **`listForUserInSection` must return a `contentId` on each entry**; if the
+student has an excusal and an entry has none, the calculation throws instead of guessing. Without the
+option, or for a student with no excusals, nothing changes and `contentId` is not needed.
+
+## `AccommodationService`
+
+Per-student exceptions to the normal rules of a piece of work. Staff, and TAs they delegate to, grant and
+end them, each under their own name; a student sees their own, and so does a guardian with the `grades`
+scope. **Nothing is deleted**: ending one sets `revokedAt` and `revokedBy`, and changing an extension keeps the
+old one as history.
+
+```ts
+new AccommodationService(
+  repos,        // the authorization repositories, `content`, plus `extensions` and `excusals` (below)
+  bus?,
+  { policy },   // required: every method needs an { actorId }, because each record says who made it
+)
+```
+
+```ts
+interface TimeExtension {
+  id; userId; contentId; sectionId;
+  extraSeconds: number;       // extra time, in seconds
+  reason?; grantedBy; grantedAt; revokedAt?; revokedBy?;
+}
+interface Excusal {
+  id; userId; contentId; sectionId;
+  reason?; excusedBy; excusedAt; revokedAt?; revokedBy?;
+}
+```
+
+### Extensions
+
+An extension is only an **amount of extra time**: the SDK stores no due dates (they are yours), so it cannot
+move one. It is used in two places: for assignments, the pure helpers `effectiveDueAt` and `daysLate` below; for
+quizzes, the `extensions` option of `AssessmentService`, which adds it to the time limit you pass (see
+[ASSESSMENT.md](./ASSESSMENT.md)).
+
+- **`grantExtension(contentId, userId, extraSeconds, actor, { reason? })`** gives the student more time.
+  `extraSeconds` must be a finite number above zero. Granting the same amount again changes nothing and emits
+  nothing; a different amount **replaces** the old extension, which stays as a revoked record
+  (`replacedExtensionId` on the event). Emits `grading.extensionGranted`.
+- **`revokeExtension(contentId, userId, actor)`** ends it and returns the record, or `null` if there was none.
+- **`getExtension(contentId, userId, actor)`** the current extension or `null`: the student's own, their
+  guardian's (`grades` scope), or anyone's for staff.
+- **`listExtensions(contentId, actor, { includeRevoked? })`** everyone's, staff only.
+
+### Excusals
+
+An excused item is **left out of the student's final grade** (see `excusals` above), instead of being counted
+as zero. Excusing needs no grade to exist yet; the item simply never counts.
+
+- **`excuse(contentId, userId, actor, { reason? })`**: excusing someone already excused changes nothing and emits
+  nothing. Emits `grading.excused`.
+- **`unexcuse(contentId, userId, actor)`**: the work counts again; returns the record, or `null`.
+- **`getExcusal(contentId, userId, actor)`** and **`listExcusals(contentId, actor, { includeRevoked? })`**, readable
+  like the extension ones.
+
+### Who can do what
+
+| Method | Action | Who, by default |
+| --- | --- | --- |
+| `grantExtension`, `revokeExtension`, `listExtensions` | `grading.grantExtension` | admin, instructor, and a TA they delegated it to |
+| `excuse`, `unexcuse`, `listExcusals` | `grading.excuse` | admin, instructor, and a TA they delegated it to |
+| `getExtension`, `getExcusal` | `grading.view` | staff for anyone; a student for themselves (also after completing the section); a guardian with the `grades` scope |
+
+Each grant and revoke is checked **before anything else**, so a stranger learns nothing, and **unknown
+content is refused exactly like forbidden content**. The section always comes from the content node (never
+from the caller), and the target must be an **active student** of that section: a dropped student, staff, or
+someone in another section is refused. Content that is not published yet is fine for staff. A student can
+never grant or excuse themselves.
+
+### The repositories
+
+```ts
+interface TimeExtensionRepository {
+  create(extension: Omit<TimeExtension, 'id'>): Promise<TimeExtension>;
+  findActive(userId: string, contentId: string): Promise<TimeExtension | null>;   // not revoked
+  revoke(id: string, at: Date, by: string): Promise<TimeExtension>;               // set revokedAt, revokedBy
+  listForContent(contentId: string, options?: { includeRevoked?: boolean }): Promise<TimeExtension[]>;
+  listForUser(userId: string, sectionId: string, options?: { includeRevoked?: boolean }): Promise<TimeExtension[]>;
+}
+// ExcusalRepository has the same five methods for Excusal.
+```
+
+`list...` methods leave out revoked records unless asked. Add a uniqueness rule (one active record per student and
+content) if your store can enforce it: the service checks with a read, so two simultaneous grants could both
+create one.
+
 ## `GradeRepository`
 
 ```ts
@@ -153,7 +248,7 @@ interface GradeRepository {
   // optional, recommended: supersede ONLY IF still current, as one atomic compare-and-set
   supersedeIfCurrent?(id: string, byId: string): Promise<boolean>;
   listForUserInSection(userId: string, sectionId: string):
-    Promise<Array<GradeEntry & { category: string }>>;
+    Promise<Array<GradeEntry & { category: string; contentId?: string }>>;   // contentId: needed for excusals
 }
 ```
 
@@ -245,6 +340,19 @@ grade into `Infinity` or `NaN`, and a category with only such entries counts as 
 yet. `recordGrade` refuses to store these, so this only matters for rows written some other way.
 It is silent, so validate imported data.
 
+### `effectiveDueAt(dueAt, extension?): Date` and `daysLate(submittedAt, dueAt, extension?): number`
+
+`effectiveDueAt` is the deadline a student really has: `dueAt` plus their `extraSeconds`, as a **new** date
+(`extraSeconds` must be a finite number from 0 up). `daysLate` is how late a submission is **in whole days, started
+days included**: one second late is 1, a day and a second is 2, on time or exactly at the deadline is 0. It measures
+against the extended deadline, and its result is what `applyLatePolicy` takes:
+
+```ts
+const ext = await accommodations.getExtension(assignmentId, studentId, actor);
+const late = daysLate(submission.submittedAt, dueAt, ext);          // the SDK has no due dates: dueAt is yours
+const score = applyLatePolicy(rawScore, maxScore, late, policy);
+```
+
 ### `applyLatePolicy(score, maxScore, daysLate, policy): number`
 
 Returns the score after a late penalty.
@@ -268,6 +376,10 @@ Finds the band with the highest `minPercent` that the percentage reaches. `'N/A'
 none does (for example a negative percentage, or a scale with no 0 band).
 
 ## Events
+
+`grading.extensionGranted` (`extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`,
+`replacedExtensionId?`) and `grading.excused` (`excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy`),
+once per new record, each naming who did it. Ending an extension or an excusal emits nothing yet.
 
 `grading.gradePosted` (`gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`,
 `graderId`), once per `recordGrade`, including a regrade. It identifies the work by
@@ -293,7 +405,14 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 - **A completed student can still read their own grades** (final and letter grade), and so
   can their guardians, but nothing else, and never anyone else's. Dropped and waitlisted
   students cannot. See [PERMISSIONS.md](./PERMISSIONS.md).
-- **Not built yet:** grading extensions, curve, GPA, and excused-assignment handling.
+- **Not built yet:** curve and GPA (pure functions, planned), rubrics and peer review.
+- **Extensions know nothing about due dates**, which are yours; they are an amount of time you apply with
+  `effectiveDueAt` / `daysLate`, or the quiz `extensions` option. Nothing stops an extension on content that has no
+  deadline or time limit; it simply does nothing.
+- **Excused work is matched by content.** An excusal does nothing for a grade whose entries carry no `contentId`
+  (and the calculation throws if it cannot tell), and it is only as current as your repository's data.
+- **Ending an extension or excusal emits no event**, so a host cannot be told of a revocation yet.
+- **Two simultaneous grants can both create a record** unless your store enforces one active record per student and content.
 - **Late penalties are manual** (see above).
 
 ## Tests
@@ -301,6 +420,7 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | File | Covers |
 | --- | --- |
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
+| `test/grading-accommodations.test.ts` | `effectiveDueAt`, `daysLate`; `AccommodationService` (grant, replace, revoke, excuse, un-excuse, reading, delegation, tenancy, probing, idempotence, events); final grades leaving out excused work |
 | `test/grading-system.test.ts` | `recordSystemGrade`: the `system:` prefix and allow-list, the numbers, no actor needed, the submission-owner check with enforcement, the event |
 | `test/atomic-repositories.test.ts` | regrading races with and without `supersedeIfCurrent` (one winner, the loser kept as history and told who won, only the winner announced and counted), alongside the capacity and attempt-limit races |
 | `test/grading-validation.test.ts` | the number checks in `recordGrade` (each bad case, the boundaries, extra credit on and off, a refused regrade leaving the current grade alone, the permission check coming first) and `computeFinalGrade` skipping entries that cannot be a grade |
