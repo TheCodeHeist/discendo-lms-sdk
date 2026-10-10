@@ -197,7 +197,10 @@ export class AssessmentService {
 
 function shuffle<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const array = new Uint32Array(1);
+    crypto.getRandomValues(array);
+    const randomFraction = array[0]! / (0xffffffff + 1);
+    const j = Math.floor(randomFraction * (i + 1));
     [arr[i], arr[j]] = [arr[j] as T, arr[i] as T];
   }
 }
