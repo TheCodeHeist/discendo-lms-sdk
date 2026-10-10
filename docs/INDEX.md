@@ -42,7 +42,7 @@ tests that cover it.
 | **guardians** | `discendo-sdk/guardians` | [GUARDIANS.md](./GUARDIANS.md) | Admins creating, changing and revoking guardian links, and listing who to notify |
 | **content** | `discendo-sdk/content` | [CONTENT.md](./CONTENT.md) | The content tree, publishing and versioning, prerequisite gating |
 | **assessment** | `discendo-sdk/assessment` | [ASSESSMENT.md](./ASSESSMENT.md) | Submissions, attempt limits, quiz attempts with randomization, a plagiarism-check seam |
-| **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades, student extensions and excusals |
+| **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades, student extensions and excusals, curves and GPA |
 | **scheduling** | `discendo-sdk/scheduling` | [SCHEDULING.md](./SCHEDULING.md) | Timetables: recurring templates, occurrences, conflicts, availability, room matching and an auto-scheduling solver. By far the largest module |
 | scheduling: calendar | `discendo-sdk/scheduling/calendar` | [CALENDAR.md](./CALENDAR.md) | Availability windows (locked, open, closed) and iCal export of due dates |
 | **communication** | `discendo-sdk/communication` | [COMMUNICATION.md](./COMMUNICATION.md) | Announcements, thread replies, and the bridge from events to a notification sink |

@@ -4,7 +4,7 @@
 student's recorded grades into a final percentage and a letter. Subpath:
 `discendo-sdk/grading`.
 
-The module has three parts:
+The module has four parts:
 
 - **`GradingService`** records grades and computes a student's final grade. It owns
   persistence (through a repository), permissions and events.
@@ -14,12 +14,14 @@ The module has three parts:
   a grade before committing it).
 - **`AccommodationService`** records per-student exceptions: **extra time** (extensions) and
   **excusals** from a piece of work. It has its own repositories, permissions and events.
+- **Curves and GPA**: pure functions (`applyCurve`, `curveEntries`, `computeGpa`) with no repositories,
+  permissions or events.
 
 ## At a glance
 
 | | |
 | --- | --- |
-| **You import** | `GradingService`, `AccommodationService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, and the types in `types.ts` |
+| **You import** | `GradingService`, `AccommodationService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, `applyCurve`, `curveEntries`, `computeGpa`, `toGpaPoints`, `STANDARD_GPA_SCALE`, and the types in `types.ts` |
 | **You implement** | `GradeRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
 | **Emits events** | `grading.gradePosted`, `grading.extensionGranted`, `grading.excused` |
 | **Permission actions** | `grading.record`, `grading.view`, `grading.grantExtension`, `grading.excuse` (and `recordSystemGrade`, which takes no actor: see below) |
@@ -353,6 +355,79 @@ const late = daysLate(submission.submittedAt, dueAt, ext);          // the SDK h
 const score = applyLatePolicy(rawScore, maxScore, late, policy);
 ```
 
+### Curves: `applyCurve(percents, curve, options?)` and `curveEntries(entries, curve, options?)`
+
+Pure. A curve works on **percentages** (0 and up, normally 0 to 100) and returns new ones in the same order;
+`curveEntries` does the same for anything with a `score` and a `maxScore` and returns copies with a new `score`
+(the same `maxScore`). Pass **everyone who counts** for the piece of work, and nobody else: `scaleToTop` and
+`targetMean` look at the whole class.
+
+| `curve.kind` | What it does |
+| --- | --- |
+| `flat` (`points`) | adds `points` percentage points to everyone; `points` is from 0 up |
+| `scaleToTop` (`target?`, default 100) | scales so the best score becomes `target`; a class that already reaches it is left alone |
+| `sqrt` | `10 * sqrt(percent)`: 36 becomes 60, 100 stays 100 |
+| `targetMean` (`mean`) | shifts everyone by the same amount so the class average reaches `mean`; an average already there is left alone |
+| `linear` (`fromMin`, `fromMax`, `toMin`, `toMax`) | maps `fromMin..fromMax` onto `toMin..toMax` along a straight line that carries on beyond both ends; each range must rise |
+
+Rules that hold for **every** curve:
+
+- **A curve never lowers a grade.** Whatever the curve would give, a score comes back as at least what it was, and
+  one the curve does not raise comes back **exactly** as it was (also for `curveEntries`: its `score` is untouched,
+  not recomputed).
+- **Capped at 100** (`options.cap`); `cap: null` removes the cap for courses with extra credit, and another number
+  caps there. A grade already above the cap keeps its value. A cap can stop `targetMean` short of its target.
+- **No rounding** unless `options.decimals` (0 to 10) is set; it rounds the curved value, not a grade the curve left alone.
+- **Bad input throws** instead of turning into NaN: a negative or non-finite percentage, an entry without a usable
+  `maxScore`, a curve of an unknown kind, or an option that makes no sense.
+
+```ts
+const percents = entries.map((e) => (e.score / e.maxScore) * 100);
+const curved = applyCurve(percents, { kind: 'targetMean', mean: 75 });
+```
+
+**Nothing is stored.** To record curved scores, regrade each entry with `GradingService.recordGrade` and
+`previousEntryId`, as an actor: the original stays in the history and the audit trail says who curved it.
+
+```ts
+const newEntries = curveEntries(entriesForTheAssignment, { kind: 'scaleToTop' });
+for (const [i, e] of newEntries.entries()) {
+  if (e.score !== entriesForTheAssignment[i].score) {
+    const before = entriesForTheAssignment[i];
+    await grading.recordGrade(e.submissionId, e.userId, e.score, e.maxScore, teacher.id, before.id, { actorId: teacher.id });
+  }
+}
+```
+
+### GPA: `computeGpa(courses, scale, options?)`
+
+Pure. The credit-weighted average of grade points.
+
+```ts
+computeGpa(
+  [{ credits: 4, letter: 'A' }, { credits: 3, percent: 87 }, { credits: 3, letter: 'P' }],
+  { ...STANDARD_GPA_SCALE, P: null },
+  { letterScale, decimals: 2 },        // letterScale: the bands that turn a percent into a letter
+);
+```
+
+- **The scale** (`GpaScale`) maps a letter to points. `STANDARD_GPA_SCALE` is the US four-point scale with
+  pluses and minuses (A+ and A are 4.0, F is 0); it is frozen, so spread it to extend it, or pass your own.
+  A letter mapped to **`null`** (pass, withdrawn, incomplete) is **left out** of the average, credits included.
+  A letter that is **not in the scale at all throws**, so a typo like `'a'` is caught instead of skipped.
+  `toGpaPoints(letter, scale)` is the same lookup on its own.
+- **A course** has `credits` (finite, from 0 up) and exactly one of `letter` or `percent`. A `percent` goes through
+  `options.letterScale` with `toLetterGrade`, and throws without it or when the percentage falls outside every band
+  (`'N/A'`).
+- **`bonus`** gives a weighted course (honors, AP) extra points, **only when it earned more than 0**, so an F stays 0.
+- **The result** is `null`, not 0, when nothing counts (no courses, only excluded letters, or zero credits).
+  `options.decimals` rounds it; otherwise it is not rounded.
+- Every course is checked first, so a bad letter, credit value or bonus throws even for a course that would not count.
+
+The SDK does not know a course's credits, or which attempt of a repeated course should count, so **you** gather
+them. For a student's cumulative GPA, take each section's final letter (`computeLetterGradeForUser`) or percentage
+(`computeFinalGradeForUser`) with its credits, drop the retaken attempts you do not want to count, and pass the list.
+
 ### `applyLatePolicy(score, maxScore, daysLate, policy): number`
 
 Returns the score after a late penalty.
@@ -405,7 +480,10 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 - **A completed student can still read their own grades** (final and letter grade), and so
   can their guardians, but nothing else, and never anyone else's. Dropped and waitlisted
   students cannot. See [PERMISSIONS.md](./PERMISSIONS.md).
-- **Not built yet:** curve and GPA (pure functions, planned), rubrics and peer review.
+- **Not built yet:** rubrics (types only) and peer review.
+- **Curving and GPA are calculations, not records.** Nothing remembers that a curve was applied or what a GPA was; recording a
+  curve is a regrade you do, and a GPA you keep is yours to store. There is no per-course credit value, repeat/retake policy,
+  or class rank in the SDK.
 - **Extensions know nothing about due dates**, which are yours; they are an amount of time you apply with
   `effectiveDueAt` / `daysLate`, or the quiz `extensions` option. Nothing stops an extension on content that has no
   deadline or time limit; it simply does nothing.
@@ -420,6 +498,7 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | File | Covers |
 | --- | --- |
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
+| `test/grading-curve-gpa.test.ts` | `applyCurve` (each curve kind, the never-lower rule, the cap, rounding, bad input), `curveEntries` (exact scores kept, whole-class curves), `computeGpa` and `toGpaPoints` (weighting, excluded and unknown letters, bonus, percent route, null result, rounding) |
 | `test/grading-accommodations.test.ts` | `effectiveDueAt`, `daysLate`; `AccommodationService` (grant, replace, revoke, excuse, un-excuse, reading, delegation, tenancy, probing, idempotence, events); final grades leaving out excused work |
 | `test/grading-system.test.ts` | `recordSystemGrade`: the `system:` prefix and allow-list, the numbers, no actor needed, the submission-owner check with enforcement, the event |
 | `test/atomic-repositories.test.ts` | regrading races with and without `supersedeIfCurrent` (one winner, the loser kept as history and told who won, only the winner announced and counted), alongside the capacity and attempt-limit races |
