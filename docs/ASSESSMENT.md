@@ -249,7 +249,7 @@ after each stored submission. A failing listener never fails the submission. See
   [CALENDAR.md](./CALENDAR.md).
 - **The content kind is not checked.** Nothing stops `submit` being called on a page, or
   `generateAttempt` on an assignment.
-- **The shuffle uses `Math.random`**: unseeded and not reproducible.
+- **The shuffle is not reproducible**: it uses `crypto.getRandomValues` and cannot be seeded.
 - `grading.view` covers a guardian's view of grades; there is no guardian access to
   attempts.
 
