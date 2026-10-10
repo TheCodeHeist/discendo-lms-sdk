@@ -434,6 +434,8 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     'content.manage',
     'enrollment.enroll',
     'enrollment.grantRole.student',
+    'grading.excuse',
+    'grading.grantExtension',
     'reporting.recordAttendance',
     'scheduling.manageOccurrence',
     'scheduling.recordAttendance',
@@ -445,7 +447,7 @@ describe('delegated actions (grants an instructor gave a TA)', () => {
     ...extra,
   });
 
-  it('marks exactly eight built-in actions as delegable, and the policy lists them', () => {
+  it('marks exactly ten built-in actions as delegable, and the policy lists them', () => {
     expect(
       Object.entries(DEFAULT_RULES)
         .filter(([, rule]) => 'delegable' in rule)

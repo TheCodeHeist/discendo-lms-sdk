@@ -59,6 +59,11 @@ export const DEFAULT_RULES = {
   'enrollment.bulkEnroll': { roles: ['admin'] },
   'enrollment.drop': { roles: ['admin', 'instructor'], ownRoles: ['student'] },
   'enrollment.viewRoster': { roles: ['admin', 'instructor', 'ta'] },
+  // Moves waitlisted people into free seats. Not delegable: who gets a seat is the instructor's call.
+  'enrollment.promoteWaitlist': { roles: ['admin', 'instructor'] },
+  // Reviews students' own requests for a seat (list, accept, modify, reject). Admin only by default,
+  // and not delegable. A host that wants section instructors to review overrides this rule.
+  'enrollment.reviewRequest': { roles: ['admin'] },
   // Enrolling someone with a role ALSO requires the matching grantRole action,
   // so nobody can hand out a role beyond what they are allowed to grant.
   'enrollment.grantRole.admin': { roles: ['admin'] },
@@ -71,10 +76,16 @@ export const DEFAULT_RULES = {
   // assessment and grading
   'assessment.submit': { ownRoles: ['student'] },
   'assessment.startAttempt': { ownRoles: ['student'] },
+  // Answering and submitting a quiz attempt are the attempt's own student's alone: staff cannot answer for them.
+  'assessment.answerQuiz': { ownRoles: ['student'] },
+  'assessment.submitQuiz': { ownRoles: ['student'] },
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
+  // Per-student exceptions. Delegable: an instructor may hand them to a TA, who then acts under their own name.
+  'grading.grantExtension': { roles: ['admin', 'instructor'], delegable: true },
+  'grading.excuse': { roles: ['admin', 'instructor'], delegable: true },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades', afterCompletion: true },
   // communication
   // Announcements have two separate channels: one addressed to the students and one to the

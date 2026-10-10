@@ -5,15 +5,25 @@ import { PermissionDeniedError, ActorRequiredError } from '../../core/permission
 import { authorizeInSection } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
 import { computeFinalGrade, toLetterGrade } from './calculations.js';
+import type { ExcusalRepository } from './accommodations.js';
 
 export interface GradeRepository {
   create(entry: Omit<GradeEntry, 'id'>): Promise<GradeEntry>;
   findById(id: string): Promise<GradeEntry | null>;
   markSuperseded(id: string, byId: string): Promise<void>;
+  /**
+   * OPTIONAL, and strongly recommended: mark entry `id` as superseded by `byId` **only if it is
+   * still current** (its `supersededBy` is unset), as ONE atomic compare-and-set (a conditional
+   * update), and return whether it did. Without it the service checks that the previous entry is
+   * current and then writes, so two simultaneous regrades of one entry can both pass the check and
+   * leave two current entries. With it, the loser gets a `GradeConflictError` and its own entry is
+   * kept, marked as superseded by the winner, so exactly one entry stays current.
+   */
+  supersedeIfCurrent?(id: string, byId: string): Promise<boolean>;
   listForUserInSection(
     userId: string,
     sectionId: string,
-  ): Promise<Array<GradeEntry & { category: string }>>;
+  ): Promise<Array<GradeEntry & { category: string; contentId?: string }>>;
 }
 
 /** Where a submission lives and who made it. */
@@ -41,6 +51,64 @@ export interface GradingEnforcement {
   submissions: SubmissionLocator;
 }
 
+/** A grade that cannot be recorded: the numbers are not a valid score out of a valid maximum. */
+export class InvalidGradeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InvalidGradeError';
+  }
+}
+
+export interface GradingServiceOptions {
+  /**
+   * Allow a score above the maximum (extra credit), which then counts as the percentage it is
+   * (120 out of 100 is 120%), so a final grade can exceed 100. Off by default, so a typo such as
+   * 850 for 85 is refused instead of silently inflating a grade. Negative and non-finite numbers,
+   * and a maximum of zero or less, are refused either way.
+   */
+  allowExtraCredit?: boolean;
+  /**
+   * The system grader names (each starting with `system:`, such as `'system:quiz'`) that may post
+   * grades through `recordSystemGrade`, which needs no actor. Empty by default: nothing can.
+   */
+  systemGraders?: string[];
+  /**
+   * Where to look up excused work. When set, an entry whose content is excused for the student is left
+   * out of their final and letter grade (not counted as zero). Then `listForUserInSection` must return a
+   * `contentId` on each entry: if the student has an excusal and an entry has none, the calculation throws.
+   * An `AccommodationService`'s `excusals` repository fits.
+   */
+  excusals?: Pick<ExcusalRepository, 'listForUser'>;
+}
+
+/** `recordSystemGrade` was called with a grader name the host has not allowed (or one that is not a `system:` name). */
+export class SystemGraderNotAllowedError extends Error {
+  constructor(readonly source: string) {
+    super(`'${source}' is not an allowed system grader`);
+    this.name = 'SystemGraderNotAllowedError';
+  }
+}
+
+/**
+ * A regrade lost a race: another regrade of the same entry was recorded first. The loser's entry is
+ * kept as history, superseded by the winner's, so exactly one entry is current. Nothing was
+ * announced for the loser; ask again with `winnerId` as the `previousEntryId` if the grade should
+ * still change.
+ */
+export class GradeConflictError extends Error {
+  constructor(
+    /** The entry this call created and then marked as superseded. */
+    readonly entryId: string,
+    /** The entry both regrades were replacing. */
+    readonly previousEntryId: string,
+    /** The entry that won (absent if the repository could not say). */
+    readonly winnerId?: string,
+  ) {
+    super(`Grade entry ${previousEntryId} was superseded by another regrade first`);
+    this.name = 'GradeConflictError';
+  }
+}
+
 export class GradingService {
   constructor(
     private readonly grades: GradeRepository,
@@ -52,6 +120,7 @@ export class GradingService {
      * (the integrity checks on `previousEntryId` apply either way).
      */
     private readonly enforcement?: GradingEnforcement,
+    private readonly options: GradingServiceOptions = {},
   ) {}
 
   /**
@@ -67,6 +136,12 @@ export class GradingService {
    * in the submission's section, `graderId` must be the actor (nobody records
    * a grade under someone else's name), `userId` must be whoever submitted the
    * work, and nobody may grade their own submission.
+   *
+   * The numbers must make a grade, checked after the permission check:
+   * `maxScore` finite and above zero, `score` finite and not negative, and
+   * `score` not above `maxScore` unless the service was built with
+   * `allowExtraCredit`. Otherwise it throws `InvalidGradeError` and stores,
+   * supersedes and announces nothing.
    */
   async recordGrade(
     submissionId: string,
@@ -80,6 +155,8 @@ export class GradingService {
     if (this.enforcement) {
       await this.authorizeRecord(this.enforcement, submissionId, userId, graderId, actor);
     }
+
+    this.validateNumbers(score, maxScore);
 
     if (previousEntryId !== undefined) {
       const previous = await this.grades.findById(previousEntryId);
@@ -101,7 +178,17 @@ export class GradingService {
       gradedAt: new Date(),
     });
     if (previousEntryId) {
-      await this.grades.markSuperseded(previousEntryId, entry.id);
+      if (this.grades.supersedeIfCurrent) {
+        // An atomic compare-and-set: only one regrade of an entry can win.
+        if (!(await this.grades.supersedeIfCurrent(previousEntryId, entry.id))) {
+          const winnerId = (await this.grades.findById(previousEntryId))?.supersededBy;
+          // Keep the loser's entry as history, behind the winner, so exactly one stays current.
+          if (winnerId !== undefined) await this.grades.markSuperseded(entry.id, winnerId);
+          throw new GradeConflictError(entry.id, previousEntryId, winnerId);
+        }
+      } else {
+        await this.grades.markSuperseded(previousEntryId, entry.id);
+      }
     }
 
     void this.events?.emit({
@@ -114,6 +201,52 @@ export class GradingService {
       graderId: entry.graderId,
     });
 
+    return entry;
+  }
+
+  /**
+   * Records a grade made by the system rather than a person, such as a quiz's automatic score. It
+   * takes no actor and checks no permission, so it is for SDK code and your own server code only;
+   * never expose it to a client. To keep that safe, the grader name `source` must start with
+   * `system:` and be listed in the service's `systemGraders` option, or it throws
+   * `SystemGraderNotAllowedError` and stores nothing. With enforcement on, the submission must exist and
+   * belong to `userId`. The score is checked like any grade. It is always a new entry (there is no
+   * regrade here) and `grading.gradePosted` is emitted with the source as `graderId`.
+   */
+  async recordSystemGrade(
+    submissionId: string,
+    userId: string,
+    score: number,
+    maxScore: number,
+    source: string,
+  ): Promise<GradeEntry> {
+    if (!source.startsWith('system:') || !(this.options.systemGraders ?? []).includes(source)) {
+      throw new SystemGraderNotAllowedError(source);
+    }
+    if (this.enforcement) {
+      const located = await this.enforcement.submissions.locate(submissionId);
+      if (!located) throw new Error(`Submission ${submissionId} not found`);
+      if (located.userId !== userId) throw new Error('The submission does not belong to that user');
+    }
+    this.validateNumbers(score, maxScore);
+
+    const entry = await this.grades.create({
+      submissionId,
+      userId,
+      score,
+      maxScore,
+      graderId: source,
+      gradedAt: new Date(),
+    });
+    void this.events?.emit({
+      type: 'grading.gradePosted',
+      gradeEntryId: entry.id,
+      submissionId: entry.submissionId,
+      userId: entry.userId,
+      score: entry.score,
+      maxScore: entry.maxScore,
+      graderId: entry.graderId,
+    });
     return entry;
   }
 
@@ -151,9 +284,20 @@ export class GradingService {
     scheme: GradingScheme,
   ): Promise<number> {
     const entries = await this.grades.listForUserInSection(userId, sectionId);
+    const excused = new Set(
+      ((await this.options.excusals?.listForUser(userId, sectionId)) ?? [])
+        .filter((x) => x.revokedAt === undefined)
+        .map((x) => x.contentId),
+    );
     const byCategory = new Map<string, GradeEntry[]>();
     for (const e of entries) {
       if (e.supersededBy) continue; // only count current entries
+      if (excused.size > 0) {
+        if (e.contentId === undefined) {
+          throw new Error('listForUserInSection must return a contentId on every entry when the student has excused work');
+        }
+        if (excused.has(e.contentId)) continue; // excused: left out, not counted as zero
+      }
       const bucket = byCategory.get(e.category) ?? [];
       bucket.push(e);
       byCategory.set(e.category, bucket);
@@ -166,6 +310,20 @@ export class GradingService {
    * is compared against the caller's arguments, so an unauthorized caller
    * learns nothing (not even who submitted what) from a mismatch.
    */
+  private validateNumbers(score: number, maxScore: number): void {
+    if (typeof maxScore !== 'number' || !Number.isFinite(maxScore) || maxScore <= 0) {
+      throw new InvalidGradeError('maxScore must be a finite number above zero');
+    }
+    if (typeof score !== 'number' || !Number.isFinite(score) || score < 0) {
+      throw new InvalidGradeError('score must be a finite number that is not negative');
+    }
+    if (score > maxScore && !this.options.allowExtraCredit) {
+      throw new InvalidGradeError(
+        'score is above maxScore; build the service with allowExtraCredit to allow extra credit',
+      );
+    }
+  }
+
   private async authorizeRecord(
     enforcement: GradingEnforcement,
     submissionId: string,

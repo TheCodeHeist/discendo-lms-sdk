@@ -1,3 +1,4 @@
+import { unusedQuizAttempts } from './helpers/quiz-store.js';
 import { describe, it, expect } from 'bun:test';
 import { AssessmentService } from '../src/domains/assessment/index.js';
 import type { SubmissionRepository, QuizRepository, Submission } from '../src/domains/assessment/index.js';
@@ -18,6 +19,7 @@ function makeRepos() {
   const quizzes: QuizRepository = {
     getQuestions: async () => [],
     createAttempt: async (a) => ({ ...a, id: 'attempt-1' }),
+    ...unusedQuizAttempts,
   };
   return { submissions, quizzes };
 }

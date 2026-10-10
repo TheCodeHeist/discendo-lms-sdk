@@ -9,6 +9,8 @@ import type {
   Course,
   CourseSection,
   Enrollment,
+  EnrollmentRequest,
+  EnrollmentRequestStatus,
   ContentNode,
   AcademicTerm,
   Organization,
@@ -48,6 +50,25 @@ export interface EnrollmentRepository {
   findByUserAndSection(userId: Id, sectionId: Id): Promise<Enrollment | null>;
   listBySection(sectionId: Id, status?: Enrollment['status']): Promise<Enrollment[]>;
   countActive(sectionId: Id): Promise<number>;
+  /**
+   * OPTIONAL, and strongly recommended whenever a section has a capacity: create the enrollment
+   * (the `active` one it is given) **only if** the section has fewer than `capacity` active
+   * enrollments, as ONE atomic step (a transaction, a conditional insert, a row lock), and return
+   * `null` if it is full. Count the same enrollments `countActive` counts. Without it the service
+   * checks `countActive` and then calls `create`, so two simultaneous enrollments into the last
+   * seat can both succeed. With it, the service waitlists the person (or throws) on `null`.
+   */
+  createIfSeatFree?(enrollment: Omit<Enrollment, 'id'>, capacity: number): Promise<Enrollment | null>;
+  /**
+   * OPTIONAL, and strongly recommended whenever a section has a capacity: set the `waitlisted`
+   * enrollment `enrollmentId` to `active` **only if** it is still `waitlisted` AND the section has
+   * fewer than `capacity` active enrollments, as ONE atomic step, and return the updated enrollment,
+   * or `null` if nothing was changed (the section is full, or the enrollment is no longer
+   * waitlisted). Count the same enrollments `countActive` counts. Without it the service checks
+   * `countActive` and then calls `update`, so two simultaneous promotions into the last seat can
+   * both succeed.
+   */
+  promoteIfSeatFree?(enrollmentId: Id, capacity: number): Promise<Enrollment | null>;
 }
 
 export interface ContentRepository {
@@ -70,6 +91,22 @@ export interface DepartmentRepository {
   findById(id: Id): Promise<Department | null>;
   /** The departments of one organization (`undefined` = those that belong to no organization). */
   listByOrg(orgId: Id | undefined): Promise<Department[]>;
+}
+
+export interface EnrollmentRequestRepository {
+  create(request: Omit<EnrollmentRequest, 'id'>): Promise<EnrollmentRequest>;
+  findById(id: Id): Promise<EnrollmentRequest | null>;
+  update(id: Id, patch: Partial<Omit<EnrollmentRequest, 'id'>>): Promise<EnrollmentRequest>;
+  /** This person's `pending` request for this section, or null. There should never be two. */
+  findPending(userId: Id, sectionId: Id): Promise<EnrollmentRequest | null>;
+  listBySection(sectionId: Id, status?: EnrollmentRequestStatus): Promise<EnrollmentRequest[]>;
+  listByUser(userId: Id): Promise<EnrollmentRequest[]>;
+  /**
+   * OPTIONAL, and recommended: apply `patch` (the decision) **only if** the request is still
+   * `pending`, as one atomic step, and return the updated request, or `null` if it was no longer
+   * pending. Without it two reviewers deciding at the same moment can both record a decision.
+   */
+  decideIfPending?(id: Id, patch: Partial<Omit<EnrollmentRequest, 'id'>>): Promise<EnrollmentRequest | null>;
 }
 
 export interface DelegationRepository {
@@ -117,6 +154,8 @@ export interface RepositoryContext {
   organizations?: OrganizationRepository;
   /** Only needed by hosts that group courses into departments. Nothing in the SDK requires it. */
   departments?: DepartmentRepository;
+  /** Only needed by hosts that let students request enrollment (`EnrollmentRequestService`). */
+  enrollmentRequests?: EnrollmentRequestRepository;
   /** Only needed by hosts whose instructors delegate actions to TAs. Without it a TA only has the TA defaults. */
   delegations?: DelegationRepository;
   /** Only needed by hosts with guardians. Without it a guardian can read nothing. */

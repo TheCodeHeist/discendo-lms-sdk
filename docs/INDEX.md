@@ -37,12 +37,12 @@ tests that cover it.
 | core: tenancy | `discendo-sdk/core` | [TENANCY.md](./TENANCY.md) | Organizations (the tenant wall) and optional departments |
 | core: permissions | `discendo-sdk/core` | [PERMISSIONS.md](./PERMISSIONS.md) | Roles, the default rule table, policies, and how services enforce them |
 | core: guardians | `discendo-sdk/core` | [GUARDIANS.md](./GUARDIANS.md) | Read-only access for a student's parent or guardian, through a link |
-| **enrollment** | `discendo-sdk/enrollment` | [ENROLLMENT.md](./ENROLLMENT.md) | Enrolling and dropping, waitlisting at capacity, bulk roster import |
+| **enrollment** | `discendo-sdk/enrollment` | [ENROLLMENT.md](./ENROLLMENT.md) | Enrolling and dropping, waitlisting and waitlist promotion, bulk roster import, student enrollment requests |
 | **delegation** | `discendo-sdk/delegation` | [DELEGATION.md](./DELEGATION.md) | Instructors handing selected permissions to their TAs, and taking them back |
 | **guardians** | `discendo-sdk/guardians` | [GUARDIANS.md](./GUARDIANS.md) | Admins creating, changing and revoking guardian links, and listing who to notify |
 | **content** | `discendo-sdk/content` | [CONTENT.md](./CONTENT.md) | The content tree, publishing and versioning, prerequisite gating |
 | **assessment** | `discendo-sdk/assessment` | [ASSESSMENT.md](./ASSESSMENT.md) | Submissions, attempt limits, quiz attempts with randomization, a plagiarism-check seam |
-| **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades |
+| **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades, student extensions and excusals, curves and GPA |
 | **scheduling** | `discendo-sdk/scheduling` | [SCHEDULING.md](./SCHEDULING.md) | Timetables: recurring templates, occurrences, conflicts, availability, room matching and an auto-scheduling solver. By far the largest module |
 | scheduling: calendar | `discendo-sdk/scheduling/calendar` | [CALENDAR.md](./CALENDAR.md) | Availability windows (locked, open, closed) and iCal export of due dates |
 | **communication** | `discendo-sdk/communication` | [COMMUNICATION.md](./COMMUNICATION.md) | Announcements, thread replies, and the bridge from events to a notification sink |
@@ -54,7 +54,7 @@ tests that cover it.
 
 | Module | Permission enforcement |
 | --- | --- |
-| enrollment, grading, assessment, content, communication, scheduling, reporting, admin, delegation | **yes**: opt-in (delegation always) |
+| enrollment, grading, assessment, content, communication, scheduling, reporting, admin, delegation | **yes**: opt-in (delegation and `EnrollmentRequestService` always) |
 
 See [PERMISSIONS.md](./PERMISSIONS.md) for how to turn it on.
 

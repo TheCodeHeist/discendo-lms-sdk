@@ -77,7 +77,7 @@ Produces an RFC 5545 calendar a student can subscribe to or download, with one
 ```
 BEGIN:VCALENDAR
 VERSION:2.0
-PRODID:-//lms-sdk//EN
+PRODID:-//DiscendoLMS//discendo-sdk//EN
 BEGIN:VEVENT
 UID:assign-1
 DTSTAMP:20261004T090000Z
@@ -87,7 +87,13 @@ END:VEVENT
 END:VCALENDAR
 ```
 
-- **Lines are separated by CRLF**, never a bare LF.
+- **Every line ends with CRLF**, the last one (`END:VCALENDAR`) included, and never a bare LF.
+- **Long lines are folded** at 75 octets (RFC 5545 §3.1): the line break is CRLF followed by a
+  single space, and the space counts toward the next line's 75. The limit is in **octets**, not
+  characters, so a multi-byte character (an accented letter, a CJK character, an emoji) is only
+  ever moved whole to the next line, never split. A reader unfolds by removing each CRLF that is
+  followed by a space or tab, and gets the original line back exactly.
+- `PRODID` is `-//DiscendoLMS//discendo-sdk//EN`.
 - `UID` is the item's `id`, so a calendar app updates an event instead of duplicating it
   when the feed is fetched again.
 - `DTSTAMP` is the time of export (not the due date). `DTSTART` is the due date in UTC,
@@ -96,6 +102,13 @@ END:VCALENDAR
 - An invalid `dueAt` **throws** (a `RangeError`) instead of writing a garbage date.
 - There is no `DTEND`, `DESCRIPTION` or time-zone block: each due date is a single
   instant.
+
+### Output changed from earlier versions
+
+Earlier versions did not fold, did not end with a final CRLF, and had `PRODID:-//lms-sdk//EN`.
+Calendar apps treat `PRODID` as informational and read folded lines and the final CRLF as the
+standard says, so this should be invisible to subscribers. A host that **compares exported text**
+(a snapshot test, a cache key, an ETag over the body) will see the difference.
 
 ### Text escaping and injection
 
@@ -110,24 +123,18 @@ can do that; tests show it. Ordinary text, including Unicode, passes through unt
 
 ## Known limitations
 
-These two are marked as pending tests (`it.todo`) in `test/scheduling-calendar.test.ts`:
-
-- **No line folding.** RFC 5545 §3.1 says lines longer than 75 octets must be folded. A
-  very long title is written on one line. Most calendar apps accept it; a strict
-  parser may not.
-- **No trailing CRLF.** The output ends at `END:VCALENDAR` with no final line break,
-  where the RFC expects every line, the last included, to end in CRLF.
-
-Also:
-
-- **`PRODID` still reads `-//lms-sdk//EN`**, the project's earlier name.
 - **Due dates only.** There is no recurring-event export; the timetables from
   [SCHEDULING.md](./SCHEDULING.md) are not exported by this method.
 - **No `VTIMEZONE`**, because everything is UTC.
+- **`UID` is just the item's id**, with no domain part, so two systems that both export an id
+  `1` would collide in one subscriber's calendar. Use ids that are unique across your system.
+- **A very long line becomes many lines.** Folding is correct, but a feed with thousands of
+  characters in a title is still a heavy feed.
 
 ## Tests
 
 `test/scheduling-calendar.test.ts` — availability (inclusive bounds, one-sided windows,
 offsets, the default `now`), the iCal shell, line separators, date formatting and UTC,
-`DTSTAMP`, invalid dates, and the escaping and injection cases. The two limitations above
-are listed there as pending.
+`DTSTAMP`, invalid dates, the escaping and injection cases, and the folding and termination
+cases (the 75-octet boundary, multi-byte and four-byte text wherever the fold falls, unfolding
+back to the original line, folding of long ids, and that folding cannot be used to inject lines).

@@ -24,7 +24,7 @@ that live in `core` have their own pages:
 
 | File | What it holds |
 | --- | --- |
-| `types.ts` | `Id`, `Timestamp`, `Role`, `Identity`, `Organization`, `Department`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, `GuardianLink`, `TaGrant` |
+| `types.ts` | `Id`, `Timestamp`, `Role`, `Identity`, `Organization`, `Department`, `Course`, `CourseSection`, `Enrollment`, `ContentNode`, `AcademicTerm`, `GuardianLink`, `TaGrant`, `EnrollmentRequest`, `EnrollmentRequestStatus` |
 | `repositories.ts` | The repository interfaces and the `RepositoryContext` bundle |
 | `events.ts` | `EventBus` and every `LmsEvent` variant |
 | `tenancy.ts` | `sameOrg`, `assertSameOrg`, `assertCourseDepartment`, `TenantMismatchError`, `UnknownDepartmentError` |
@@ -157,11 +157,12 @@ interface over whatever you use. These are the ones in `core`:
 | --- | --- | --- |
 | `UserRepository` | `findById(id)`, `findByExternalRef(ref, orgId?)` | enrollment, every enforcing service |
 | `CourseRepository` | `findCourse(id)`, `findSection(id)`, `listSections(courseId)` | enrollment, every enforcing service |
-| `EnrollmentRepository` | `create`, `findById`, `update`, `findByUserAndSection`, `listBySection(sectionId, status?)`, `countActive(sectionId)` | enrollment, every enforcing service |
+| `EnrollmentRepository` | `create`, `findById`, `update`, `findByUserAndSection`, `listBySection(sectionId, status?)`, `countActive(sectionId)`, and optionally `createIfSeatFree(enrollment, capacity)` and `promoteIfSeatFree(enrollmentId, capacity)` | enrollment, every enforcing service |
 | `ContentRepository` | `findById`, `listBySection`, `create`, `update`, `reorder` | content, assessment (when enforcing) |
 | `TermRepository` | `findById(id)` | part of `RepositoryContext` |
 | `OrganizationRepository` | `findById(id)` | optional; nothing in the SDK requires it yet |
 | `DepartmentRepository` | `findById(id)`, `listByOrg(orgId)` | optional; for hosts that group courses |
+| `EnrollmentRequestRepository` | `create`, `findById`, `update`, `findPending`, `listBySection(sectionId, status?)`, `listByUser`, and optionally `decideIfPending(id, patch)` | optional; for student enrollment requests |
 | `DelegationRepository` | `create`, `findById`, `listActiveForEnrollment`, `revoke` | optional; for TA delegation |
 | `GuardianLinkRepository` | `findActive(guardianId, wardId)` | optional; for guardians |
 
@@ -201,6 +202,7 @@ interface RepositoryContext {
   terms: TermRepository;
   organizations?: OrganizationRepository;
   departments?: DepartmentRepository;
+  enrollmentRequests?: EnrollmentRequestRepository;
   delegations?: DelegationRepository;
   guardianLinks?: GuardianLinkRepository;
 }

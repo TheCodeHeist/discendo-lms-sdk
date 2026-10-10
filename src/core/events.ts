@@ -42,6 +42,46 @@ export interface DroppedEvent {
   userId: string;
   sectionId: string;
 }
+/**
+ * A waitlisted person was given a seat. `trigger` says how: `'manual'` (someone called
+ * `promoteFromWaitlist`) or `'auto'` (the service's `promoteOnDrop` option, after a seat was freed).
+ * `actorId` is present only for a manual promotion made with permissions enforced; an automatic one
+ * names nobody, so a student who drops themselves is never tied to who moved up.
+ */
+export interface PromotedEvent {
+  type: 'enrollment.promoted';
+  enrollmentId: string;
+  userId: string;
+  sectionId: string;
+  previousStatus: 'waitlisted';
+  trigger: 'manual' | 'auto';
+  actorId?: string;
+}
+
+/** A student asked for a seat. Nothing has been decided: this is the cue to tell the reviewers. */
+export interface EnrollmentRequestedEvent {
+  type: 'enrollment.requested';
+  requestId: string;
+  userId: string;
+  sectionId: string;
+}
+/**
+ * A request was settled. `sectionId` is the section that was asked for. For `accepted`,
+ * `enrollmentId`, `enrollmentStatus` (`waitlisted` means the student has no seat yet) and
+ * `grantedSectionId` (different from `sectionId` when the reviewer modified the request) say what
+ * the student got. `reviewerId` is set for `accepted` and `rejected`, never for `withdrawn`.
+ */
+export interface EnrollmentRequestDecidedEvent {
+  type: 'enrollment.requestDecided';
+  requestId: string;
+  userId: string;
+  sectionId: string;
+  decision: 'accepted' | 'rejected' | 'withdrawn';
+  reviewerId?: string;
+  enrollmentId?: string;
+  enrollmentStatus?: 'active' | 'waitlisted' | 'dropped' | 'completed';
+  grantedSectionId?: string;
+}
 
 // --- grading events ---
 export interface GradePostedEvent {
@@ -69,6 +109,46 @@ export interface SubmissionReceivedEvent {
   contentId: string;
   userId: string;
   attemptNumber: number;
+}
+
+/**
+ * A student submitted a quiz attempt and it was scored. A `Submission` (payload kind `quiz`) now
+ * exists for grading to attach to; it does NOT also emit `assessment.submissionReceived`. Sent once per
+ * attempt, when that submission is stored.
+ */
+export interface QuizSubmittedEvent {
+  type: 'assessment.quizSubmitted';
+  attemptId: string;
+  quizId: string;
+  submissionId: string;
+  userId: string;
+  score: number;
+  maxScore: number;
+  late: boolean;
+}
+
+// --- grading events ---
+/** A student was given extra time on a piece of work (a later deadline, or a longer quiz). */
+export interface ExtensionGrantedEvent {
+  type: 'grading.extensionGranted';
+  extensionId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  extraSeconds: number;
+  /** Who granted it (oversight: a delegated TA is named here). */
+  grantedBy: string;
+  /** Set when this replaced an earlier extension for the same student and content. */
+  replacedExtensionId?: string;
+}
+/** A student was excused from a piece of work, so it no longer counts in their final grade. */
+export interface ExcusedEvent {
+  type: 'grading.excused';
+  excusalId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  excusedBy: string;
 }
 
 // --- scheduling events ---
@@ -111,6 +191,12 @@ export interface OccurrenceRescheduledEvent {
 export type LmsEvent =
   | EnrolledEvent
   | DroppedEvent
+  | PromotedEvent
+  | EnrollmentRequestedEvent
+  | EnrollmentRequestDecidedEvent
+  | QuizSubmittedEvent
+  | ExtensionGrantedEvent
+  | ExcusedEvent
   | GradePostedEvent
   | ContentPublishedEvent
   | SubmissionReceivedEvent

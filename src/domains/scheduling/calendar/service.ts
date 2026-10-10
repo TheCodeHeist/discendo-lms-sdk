@@ -17,9 +17,13 @@ export class CalendarService {
     return 'open';
   }
 
-  /** Minimal iCal (RFC 5545) export for a set of due dates. */
+  /**
+   * Minimal iCal (RFC 5545) export for a set of due dates. Lines longer than 75 octets are folded
+   * (CRLF plus one space, never inside a multi-byte character), and every line, the last one
+   * included, ends with CRLF.
+   */
   toIcal(events: Array<{ id: string; title: string; dueAt: Date }>): string {
-    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN'];
+    const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//DiscendoLMS//discendo-sdk//EN'];
     for (const e of events) {
       lines.push(
         'BEGIN:VEVENT',
@@ -31,8 +35,38 @@ export class CalendarService {
       );
     }
     lines.push('END:VCALENDAR');
-    return lines.join('\r\n');
+    return lines.map(foldLine).join('\r\n') + '\r\n';
   }
+}
+
+const MAX_LINE_OCTETS = 75;
+
+/**
+ * Folds one content line per RFC 5545 section 3.1: no physical line longer than 75 octets
+ * (excluding the line break), each continuation starting with a single space that counts toward
+ * its 75. The limit is in octets, so a character is only ever moved whole to the next line:
+ * counting JavaScript characters would split multi-byte text, and a split UTF-8 sequence is
+ * garbage once the feed is read.
+ */
+function foldLine(line: string): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(line).length <= MAX_LINE_OCTETS) return line;
+  const physical: string[] = [];
+  let current = '';
+  let currentOctets = 0;
+  for (const char of line) {
+    // iterating by code point keeps a surrogate pair (a four-octet character) together
+    const octets = encoder.encode(char).length;
+    if (currentOctets + octets > MAX_LINE_OCTETS) {
+      physical.push(current);
+      current = ' ';
+      currentOctets = 1;
+    }
+    current += char;
+    currentOctets += octets;
+  }
+  physical.push(current);
+  return physical.join('\r\n');
 }
 
 function formatIcalDate(d: Date): string {

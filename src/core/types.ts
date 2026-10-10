@@ -126,6 +126,33 @@ export interface Enrollment {
   droppedAt?: Timestamp;
 }
 
+export type EnrollmentRequestStatus = 'pending' | 'accepted' | 'rejected' | 'withdrawn';
+
+/**
+ * A student's own request for a seat in a section, waiting for an administrator (see
+ * `EnrollmentRequestService`). It is always a request to join as a `student`. Nothing is deleted:
+ * a decided request stays as the record of who decided what and why.
+ */
+export interface EnrollmentRequest {
+  id: Id;
+  userId: Id;
+  /** The section the student asked for. */
+  sectionId: Id;
+  status: EnrollmentRequestStatus;
+  requestedAt: Timestamp;
+  /** What the student wrote when asking. */
+  note?: string;
+  reviewedAt?: Timestamp;
+  /** Who accepted or rejected it (not set for a withdrawal). */
+  reviewerId?: Id;
+  /** What the reviewer wrote when deciding. */
+  reviewNote?: string;
+  /** The enrollment an accepted request led to (it may be `waitlisted`). */
+  enrollmentId?: Id;
+  /** The section the student was actually placed in: `sectionId`, or another section of the same course if the reviewer modified the request. */
+  grantedSectionId?: Id;
+}
+
 export type ContentKind = 'page' | 'assignment' | 'quiz' | 'file' | 'link';
 
 export interface ContentNode {

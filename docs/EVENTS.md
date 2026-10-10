@@ -113,9 +113,15 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | --- | --- | --- | --- |
 | `enrollment.enrolled` | `EnrollmentService` | a **new** enrollment record is created (single `enroll` and each successful row of `bulkEnroll`) | `enrollmentId`, `userId`, `sectionId`, `status` (`'active'` or `'waitlisted'`) |
 | `enrollment.dropped` | `EnrollmentService.drop` | an enrollment is dropped | `enrollmentId`, `userId`, `sectionId` |
-| `grading.gradePosted` | `GradingService.recordGrade` | a grade is recorded, including a regrade that supersedes an earlier one | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId` |
+| `enrollment.requested` | `EnrollmentRequestService.request` | a student asks for a seat (not for a repeat of a pending request) | `requestId`, `userId`, `sectionId` |
+| `enrollment.requestDecided` | `EnrollmentRequestService.withdraw`, `accept`, `modify`, `reject` | a request is settled | `requestId`, `userId`, `sectionId`, `decision` (`'accepted'`, `'rejected'` or `'withdrawn'`), `reviewerId?` (accepted and rejected), `enrollmentId?`, `enrollmentStatus?`, `grantedSectionId?` (accepted) |
+| `enrollment.promoted` | `EnrollmentService.promoteFromWaitlist`, and `drop` with `promoteOnDrop` | a waitlisted person is made active | `enrollmentId`, `userId`, `sectionId`, `previousStatus` (`'waitlisted'`), `trigger` (`'manual'` or `'auto'`), `actorId?` (only a manual promotion with permissions enforced) |
+| `grading.gradePosted` | `GradingService.recordGrade`, `recordSystemGrade` | a grade is recorded, including a regrade that supersedes an earlier one, or a system grade such as a quiz's automatic score (`graderId` is then `system:...`) | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId` |
+| `grading.extensionGranted` | `AccommodationService.grantExtension` | a student is given extra time (not for a repeat of the same amount) | `extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`, `replacedExtensionId?` |
+| `grading.excused` | `AccommodationService.excuse` | a student is excused from a piece of work (not for a repeat) | `excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy` |
 | `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version` |
 | `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber` |
+| `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late` |
 | `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `previousStatus` |
 | `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `from` |
 
@@ -150,8 +156,11 @@ These are known gaps, planned as one round after the features land, so that the
 event shapes are designed together:
 
 - attendance recorded
-- enrollment status changes other than enroll and drop (for example a waitlisted
-  student becoming active)
+- enrollment status changes other than enroll, drop and promotion (the first of the
+  planned status-change events, `enrollment.promoted`, was added early because automatic
+  promotion would otherwise be invisible to a host; `enrollment.requested` and
+  `enrollment.requestDecided` were added with the request flow for the same reason: a host
+  has to tell reviewers and students)
 - content unpublished
 - an `orgId` on events, so a listener can filter by tenant
 - a `contentId` on `grading.gradePosted`
@@ -191,8 +200,8 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Seven event types.** The gaps listed under "Not emitted yet" are real: attendance,
-  other enrollment status changes, unpublishing, delegation and guardian changes.
+- **Thirteen event types.** The gaps listed under "Not emitted yet" are real: attendance,
+  other enrollment status changes (completion, say), unpublishing, delegation and guardian changes.
 - **No tenant on events.** An event carries no `orgId`, so a listener serving several
   organizations has to look it up.
 - **No ordering between handlers and no priorities.** Handlers are started in
@@ -208,7 +217,11 @@ look up what it needs, and ids stay stable when entity shapes change.
 | File | Covers |
 | --- | --- |
 | `test/core-events.test.ts` | the bus: delivery, ordering (specific before wildcard), failure isolation, `onHandlerError`, unsubscribe, wildcard, `once` |
+| `test/assessment-quiz.test.ts` | `assessment.quizSubmitted`: payload, once per attempt, none for a repeat, late flag, not alongside `submissionReceived` |
+| `test/grading-accommodations.test.ts` | `grading.extensionGranted` (with `replacedExtensionId`) and `grading.excused`: payloads, the actor named, none for a repeat or a refusal |
 | `test/enrollment-events.test.ts` | `enrollment.enrolled` (active and waitlisted), `enrollment.dropped`, working with no bus |
+| `test/enrollment-waitlist.test.ts` | `enrollment.promoted`: manual and automatic, its payload and actor |
+| `test/enrollment-requests.test.ts` | `enrollment.requested`, `enrollment.requestDecided`: each decision's payload, and no event for an idempotent repeat |
 | `test/grading-events.test.ts` | `grading.gradePosted` |
 | `test/content-events.test.ts` | `content.published` |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
