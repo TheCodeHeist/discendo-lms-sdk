@@ -31,8 +31,33 @@ export class CalendarService {
       );
     }
     lines.push('END:VCALENDAR');
-    return lines.join('\r\n');
+    return lines.map(foldIcalLine).join('\r\n') + '\r\n';
   }
+}
+
+/**
+ * Folds lines longer than 75 octets per RFC 5545 section 3.1.
+ * Folding is done by inserting CRLF + SPACE, and the line break
+ * can occur between any two characters.
+ */
+function foldIcalLine(line: string): string {
+  const encoder = new TextEncoder();
+  if (encoder.encode(line).length <= 75) return line;
+
+  let folded = '';
+  let currentLineBytes = 0;
+
+  for (const char of line) {
+    const charBytes = encoder.encode(char).length;
+    if (currentLineBytes + charBytes > 75) {
+      folded += '\r\n ';
+      currentLineBytes = 1;
+    }
+    folded += char;
+    currentLineBytes += charBytes;
+  }
+
+  return folded;
 }
 
 function formatIcalDate(d: Date): string {
