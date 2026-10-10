@@ -75,7 +75,7 @@ describe('CalendarService.toIcal', () => {
   }
 
   it('produces just the calendar shell for an empty list', () => {
-    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN', 'END:VCALENDAR'].join(CRLF));
+    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN', 'END:VCALENDAR', ''].join(CRLF));
   });
 
   it('renders one event with UID, DTSTAMP, DTSTART and SUMMARY', () => {
@@ -92,6 +92,7 @@ describe('CalendarService.toIcal', () => {
         'SUMMARY:Essay 1',
         'END:VEVENT',
         'END:VCALENDAR',
+        '',
       ].join(CRLF),
     );
   });
@@ -157,13 +158,13 @@ describe('CalendarService.toIcal', () => {
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
       expect(lines.filter((l) => l.startsWith('UID:'))).toEqual(['UID:a1']);
       expect(lines.filter((l) => l.startsWith('SUMMARY:'))).toHaveLength(1);
-      expect(lines).toHaveLength(10); // shell (3) + VEVENT block (6) + END:VCALENDAR
+      expect(lines).toHaveLength(11); // shell (3) + VEVENT block (6) + END:VCALENDAR + trailing empty line
     });
 
     it('cannot be used to inject lines through the id either', () => {
       const lines = one('T', 'x\r\nBEGIN:VEVENT').split(CRLF);
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
-      expect(lines).toHaveLength(10);
+      expect(lines).toHaveLength(11);
     });
 
     it('leaves ordinary text, including unicode, untouched', () => {
@@ -178,5 +179,9 @@ describe('CalendarService.toIcal', () => {
     throw new Error('not implemented');
   };
   it.todo('folds content lines longer than 75 octets (RFC 5545 section 3.1)', notImplemented);
-  it.todo('terminates the final line (END:VCALENDAR) with CRLF like every other line', notImplemented);
+
+  it('terminates the final line (END:VCALENDAR) with CRLF like every other line', () => {
+    const out = icalFor([]);
+    expect(out.endsWith('END:VCALENDAR\r\n')).toBe(true);
+  });
 });
