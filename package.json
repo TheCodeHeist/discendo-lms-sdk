@@ -26,11 +26,16 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "zod": "latest"
-  },
+  "peerDependencies": {},
   "devDependencies": {
     "typescript": "latest",
     "@types/bun": "latest"
-  }
+  },
+  "files": [
+    "dist",
+    "src",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ]
 }
