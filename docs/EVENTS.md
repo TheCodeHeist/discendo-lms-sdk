@@ -111,19 +111,31 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 
 | `type` | Emitted by | When | Payload |
 | --- | --- | --- | --- |
-| `enrollment.enrolled` | `EnrollmentService` | a **new** enrollment record is created (single `enroll` and each successful row of `bulkEnroll`) | `enrollmentId`, `userId`, `sectionId`, `status` (`'active'` or `'waitlisted'`) |
-| `enrollment.dropped` | `EnrollmentService.drop` | an enrollment is dropped | `enrollmentId`, `userId`, `sectionId` |
-| `enrollment.requested` | `EnrollmentRequestService.request` | a student asks for a seat (not for a repeat of a pending request) | `requestId`, `userId`, `sectionId` |
-| `enrollment.requestDecided` | `EnrollmentRequestService.withdraw`, `accept`, `modify`, `reject` | a request is settled | `requestId`, `userId`, `sectionId`, `decision` (`'accepted'`, `'rejected'` or `'withdrawn'`), `reviewerId?` (accepted and rejected), `enrollmentId?`, `enrollmentStatus?`, `grantedSectionId?` (accepted) |
-| `enrollment.promoted` | `EnrollmentService.promoteFromWaitlist`, and `drop` with `promoteOnDrop` | a waitlisted person is made active | `enrollmentId`, `userId`, `sectionId`, `previousStatus` (`'waitlisted'`), `trigger` (`'manual'` or `'auto'`), `actorId?` (only a manual promotion with permissions enforced) |
-| `grading.gradePosted` | `GradingService.recordGrade`, `recordSystemGrade` | a grade is recorded, including a regrade that supersedes an earlier one, or a system grade such as a quiz's automatic score (`graderId` is then `system:...`) | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId` |
-| `grading.extensionGranted` | `AccommodationService.grantExtension` | a student is given extra time (not for a repeat of the same amount) | `extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`, `replacedExtensionId?` |
-| `grading.excused` | `AccommodationService.excuse` | a student is excused from a piece of work (not for a repeat) | `excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy` |
-| `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version` |
-| `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber` |
-| `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late` |
-| `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `previousStatus` |
-| `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `from` |
+| `enrollment.enrolled` | `EnrollmentService` | a **new** enrollment record is created (single `enroll` and each successful row of `bulkEnroll`) | `enrollmentId`, `userId`, `sectionId`, `status` (`'active'` or `'waitlisted'`), `orgId?` |
+| `enrollment.dropped` | `EnrollmentService.drop` | an enrollment is dropped | `enrollmentId`, `userId`, `sectionId`, `orgId?` |
+| `enrollment.requested` | `EnrollmentRequestService.request` | a student asks for a seat (not for a repeat of a pending request) | `requestId`, `userId`, `sectionId`, `orgId?` |
+| `enrollment.requestDecided` | `EnrollmentRequestService.withdraw`, `accept`, `modify`, `reject` | a request is settled | `requestId`, `userId`, `sectionId`, `decision` (`'accepted'`, `'rejected'` or `'withdrawn'`), `reviewerId?` (accepted and rejected), `enrollmentId?`, `enrollmentStatus?`, `grantedSectionId?` (accepted), `orgId?` |
+| `enrollment.promoted` | `EnrollmentService.promoteFromWaitlist`, and `drop` with `promoteOnDrop` | a waitlisted person is made active | `enrollmentId`, `userId`, `sectionId`, `previousStatus` (`'waitlisted'`), `trigger` (`'manual'` or `'auto'`), `actorId?` (only a manual promotion with permissions enforced), `orgId?` |
+| `enrollment.promotionFailed` | `EnrollmentService.drop` with `promoteOnDrop` | background auto-promotion fails after an active student drops | `sectionId`, `droppedEnrollmentId`, `error`, `orgId?` |
+| `grading.gradePosted` | `GradingService.recordGrade`, `recordSystemGrade` | a grade is recorded, including a regrade that supersedes an earlier one, or a system grade such as a quiz's automatic score (`graderId` is then `system:...`) | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId`, `contentId?`, `orgId?` |
+| `grading.extensionGranted` | `AccommodationService.grantExtension` | a student is given extra time (not for a repeat of the same amount) | `extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`, `replacedExtensionId?`, `orgId?` |
+| `grading.extensionRevoked` | `AccommodationService.revokeExtension` | an active time extension is revoked | `extensionId`, `userId`, `contentId`, `sectionId`, `revokedBy`, `orgId?` |
+| `grading.excused` | `AccommodationService.excuse` | a student is excused from a piece of work (not for a repeat) | `excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy`, `orgId?` |
+| `grading.unexcused` | `AccommodationService.unexcuse` | an active excusal is revoked and the work counts again | `excusalId`, `userId`, `contentId`, `sectionId`, `revokedBy`, `orgId?` |
+| `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version`, `orgId?` |
+| `content.unpublished` | `ContentService.unpublish` | content is unpublished (each call bumps `version` and sets `published: false`) | `contentId`, `sectionId`, `version`, `orgId?` |
+| `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber`, `orgId?` |
+| `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late`, `orgId?` |
+| `assessment.plagiarismCheckFailed` | `AssessmentService.submit` | background plagiarism hook threw an error | `submissionId`, `contentId`, `userId`, `error`, `orgId?` |
+| `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?`, `orgId?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `previousStatus` |
+| `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?`, `orgId?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `from` |
+| `reporting.attendanceRecorded` | `ReportingService.recordAttendance` | an attendance mark is recorded | `sessionId`, `userId`, `status`, `recordedAt`, `recordedBy?`, `sectionId?`, `orgId?` |
+| `delegation.granted` | `DelegationService.grant` | an instructor or admin delegates an action to a TA | `grantId`, `enrollmentId`, `sectionId`, `action`, `grantedBy`, `orgId?` |
+| `delegation.revoked` | `DelegationService.revoke` | a delegated grant is revoked | `grantId`, `enrollmentId`, `sectionId`, `action`, `revokedBy`, `orgId?` |
+| `guardians.linkCreated` | `GuardianService.createLink` | an admin links a guardian to a ward with specific scopes | `linkId`, `guardianId`, `studentId`, `scopes`, `createdBy`, `orgId?` |
+| `guardians.scopesUpdated` | `GuardianService.updateScopes` | an admin modifies permissions scopes on an active link | `linkId`, `guardianId`, `studentId`, `scopes`, `previousScopes`, `updatedBy`, `orgId?` |
+| `guardians.linkRevoked` | `GuardianService.revokeLink` | an admin revokes a guardian link | `linkId`, `guardianId`, `studentId`, `revokedBy`, `orgId?` |
+| `communication.deliveryFailed` | `CommunicationService.postAnnouncement`, `bridgeEventBusToNotificationSink` | asynchronous delivery to a notification sink failed | `channel`, `recipientId`, `error`, `announcementId?`, `orgId?` |
 
 Details that are easy to get wrong:
 
@@ -143,32 +155,17 @@ Details that are easy to get wrong:
   actor. The SDK sends nothing to admins itself: forward them to your audit log or
   notification channel, for instance `bus.on('scheduling.*', ...)` and filter on
   `actorRole !== 'admin'`.
-- **`grading.gradePosted` identifies the work by `submissionId`, not `contentId`.**
-  Grading does not know which content a submission belongs to, so a consumer that
-  needs it must look it up (this is why the notification bridge takes a
-  `resolveContentId` function).
+- **`grading.gradePosted` carries `contentId?` directly** when known from the submission location. If present, consumer bridges do not need a secondary lookup.
+- **Tenant `orgId` is on all events** whenever known from the actor, course, section, or content node, so multi-tenant listeners can partition and filter without extra roundtrips.
+- **Asynchronous background failures are reported via dedicated failure events**: `communication.deliveryFailed`, `assessment.plagiarismCheckFailed`, and `enrollment.promotionFailed`. Because notification sinks, hooks, and post-drop promotions are fire-and-forget, these events ensure problems make noise instead of failing silently.
 - **A refused call emits nothing.** When enforcement is on and the permission
   check fails, the operation never starts, so no event is emitted.
 
 ### Not emitted yet
 
-These are known gaps, planned as one round after the features land, so that the
-event shapes are designed together:
+Future rounds may add:
 
-- attendance recorded
-- enrollment status changes other than enroll, drop and promotion (the first of the
-  planned status-change events, `enrollment.promoted`, was added early because automatic
-  promotion would otherwise be invisible to a host; `enrollment.requested` and
-  `enrollment.requestDecided` were added with the request flow for the same reason: a host
-  has to tell reviewers and students)
-- content unpublished
-- an `orgId` on events, so a listener can filter by tenant
-- a `contentId` on `grading.gradePosted`
-- anything about delegation or guardian links (a grant given or revoked, a link
-  created)
-
-Until then, a host that needs one of these can wrap the call (see
-[ADMIN.md](./ADMIN.md)'s `withAudit`) or emit its own event.
+- enrollment status changes outside of enroll, drop and waitlist promotion (such as section completion).
 
 ## Bridging the bus to other systems
 
@@ -200,10 +197,8 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Thirteen event types.** The gaps listed under "Not emitted yet" are real: attendance,
-  other enrollment status changes (completion, say), unpublishing, delegation and guardian changes.
-- **No tenant on events.** An event carries no `orgId`, so a listener serving several
-  organizations has to look it up.
+- **Twenty-five event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
+- **Tenant `orgId` is optional.** It is present whenever known from context, but omitted on calls made without enforcement or organization metadata.
 - **No ordering between handlers and no priorities.** Handlers are started in
   registration order and run concurrently.
 - **No filtering beyond type.** `on(type)` or `on('*')` only; filtering by section,
@@ -226,4 +221,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 | `test/content-events.test.ts` | `content.published` |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/scheduling-service-events.test.ts` | the two scheduling events |
-| `test/communication-event-bridge.test.ts` | the notification bridge |
+| `test/communication-event-bridge.test.ts` | the notification bridge, direct `contentId` handling, and `communication.deliveryFailed` |
+| `test/delegation-events.test.ts` | `delegation.granted` and `delegation.revoked`: payloads, actor attribution, idempotency |
+| `test/guardians-events.test.ts` | `guardians.linkCreated`, `guardians.scopesUpdated`, and `guardians.linkRevoked`: payloads, actor attribution |
+| `test/reporting-events.test.ts` | `reporting.attendanceRecorded`: enforced and unenforced payloads, session locator |

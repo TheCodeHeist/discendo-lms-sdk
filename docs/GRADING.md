@@ -108,6 +108,11 @@ await grading.recordGrade('sub-1', 'stu-1', 90, 100, teacher.id, entry.id, { act
      counts as 120%, so a final grade can then exceed 100. A negative or non-finite number, and a
      maximum of zero or less, are refused either way.
 3. **`previousEntryId`, if given, must be the current entry for *this* submission.**
+
+### `recordGroupGrade(submissionId, memberUserIds, score, maxScore, graderId, options?, actor?): Promise<GradeEntry[]>`
+
+Records a shared grade for every member of a group submission. Creates a distinct `GradeEntry` for each student in `memberUserIds` with the same score and max score, maintaining the full audit trail and event emission per member. Supports regrading via `options.previousEntryIds: Record<userId, previousEntryId>`. Requires `'grading.record'`.
+
    Otherwise the call throws, and nothing is written:
    - `Previous grade entry <id> not found`
    - `Previous grade entry belongs to a different submission`

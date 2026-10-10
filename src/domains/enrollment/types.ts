@@ -1,4 +1,4 @@
-import type { Role } from '../../core/types.js';
+import type { Role, CoursePrerequisite } from "../../core/types.js";
 
 export interface EnrollOptions {
   userId: string;
@@ -11,6 +11,11 @@ export interface EnrollOptions {
    * before the section opens. Archived sections never take new enrollments, with or without this.
    */
   allowDraft?: boolean;
+  /**
+   * If true and prerequisite checking is enabled on EnrollmentService, overrides unmet prerequisites
+   * for this enrollment (e.g. staff granting an academic exception).
+   */
+  overridePrerequisites?: boolean;
 }
 
 /** What `bulkEnroll` applies to every row. */
@@ -49,7 +54,7 @@ export interface RejectOptions {
 export class AlreadyEnrolledError extends Error {
   constructor(readonly sectionId: string) {
     super(`Already enrolled in section ${sectionId}`);
-    this.name = 'AlreadyEnrolledError';
+    this.name = "AlreadyEnrolledError";
   }
 }
 
@@ -60,19 +65,19 @@ export class RequestNotPendingError extends Error {
     readonly status: string,
   ) {
     super(`Enrollment request ${requestId} is ${status}, not pending`);
-    this.name = 'RequestNotPendingError';
+    this.name = "RequestNotPendingError";
   }
 }
 
 /** `modify` named a section that cannot take this student's place: the same one, or another course's. */
 export class InvalidRequestModificationError extends Error {
-  constructor(readonly reason: 'same-section' | 'different-course') {
+  constructor(readonly reason: "same-section" | "different-course") {
     super(
-      reason === 'same-section'
-        ? 'A modified request must name a different section (use accept to keep the one asked for)'
-        : 'A modified request must stay in the same course',
+      reason === "same-section"
+        ? "A modified request must name a different section (use accept to keep the one asked for)"
+        : "A modified request must stay in the same course",
     );
-    this.name = 'InvalidRequestModificationError';
+    this.name = "InvalidRequestModificationError";
   }
 }
 
@@ -80,14 +85,14 @@ export class InvalidRequestModificationError extends Error {
 export class SectionNotOpenError extends Error {
   constructor(
     readonly sectionId: string,
-    readonly status: 'draft' | 'archived',
+    readonly status: "draft" | "archived",
   ) {
     super(
-      status === 'draft'
+      status === "draft"
         ? `Section ${sectionId} is a draft and is not open for enrollment (staff can pass allowDraft to pre-load it)`
         : `Section ${sectionId} is archived and takes no new enrollments`,
     );
-    this.name = 'SectionNotOpenError';
+    this.name = "SectionNotOpenError";
   }
 }
 
@@ -98,7 +103,39 @@ export class EnrollmentNotDroppableError extends Error {
     readonly status: string,
   ) {
     super(`Enrollment ${enrollmentId} is ${status} and cannot be dropped`);
-    this.name = 'EnrollmentNotDroppableError';
+    this.name = "EnrollmentNotDroppableError";
+  }
+}
+
+/** Thrown when adding a prerequisite edge would introduce a cycle into the course graph. */
+export class CircularPrerequisiteError extends Error {
+  constructor(
+    readonly courseId: string,
+    readonly requiredCourseId: string,
+  ) {
+    super(
+      `Adding prerequisite ${requiredCourseId} to ${courseId} would create a circular dependency`,
+    );
+    this.name = "CircularPrerequisiteError";
+  }
+}
+
+/** Reason why a specific prerequisite was not satisfied. */
+export interface UnmetPrerequisite {
+  prerequisite: CoursePrerequisite;
+  reason: "not_completed" | "not_active_corequisite" | "insufficient_grade";
+  currentGrade?: number | undefined;
+}
+
+/** Thrown when a student does not meet one or more required course prerequisites. */
+export class PrerequisiteNotMetError extends Error {
+  constructor(
+    readonly courseId: string,
+    readonly userId: string,
+    readonly unmet: UnmetPrerequisite[],
+  ) {
+    super(`User ${userId} does not meet prerequisites for course ${courseId}`);
+    this.name = "PrerequisiteNotMetError";
   }
 }
 

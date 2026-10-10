@@ -15,7 +15,7 @@ a section's content and the rules around it.
 | --- | --- |
 | **You import** | `ContentService`, `ContentServiceOptions`, `PrerequisiteEdge`, `CompletionChecker` |
 | **You implement** | `ContentRepository` (in `core`) and a `CompletionChecker` |
-| **Emits events** | `content.published` |
+| **Emits events** | `content.published`, `content.unpublished` |
 | **Permission actions** | `content.view`, `content.manage` (delegable to a TA) |
 | **Enforcement** | opt-in: the fifth constructor argument, `{ policy }` |
 
@@ -72,8 +72,18 @@ Sets `published: true` and increments `version`, then emits `content.published`
 with the new version. Throws `Content <id> not found` for an unknown id.
 
 **Every call bumps the version**, even on a node that is already published, so
-publishing twice gives versions 2 and 3. There is no way to unpublish through the
-service.
+publishing twice gives versions 2 and 3. To hide content again, call `unpublish`.
+
+**With enforcement** the actor needs `content.manage` in the node's section, taken from
+the **stored node**. An unknown node is refused exactly like a forbidden one
+(`PermissionDeniedError`, not "not found").
+
+### `unpublish(id, actor?): Promise<ContentNode>`
+
+Sets `published: false` and increments `version`, then emits `content.unpublished`
+with the new version. Throws `Content <id> not found` for an unknown id.
+
+**Every call bumps the version**, even on a node that is already unpublished.
 
 **With enforcement** the actor needs `content.manage` in the node's section, taken from
 the **stored node**. An unknown node is refused exactly like a forbidden one
@@ -168,7 +178,7 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 
 | Method | Action | Who |
 | --- | --- | --- |
-| `createNode`, `publish`, `reorder` | `content.manage` | admins and instructors of the section; a TA only when delegated (see [DELEGATION.md](./DELEGATION.md)) |
+| `createNode`, `publish`, `unpublish`, `reorder` | `content.manage` | admins and instructors of the section; a TA only when delegated (see [DELEGATION.md](./DELEGATION.md)) |
 | `getNode`, `listNodes` | `content.view` | active members of the section, and completed students (read-only); **drafts for staff only** |
 
 - **The section is the node's, never the caller's** (for `publish` and `getNode`), and a
@@ -198,7 +208,7 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 - **The prerequisite edges are fixed at construction.** They are a constructor
   argument, not read from a repository, so changing them means building a new service
   with the new list, and a host with per-section prerequisites must supply them all.
-- **No unpublish**, and no history of earlier versions beyond the counter.
+- **No history of earlier versions beyond the counter.**
 - **Without enforcement, `createNode` and `reorder` do no validation** of sections,
   parents or ordering.
 - **`isUnlocked` is direct-only and takes no account of dates.** Due dates and
@@ -209,5 +219,5 @@ await content.listNodes('sec-1', { actorId: student.id });   // published nodes 
 
 | File | Covers |
 | --- | --- |
-| `test/content-events.test.ts` | `content.published`, and working with no event bus |
+| `test/content-events.test.ts` | `content.published`, `content.unpublished`, and working with no event bus |
 | `test/content-permissions.test.ts` | every method with enforcement on (who may, delegation, drafts, completed students, parents, reorder ids, unknown and orphaned targets, check ordering, no lookups before the actor is known), `isUnlocked` (none, AND, direct-only, per person, cycles) and behaviour with enforcement off |

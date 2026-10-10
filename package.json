@@ -5,32 +5,77 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "exports": {
-    ".": "./dist/index.js",
-    "./core": "./dist/core/index.js",
-    "./enrollment": "./dist/domains/enrollment/index.js",
-    "./content": "./dist/domains/content/index.js",
-    "./assessment": "./dist/domains/assessment/index.js",
-    "./grading": "./dist/domains/grading/index.js",
-    "./delegation": "./dist/domains/delegation/index.js",
-    "./guardians": "./dist/domains/guardians/index.js",
-    "./scheduling": "./dist/domains/scheduling/index.js",
-    "./scheduling/calendar": "./dist/domains/scheduling/calendar/index.js",
-    "./communication": "./dist/services/communication/index.js",
-    "./reporting": "./dist/services/reporting/index.js",
-    "./admin": "./dist/services/admin/index.js",
-    "./interop": "./dist/interop/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "default": "./dist/core/index.js"
+    },
+    "./enrollment": {
+      "types": "./dist/domains/enrollment/index.d.ts",
+      "default": "./dist/domains/enrollment/index.js"
+    },
+    "./content": {
+      "types": "./dist/domains/content/index.d.ts",
+      "default": "./dist/domains/content/index.js"
+    },
+    "./assessment": {
+      "types": "./dist/domains/assessment/index.d.ts",
+      "default": "./dist/domains/assessment/index.js"
+    },
+    "./grading": {
+      "types": "./dist/domains/grading/index.d.ts",
+      "default": "./dist/domains/grading/index.js"
+    },
+    "./delegation": {
+      "types": "./dist/domains/delegation/index.d.ts",
+      "default": "./dist/domains/delegation/index.js"
+    },
+    "./guardians": {
+      "types": "./dist/domains/guardians/index.d.ts",
+      "default": "./dist/domains/guardians/index.js"
+    },
+    "./scheduling": {
+      "types": "./dist/domains/scheduling/index.d.ts",
+      "default": "./dist/domains/scheduling/index.js"
+    },
+    "./scheduling/calendar": {
+      "types": "./dist/domains/scheduling/calendar/index.d.ts",
+      "default": "./dist/domains/scheduling/calendar/index.js"
+    },
+    "./communication": {
+      "types": "./dist/services/communication/index.d.ts",
+      "default": "./dist/services/communication/index.js"
+    },
+    "./reporting": {
+      "types": "./dist/services/reporting/index.d.ts",
+      "default": "./dist/services/reporting/index.js"
+    },
+    "./admin": {
+      "types": "./dist/services/admin/index.d.ts",
+      "default": "./dist/services/admin/index.js"
+    },
+    "./interop": {
+      "types": "./dist/interop/index.d.ts",
+      "default": "./dist/interop/index.js"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "prepack": "bun run build",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
-  "peerDependencies": {
-    "zod": "latest"
-  },
   "devDependencies": {
-    "typescript": "latest",
-    "@types/bun": "latest"
+    "typescript": "^7.0.2",
+    "@types/bun": "^1.4.2"
   }
 }

@@ -1,13 +1,16 @@
-import type { DelegationRepository } from '../../core/repositories.js';
-import type { TaGrant } from '../../core/types.js';
-import { authorize, activeSectionRole } from '../../core/permissions.js';
-import type { ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { authorizeInSection } from '../../core/authorization.js';
-import type { AuthorizationRepos } from '../../core/authorization.js';
-import { ActionNotDelegableError, NotAnActiveTaError } from './types.js';
+import type { DelegationRepository } from "../../core/repositories.js";
+import type { TaGrant } from "../../core/types.js";
+import type { EventBus } from "../../core/events.js";
+import { authorize, activeSectionRole } from "../../core/permissions.js";
+import type { ActorContext, PermissionPolicy } from "../../core/permissions.js";
+import { authorizeInSection } from "../../core/authorization.js";
+import type { AuthorizationRepos } from "../../core/authorization.js";
+import { ActionNotDelegableError, NotAnActiveTaError } from "./types.js";
 
 /** What the service needs: the authorization repositories plus a delegation repository. */
-export type DelegationRepos = AuthorizationRepos & { delegations: DelegationRepository };
+export type DelegationRepos = AuthorizationRepos & {
+  delegations: DelegationRepository;
+};
 
 export interface DelegationServiceOptions {
   /**
@@ -18,6 +21,8 @@ export interface DelegationServiceOptions {
   policy: PermissionPolicy & { delegableActions?: readonly string[] };
   /** Overrides the actions the policy declares as delegable. */
   delegableActions?: readonly string[];
+  /** Optional EventBus to emit delegation events to. */
+  events?: EventBus | undefined;
 }
 
 /**
@@ -28,36 +33,68 @@ export interface DelegationServiceOptions {
  */
 export class DelegationService {
   private readonly delegable: ReadonlySet<string>;
+  private readonly events?: EventBus | undefined;
 
   constructor(
     private readonly repos: DelegationRepos,
     private readonly options: DelegationServiceOptions,
+    events?: EventBus,
   ) {
-    this.delegable = new Set(options.delegableActions ?? options.policy.delegableActions ?? []);
+    this.delegable = new Set(
+      options.delegableActions ?? options.policy.delegableActions ?? [],
+    );
+    this.events = events ?? options.events;
   }
 
   /** Gives `taUserId` the right to do `action` in `sectionId`. Granting the same action twice returns the first grant. */
-  async grant(sectionId: string, taUserId: string, action: string, actor?: ActorContext): Promise<TaGrant> {
-    const auth = await authorizeInSection(this.options.policy, this.repos, 'delegation.grant', actor, { sectionId });
+  async grant(
+    sectionId: string,
+    taUserId: string,
+    action: string,
+    actor?: ActorContext,
+  ): Promise<TaGrant> {
+    const auth = await authorizeInSection(
+      this.options.policy,
+      this.repos,
+      "delegation.grant",
+      actor,
+      { sectionId },
+    );
     if (!this.delegable.has(action)) throw new ActionNotDelegableError(action);
-    // You can only hand over what you hold yourself in this section.
+        // You can only hand over what you hold yourself in this section.
     await authorize(auth.policy, action, auth.ctx);
 
-    const ta = await this.repos.enrollments.findByUserAndSection(taUserId, sectionId);
-    if (!ta || activeSectionRole(ta) !== 'ta') throw new NotAnActiveTaError();
-
-    const existing = (await this.repos.delegations.listActiveForEnrollment(ta.id)).find(
-      (g) => this.counts(g, ta.id, sectionId) && g.action === action,
+    const ta = await this.repos.enrollments.findByUserAndSection(
+      taUserId,
+      sectionId,
     );
+    if (!ta || activeSectionRole(ta) !== "ta") throw new NotAnActiveTaError();
+
+    const existing = (
+      await this.repos.delegations.listActiveForEnrollment(ta.id)
+    ).find((g) => this.counts(g, ta.id, sectionId) && g.action === action);
     if (existing) return existing;
 
-    return this.repos.delegations.create({
+    const created = await this.repos.delegations.create({
       enrollmentId: ta.id,
       sectionId,
       action,
       grantedBy: auth.ctx.actor.id,
       grantedAt: new Date(),
     });
+
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    void this.events?.emit({
+      type: "delegation.granted",
+      grantId: created.id,
+      enrollmentId: created.enrollmentId,
+      sectionId: created.sectionId,
+      action: created.action,
+      grantedBy: created.grantedBy,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+
+    return created;
   }
 
   /** Takes a grant back. Revoking an already revoked grant changes nothing. */
@@ -65,27 +102,66 @@ export class DelegationService {
     // Only needed to find out which section this is about. An unknown grant has no section and
     // is refused exactly like a forbidden one.
     const grant = actor ? await this.repos.delegations.findById(grantId) : null;
-    await authorizeInSection(this.options.policy, this.repos, 'delegation.revoke', actor, {
-      sectionId: grant?.sectionId,
-    });
-    if (!grant) throw new Error('unreachable: authorization refuses a missing section');
+    const auth = await authorizeInSection(
+      this.options.policy,
+      this.repos,
+      "delegation.revoke",
+      actor,
+      {
+        sectionId: grant?.sectionId,
+      },
+    );
+    if (!grant)
+      throw new Error("unreachable: authorization refuses a missing section");
     if (grant.revokedAt !== undefined) return grant;
-    return this.repos.delegations.revoke(grantId, new Date());
+    const revoked = await this.repos.delegations.revoke(grantId, new Date());
+
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    void this.events?.emit({
+      type: "delegation.revoked",
+      grantId: revoked.id,
+      enrollmentId: revoked.enrollmentId,
+      sectionId: revoked.sectionId,
+      action: revoked.action,
+      revokedBy: auth.ctx.actor.id,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+
+    return revoked;
   }
 
   /** The active grants of one TA in a section. A TA may see their own; instructors and admins anyone's. */
-  async list(sectionId: string, taUserId: string, actor?: ActorContext): Promise<TaGrant[]> {
-    await authorizeInSection(this.options.policy, this.repos, 'delegation.view', actor, {
+  async list(
+    sectionId: string,
+    taUserId: string,
+    actor?: ActorContext,
+  ): Promise<TaGrant[]> {
+    await authorizeInSection(
+      this.options.policy,
+      this.repos,
+      "delegation.view",
+      actor,
+      {
+        sectionId,
+        ownerId: taUserId,
+      },
+    );
+    const ta = await this.repos.enrollments.findByUserAndSection(
+      taUserId,
       sectionId,
-      ownerId: taUserId,
-    });
-    const ta = await this.repos.enrollments.findByUserAndSection(taUserId, sectionId);
-    if (!ta || activeSectionRole(ta) !== 'ta') return [];
-    return (await this.repos.delegations.listActiveForEnrollment(ta.id)).filter((g) => this.counts(g, ta.id, sectionId));
+    );
+    if (!ta || activeSectionRole(ta) !== "ta") return [];
+    return (await this.repos.delegations.listActiveForEnrollment(ta.id)).filter(
+      (g) => this.counts(g, ta.id, sectionId),
+    );
   }
 
   /** A grant only counts for this enrollment and section, and only while not revoked. */
   private counts(g: TaGrant, enrollmentId: string, sectionId: string): boolean {
-    return g.enrollmentId === enrollmentId && g.sectionId === sectionId && g.revokedAt === undefined;
+    return (
+      g.enrollmentId === enrollmentId &&
+      g.sectionId === sectionId &&
+      g.revokedAt === undefined
+    );
   }
 }

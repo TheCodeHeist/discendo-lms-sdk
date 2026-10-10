@@ -17,16 +17,123 @@ export interface Submission {
    * a submission the student made themselves, so it also tells the two apart.
    */
   recordedBy?: string;
+  groupId?: string;
+}
+
+export interface CriterionLevel {
+  points: number;
+  description: string;
 }
 
 export interface Criterion {
+  id: string;
   description: string;
   maxPoints: number;
+  levels?: CriterionLevel[];
 }
 
 export interface Rubric {
+  id: string;
   contentId: string;
+  title?: string;
   criteria: Criterion[];
+}
+
+export interface RubricScore {
+  totalScore: number;
+  maxScore: number;
+  criterionScores: Record<string, number>;
+}
+
+export interface RubricEvaluation {
+  id: string;
+  rubricId: string;
+  contentId: string;
+  submissionId: string;
+  evaluatorId: string;
+  criterionScores: Record<string, number>;
+  feedback?: string;
+  criterionFeedback?: Record<string, string>;
+  totalScore: number;
+  evaluatedAt: Date;
+}
+
+export class InvalidRubricError extends Error {
+  constructor(message: string) {
+    super(`Invalid rubric: ${message}`);
+    this.name = "InvalidRubricError";
+  }
+}
+
+export class InvalidRubricScoreError extends Error {
+  constructor(message: string) {
+    super(`Invalid rubric score: ${message}`);
+    this.name = "InvalidRubricScoreError";
+  }
+}
+
+export class RubricNotFoundError extends Error {
+  constructor(contentId: string) {
+    super(`Rubric for content ${contentId} not found`);
+    this.name = "RubricNotFoundError";
+  }
+}
+
+export interface RubricRepository {
+  save(rubric: Omit<Rubric, "id">): Promise<Rubric>;
+  findByContentId(contentId: string): Promise<Rubric | null>;
+  deleteByContentId(contentId: string): Promise<boolean>;
+}
+
+export interface RubricEvaluationRepository {
+  create(evaluation: Omit<RubricEvaluation, "id">): Promise<RubricEvaluation>;
+  findBySubmission(submissionId: string, evaluatorId?: string): Promise<RubricEvaluation[]>;
+  findById(id: string): Promise<RubricEvaluation | null>;
+}
+
+export interface PeerReviewAssignment {
+  id: string;
+  contentId: string;
+  submissionId: string;
+  reviewerUserId: string;
+  authorUserId: string;
+  assignedAt: Date;
+  completedAt?: Date;
+}
+
+export interface PeerReview {
+  id: string;
+  assignmentId: string;
+  submissionId: string;
+  reviewerUserId: string;
+  rubricEvaluationId?: string;
+  comments?: string;
+  submittedAt: Date;
+}
+
+export class PeerReviewAssignmentError extends Error {
+  constructor(message: string) {
+    super(`Peer review assignment error: ${message}`);
+    this.name = 'PeerReviewAssignmentError';
+  }
+}
+
+export class PeerReviewNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Peer review assignment ${id} not found`);
+    this.name = 'PeerReviewNotFoundError';
+  }
+}
+
+export interface PeerReviewRepository {
+  createAssignments(assignments: Omit<PeerReviewAssignment, 'id'>[]): Promise<PeerReviewAssignment[]>;
+  findAssignmentsForReviewer(reviewerUserId: string, contentId?: string): Promise<PeerReviewAssignment[]>;
+  findAssignmentsForSubmission(submissionId: string): Promise<PeerReviewAssignment[]>;
+  findAssignmentById(id: string): Promise<PeerReviewAssignment | null>;
+  markAssignmentCompleted(id: string, completedAt: Date): Promise<void>;
+  createReview(review: Omit<PeerReview, 'id'>): Promise<PeerReview>;
+  findReviewsForSubmission(submissionId: string): Promise<PeerReview[]>;
+  findReviewByAssignmentId(assignmentId: string): Promise<PeerReview | null>;
 }
 
 export interface QuizQuestion {

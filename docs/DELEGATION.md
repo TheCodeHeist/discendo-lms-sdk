@@ -17,7 +17,7 @@ instructor decide, per TA and per section, without anyone editing the policy.
 | **You import** | `DelegationService`, `ActionNotDelegableError`, `NotAnActiveTaError` |
 | **You implement** | `DelegationRepository` (`create`, `findById`, `listActiveForEnrollment`, `revoke`) |
 | **Needs from `core`** | `users`, `courses`, `enrollments` (and `delegations`) |
-| **Emits events** | none yet |
+| **Emits events** | `delegation.granted`, `delegation.revoked` |
 | **Permission actions** | `delegation.grant`, `delegation.revoke`, `delegation.view` |
 | **Enforcement** | always on: the service requires a policy and an actor on every call |
 
@@ -73,7 +73,7 @@ anything: `delegation.grant` is for admins and instructors only.
 ## `DelegationService`
 
 ```ts
-new DelegationService(repos, { policy, delegableActions? })
+new DelegationService(repos, { policy, delegableActions?, events? }, events?)
 ```
 
 - `repos`: the authorization repositories (`users`, `courses`, `enrollments`) plus
@@ -196,7 +196,6 @@ override one of the built-in delegable actions.
 
 - **`communication.postAnnouncement` covers the students' channel only.** Posting to
   guardians (`communication.postGuardianAnnouncement`) is never delegable.
-- **No events.** Granting and revoking emit nothing.
 - **No expiry.** A grant lasts until it is revoked or the TA's enrollment ends.
 - **`list` shows only active grants.** The revoked history is in your repository, but
   the service does not return it.
@@ -211,4 +210,4 @@ refusal; idempotency; the not-delegable and not-held rules; the target checks) a
 effect of grants through `EnrollmentService`: both grants needed, students only,
 nothing else gained, per-TA and per-section isolation, revocation, a re-enrolled TA
 starting empty, and a repository returning the wrong grants. The policy side is in
-`test/core-permissions.test.ts` ("delegated actions").
+`test/core-permissions.test.ts` ("delegated actions"). Event emissions are covered in `test/delegation-events.test.ts`.

@@ -476,12 +476,19 @@ describe('promoteOnDrop', () => {
     expect(w.row('w1').status).toBe('waitlisted');
   });
 
-  it('never fails the drop when the promotion fails: the person is dropped, the waitlist stays', async () => {
+  it('never fails the drop when the promotion fails: the person is dropped, the waitlist stays, and emits enrollment.promotionFailed', async () => {
     const w = buildWorld({ promoteOnDrop: true, failPromotionWrites: true, seeds: [waiting('w1', '2026-09-02')] });
     const dropped = await w.service.drop(w.row('stu').id);
+    await sleep();
     expect(dropped.status).toBe('dropped');
     expect(w.row('w1').status).toBe('waitlisted');
-    // ...and the explicit method can sweep up later
+    const failedEvents = w.events.filter((e) => e.type === 'enrollment.promotionFailed');
+    expect(failedEvents).toHaveLength(1);
+    expect(failedEvents[0]).toMatchObject({
+      type: 'enrollment.promotionFailed',
+      sectionId: 'sec-pub',
+      orgId: 'org-a',
+    });
   });
 
   it('skips a draft or archived section silently', async () => {

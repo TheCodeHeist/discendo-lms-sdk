@@ -1,10 +1,14 @@
-import type { RepositoryContext } from '../../core/repositories.js';
-import type { ContentNode } from '../../core/types.js';
-import type { EventBus } from '../../core/events.js';
-import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { authorizeInSection, isStaff } from '../../core/authorization.js';
-import type { Authorized } from '../../core/authorization.js';
-import { PermissionDeniedError } from '../../core/permissions.js';
+import type { RepositoryContext } from "../../core/repositories.js";
+import type { ContentNode } from "../../core/types.js";
+import type { EventBus } from "../../core/events.js";
+import type {
+  Action,
+  ActorContext,
+  PermissionPolicy,
+} from "../../core/permissions.js";
+import { authorizeInSection, isStaff } from "../../core/authorization.js";
+import type { Authorized } from "../../core/authorization.js";
+import { PermissionDeniedError } from "../../core/permissions.js";
 
 export interface PrerequisiteEdge {
   contentId: string;
@@ -38,13 +42,18 @@ export class ContentService {
    * Stores a new node. With enforcement on (`actor` required) the actor needs `content.manage`
    * in the node's section, and a `parentId` must be a node of that same section.
    */
-  async createNode(node: Omit<ContentNode, 'id' | 'version'>, actor?: ActorContext): Promise<ContentNode> {
+  async createNode(
+    node: Omit<ContentNode, "id" | "version">,
+    actor?: ActorContext,
+  ): Promise<ContentNode> {
     if (this.options.policy) {
-      await this.authorizeOn('content.manage', actor, node.sectionId);
+      await this.authorizeOn("content.manage", actor, node.sectionId);
       if (node.parentId !== undefined) {
         const parent = await this.repos.content.findById(node.parentId);
         if (!parent || parent.sectionId !== node.sectionId) {
-          throw new Error(`The parent node ${node.parentId} must exist in the same section`);
+          throw new Error(
+            `The parent node ${node.parentId} must exist in the same section`,
+          );
         }
       }
     }
@@ -58,11 +67,16 @@ export class ContentService {
    */
   async publish(id: string, actor?: ActorContext): Promise<ContentNode> {
     let current: ContentNode | null;
+    let auth: Authorized | undefined;
     if (this.options.policy) {
       // Only needed to find out which section this is about; skipped without an actor so the
       // caller gets "actor required" before anything about the content is looked up.
       current = actor ? await this.repos.content.findById(id) : null;
-      await this.authorizeOn('content.manage', actor, current?.sectionId);
+      auth = await this.authorizeOn(
+        "content.manage",
+        actor,
+        current?.sectionId,
+      );
     } else {
       current = await this.repos.content.findById(id);
     }
@@ -72,11 +86,55 @@ export class ContentService {
       version: current.version + 1,
     });
 
+    const orgId =
+      auth?.ctx.resourceOrgId ??
+      auth?.ctx.actor.orgId ??
+      (await this.orgIdOfSection(updated.sectionId));
     void this.events?.emit({
-      type: 'content.published',
+      type: "content.published",
       contentId: updated.id,
       sectionId: updated.sectionId,
       version: updated.version,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+
+    return updated;
+  }
+
+  /**
+   * Unpublishes a node (and bumps its version). With enforcement on the actor needs `content.manage`
+   * in the node's section, which comes from the stored node; an unknown node is refused exactly
+   * like a forbidden one.
+   */
+  async unpublish(id: string, actor?: ActorContext): Promise<ContentNode> {
+    let current: ContentNode | null;
+    let auth: Authorized | undefined;
+    if (this.options.policy) {
+      current = actor ? await this.repos.content.findById(id) : null;
+      auth = await this.authorizeOn(
+        "content.manage",
+        actor,
+        current?.sectionId,
+      );
+    } else {
+      current = await this.repos.content.findById(id);
+    }
+    if (!current) throw new Error(`Content ${id} not found`);
+    const updated = await this.repos.content.update(id, {
+      published: false,
+      version: current.version + 1,
+    });
+
+    const orgId =
+      auth?.ctx.resourceOrgId ??
+      auth?.ctx.actor.orgId ??
+      (await this.orgIdOfSection(updated.sectionId));
+    void this.events?.emit({
+      type: "content.unpublished",
+      contentId: updated.id,
+      sectionId: updated.sectionId,
+      version: updated.version,
+      ...(orgId !== undefined ? { orgId } : {}),
     });
 
     return updated;
@@ -86,14 +144,22 @@ export class ContentService {
    * Applies an order to a section's nodes. With enforcement on the actor needs `content.manage`
    * in the section, and the list may only name nodes of that section, each at most once.
    */
-  async reorder(sectionId: string, orderedIds: string[], actor?: ActorContext): Promise<void> {
+  async reorder(
+    sectionId: string,
+    orderedIds: string[],
+    actor?: ActorContext,
+  ): Promise<void> {
     if (this.options.policy) {
-      await this.authorizeOn('content.manage', actor, sectionId);
-      const own = new Set((await this.repos.content.listBySection(sectionId)).map((n) => n.id));
+      await this.authorizeOn("content.manage", actor, sectionId);
+      const own = new Set(
+        (await this.repos.content.listBySection(sectionId)).map((n) => n.id),
+      );
       const seen = new Set<string>();
       for (const id of orderedIds) {
-        if (!own.has(id)) throw new Error(`Node ${id} is not part of section ${sectionId}`);
-        if (seen.has(id)) throw new Error(`Node ${id} appears more than once in the order`);
+        if (!own.has(id))
+          throw new Error(`Node ${id} is not part of section ${sectionId}`);
+        if (seen.has(id))
+          throw new Error(`Node ${id} appears more than once in the order`);
         seen.add(id);
       }
     }
@@ -112,9 +178,10 @@ export class ContentService {
       return node;
     }
     const node = actor ? await this.repos.content.findById(id) : null;
-    const auth = await this.authorizeOn('content.view', actor, node?.sectionId);
+    const auth = await this.authorizeOn("content.view", actor, node?.sectionId);
     // authorizeOn has already refused a missing node, so there is one here.
-    if (!node!.published && !isStaff(auth.ctx)) throw this.denied('content.view');
+    if (!node!.published && !isStaff(auth.ctx))
+      throw this.denied("content.view");
     return node!;
   }
 
@@ -123,9 +190,13 @@ export class ContentService {
    * the actor needs `content.view` in the section, and anyone who is not staff there gets only
    * the published nodes. Without enforcement it returns everything.
    */
-  async listNodes(sectionId: string, actor?: ActorContext): Promise<ContentNode[]> {
-    if (!this.options.policy) return this.repos.content.listBySection(sectionId);
-    const auth = await this.authorizeOn('content.view', actor, sectionId);
+  async listNodes(
+    sectionId: string,
+    actor?: ActorContext,
+  ): Promise<ContentNode[]> {
+    if (!this.options.policy)
+      return this.repos.content.listBySection(sectionId);
+    const auth = await this.authorizeOn("content.view", actor, sectionId);
     const nodes = await this.repos.content.listBySection(sectionId);
     return isStaff(auth.ctx) ? nodes : nodes.filter((n) => n.published);
   }
@@ -136,19 +207,35 @@ export class ContentService {
    * actor and is not affected by enforcement. Read the node with `getNode` for access.
    */
   async isUnlocked(userId: string, contentId: string): Promise<boolean> {
-    const required = this.prerequisites.filter((e) => e.contentId === contentId);
+    const required = this.prerequisites.filter(
+      (e) => e.contentId === contentId,
+    );
     for (const edge of required) {
-      const done = await this.completion.isComplete(userId, edge.requiresContentId);
+      const done = await this.completion.isComplete(
+        userId,
+        edge.requiresContentId,
+      );
       if (!done) return false;
     }
     return true;
   }
 
-  private authorizeOn(action: Action, actor: ActorContext | undefined, sectionId: string | undefined): Promise<Authorized> {
+  private async orgIdOfSection(sectionId: string): Promise<string | undefined> {
+    const sec = await this.repos.courses.findSection(sectionId);
+    if (!sec) return undefined;
+    const course = await this.repos.courses.findCourse(sec.courseId);
+    return course?.orgId;
+  }
+
+  private authorizeOn(
+    action: Action,
+    actor: ActorContext | undefined,
+    sectionId: string | undefined,
+  ): Promise<Authorized> {
     // Only reading opts in: a completed student keeps read-only access to published content.
     return authorizeInSection(this.options.policy!, this.repos, action, actor, {
       sectionId,
-      afterCompletion: action === 'content.view',
+      afterCompletion: action === "content.view",
     });
   }
 

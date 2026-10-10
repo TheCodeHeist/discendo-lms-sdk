@@ -81,7 +81,7 @@ interface OccurrenceGuard {
   auth: Authorized;
   occurrence: ClassOccurrence;
   template: ClassSessionTemplate;
-  oversight: { sectionId: string; actorId: string; actorRole?: 'admin' | 'instructor' | 'ta' };
+  oversight: { sectionId: string; actorId: string; actorRole?: 'admin' | 'instructor' | 'ta'; orgId?: string };
 }
 
 const WEEKDAYS: readonly Weekday[] = ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU'];
@@ -745,11 +745,17 @@ export class SchedulingService {
     const template = occurrence ? await this.scheduling.findTemplate(occurrence.templateId) : null;
     const auth = await authorizeInSection(e.policy, e.repos, action, actor, { sectionId: template?.sectionId });
     const actorRole = actorRoleOf(auth);
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
     return {
       auth,
       occurrence: occurrence!,
       template: template!,
-      oversight: { sectionId: template!.sectionId, actorId: actor!.actorId, ...(actorRole ? { actorRole } : {}) },
+      oversight: {
+        sectionId: template!.sectionId,
+        actorId: actor!.actorId,
+        ...(actorRole ? { actorRole } : {}),
+        ...(orgId !== undefined ? { orgId } : {}),
+      },
     };
   }
 

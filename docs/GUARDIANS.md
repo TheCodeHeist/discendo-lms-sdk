@@ -178,7 +178,7 @@ out. It does one link lookup per student, and needs an actor, so a queued job mu
 person who posted (an instructor or admin) or an admin. The permission check comes before
 anything is read.
 
-Nothing is created, changed or revoked for a refused call, and no events are emitted yet.
+Nothing is created, changed or revoked for a refused call. Created, updated, and revoked links emit events to the bus if configured.
 
 ## What works today
 
@@ -235,12 +235,12 @@ This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.
 - **The SDK does not know anyone's age.** When a guardian's access should end (a
   ward turning 18, a custody change) is a decision for your application: revoke the
   link.
-- **No events** are emitted when a link is created, changed or revoked (planned for the events round).
 
 ## Tests
 
 | File | Covers |
 | --- | --- |
+| `test/guardians-events.test.ts` | `guardians.linkCreated`, `guardians.scopesUpdated`, and `guardians.linkRevoked` payloads and idempotency |
 | `test/guardians.test.ts` | `GuardianService`: who may manage and list, the organization wall in both directions and with no organizations, self-links, scope validation, one active link per pair, update and revoke (including idempotence), the guardian's own listing, and `guardiansOfSection` (scope, active wards only, revoked and foreign links, agreement with the read side), plus end-to-end checks that a created, changed or revoked link changes what the read side allows |
 | `test/core-authorization-org.test.ts` | `authorizeWithinOwnOrg` and `assertInActorOrg` |
 | `test/core-permissions.test.ts` | the policy side: scopes (including that `announcements` opens only the guardian channel), owner match, self-links, tenant check, overrides that drop the scope, and that no write action ever carries a scope |

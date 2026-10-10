@@ -174,3 +174,27 @@ export interface AcademicTerm {
   /** The organization whose calendar this term belongs to. Unset in single-tenant use. */
   orgId?: Id;
 }
+
+export interface SectionGroup {
+  id: Id;
+  sectionId: Id;
+  name: string;
+  maxMembers?: number;
+  allowSelfSignup?: boolean;
+  groupSet?: string;
+}
+
+export interface GroupMember {
+  id: Id;
+  groupId: Id;
+  userId: Id;
+  joinedAt: Timestamp;
+}
+
+export interface CoursePrerequisite {
+  id: Id;
+  courseId: Id;
+  requiredCourseId: Id;
+  minGrade?: number;
+  isCorequisite?: boolean;
+}

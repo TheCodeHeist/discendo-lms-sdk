@@ -85,8 +85,48 @@ type PlagiarismCheckResult = { flagged: boolean; score?: number; details?: strin
 type PlagiarismCheckHook = (submission: Submission) => Promise<PlagiarismCheckResult>;
 ```
 
-`Rubric` (`{ contentId, criteria }`) and `Criterion` (`{ description, maxPoints }`)
-are also exported. They are **types only**: no service reads or writes a rubric yet.
+## Rubrics and Rubric Scoring
+
+`RubricService` manages rubrics associated with content and handles rubric evaluations:
+
+```ts
+const rubrics = new RubricService(repos, { policy });
+await rubrics.saveRubric('assign-1', [
+  { id: 'crit-thesis', description: 'Thesis clarity', maxPoints: 10 },
+  { id: 'crit-evidence', description: 'Supporting evidence', maxPoints: 20 },
+], 'Essay Rubric', { actorId: teacher.id });
+
+const rubric = await rubrics.getRubric('assign-1', { actorId: student.id });
+```
+
+- **`scoreRubric(rubric, scores)`**: Pure calculation function that verifies criterion scores are non-negative, finite numbers within each criterion's `maxPoints`, computing `totalScore` and `maxScore`. Unscored criteria default to 0. Throws `InvalidRubricScoreError` on invalid or unknown criterion scores.
+- **`saveRubric(contentId, criteria, title?, actor?)`**: Saves or updates a rubric. Requires `assessment.manageRubric` (admins and instructors). Throws `InvalidRubricError` if criteria are empty or have duplicate ids or negative `maxPoints`.
+- **`getRubric(contentId, actor?)`**: Retrieves the rubric. Students can view published content; staff can view drafts (`content.view`).
+- **`deleteRubric(contentId, actor?)`**: Removes the rubric (`assessment.manageRubric`).
+- **`evaluateSubmission({ contentId, submissionId, scores, feedback?, criterionFeedback? }, actor?)`**: Evaluates a submission against the saved rubric. Requires `grading.record` (staff). Throws `RubricNotFoundError` if no rubric exists for the content.
+
+## Peer Review
+
+`PeerReviewService` manages peer review assignments and evaluations:
+
+```ts
+const peerReviews = new PeerReviewService(repos, { policy });
+// Assign reviews (cyclic shift distribution among submitters):
+await peerReviews.assignPeerReviews('assign-1', { reviewsPerStudent: 2 }, { actorId: teacher.id });
+
+// Student submits a peer review:
+await peerReviews.submitPeerReview({
+  assignmentId: 'asg-1',
+  comments: 'Detailed feedback',
+  rubricScores: { 'crit-1': 8 },
+}, { actorId: reviewer.id });
+```
+
+- **`assignPeerReviews(contentId, options?, actor?)`**: Evenly distributes peer reviews among students who submitted work, ensuring no student is assigned to review their own submission. Requires `assessment.assignPeerReviews` (admins and instructors). Throws `PeerReviewAssignmentError` if fewer than 2 students submitted work or `reviewsPerStudent` is out of bounds.
+- **`getAssignedReviews(reviewerUserId, options?, actor?)`**: Retrieves peer review assignments for a student. Viewable by the reviewer themselves or staff (`content.view`).
+- **`submitPeerReview({ assignmentId, comments?, rubricScores? }, actor?)`**: Submits a review and marks the assignment completed. Can optionally evaluate criterion scores against the content's rubric. Requires the caller to be the assigned reviewer (`assessment.submitPeerReview`). Throws `PeerReviewNotFoundError` if assignment does not exist, or `PeerReviewAssignmentError` if already submitted.
+- **`listReviewsForSubmission(submissionId, options?, actor?)`**: Lists reviews for a submission. Accessible to staff (unmasked) and the submission's author (`content.view`). When `options.anonymous: true`, the reviewer identity is masked as `'anonymous'` for students.
+- **`listEvaluations(submissionId, actor?)`**: Lists evaluations for a submission (`grading.view`). Staff can list all; the student who authored the submission can list their own.
 
 The file itself, the text or the URL is never interpreted by the SDK. It stores the
 `payload` as given and hands it back.
@@ -160,6 +200,8 @@ Records a submission and returns it.
 3. Stores the submission with `attemptNumber = prior attempts + 1`.
 4. If a plagiarism hook was supplied, calls it **without waiting** (see
    [the plagiarism hook](#the-plagiarism-hook-read-this)).
+
+Pass `options: { groupId: string }` to record work on behalf of a group (`groupId` stored on `Submission`). With enforcement, verifies the submitter is an active student member of the group. Attempt limits and counts are shared across the group.
 5. Emits `assessment.submissionReceived`, also without waiting.
 
 Pass `undefined` for `maxAttempts` for no limit. The limit is a value your code passes
@@ -415,7 +457,6 @@ after each stored submission. A failing listener never fails the submission.
 - **The answer key is the host's to protect.** `QuizRepository.getQuestions` and `getResult`'s
   breakdown carry `correctChoiceIndex`; only `getAttemptQuestions` is safe to show a student.
 - **The time limit is yours to pass on every call**, and uses the server's clock from `startedAt`.
-- **Rubrics are types only.**
 - **No prerequisite gating and no due dates** here. Use `ContentService.isUnlocked`
   ([CONTENT.md](./CONTENT.md)) and the availability windows in
   [CALENDAR.md](./CALENDAR.md).
@@ -433,5 +474,8 @@ after each stored submission. A failing listener never fails the submission.
 | `test/assessment-permissions.test.ts` | all four methods with enforcement on, including `recordOffline` (who may, delegation, active-student target, numbering, no hook or event): own-only rules, staff, enrollment states, drafts, unknown content, guardians, the tenant wall, check ordering, no lookups before the actor is known, and behaviour with enforcement off |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/assessment-plagiarism.test.ts` | the hook receives the stored submission, is not awaited, and a rejecting or synchronously throwing hook neither fails the submission, leaks an unhandled rejection, nor stops the event |
+| `test/assessment-rubrics.test.ts` | `scoreRubric` validation and calculation, `RubricService` CRUD, draft gating, staff evaluations, and owner visibility |
+| `test/assessment-peer-review.test.ts` | `PeerReviewService` distribution fairness, no self-assignments, rubric tie-in, anonymous masking, and permission gating |
+| `test/assessment-groups.test.ts` | Group submissions: member validation, group attempt consumption, and attempt limits |
 | `test/assessment-quiz.test.ts` | extra quiz time from extensions; `scoreQuiz`; resuming an open attempt; the answer-key-free view; saving answers (validation, closed, expired, races); submitting (scoring, the quiz submission and its numbering, idempotence, double submit, late flag, half-done recovery); `autoGrade`; `getResult` and who sees the breakdown; the two new student-only actions |
 | `test/core-permissions.test.ts` | the three assessment rules ("assessment rules") |
