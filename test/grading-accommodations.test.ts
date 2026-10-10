@@ -151,6 +151,7 @@ function buildWorld(opts: { delegate?: string[]; noBus?: boolean } = {}) {
       extensions.push(row);
       return row;
     },
+    findById: async (id: string) => extensions.find((e) => e.id === id) ?? null,
     findActive: async (userId: string, contentId: string) =>
       extensions.find((e) => e.userId === userId && e.contentId === contentId && e.revokedAt === undefined) ?? null,
     revoke: async (id: string, at: Date, by: string) => {
@@ -170,6 +171,7 @@ function buildWorld(opts: { delegate?: string[]; noBus?: boolean } = {}) {
       excusals.push(row);
       return row;
     },
+    findById: async (id: string) => excusals.find((e) => e.id === id) ?? null,
     findActive: async (userId: string, contentId: string) =>
       excusals.find((e) => e.userId === userId && e.contentId === contentId && e.revokedAt === undefined) ?? null,
     revoke: async (id: string, at: Date, by: string) => {
@@ -200,7 +202,7 @@ describe('grantExtension', () => {
     expect(e.grantedAt).toBeInstanceOf(Date);
     expect(e.revokedAt).toBeUndefined();
     expect(w.ofType('grading.extensionGranted')).toEqual([
-      { type: 'grading.extensionGranted', extensionId: e.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', extraSeconds: 7200, grantedBy: 'teacher' },
+      { type: 'grading.extensionGranted', extensionId: e.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', extraSeconds: 7200, grantedBy: 'teacher', orgId: 'org-a' },
     ]);
   });
 
@@ -303,10 +305,14 @@ describe('revokeExtension', () => {
     const w = buildWorld();
     const e = await w.service.grantExtension('assign-1', 'stu', 60, as('teacher'));
     const revoked = await w.service.revokeExtension('assign-1', 'stu', as('root'));
+    await sleep();
     expect(revoked).toMatchObject({ id: e.id, revokedBy: 'root' });
     expect(revoked!.revokedAt).toBeInstanceOf(Date);
     expect(w.extensions).toHaveLength(1);
     expect(await w.extensionRepo.findActive('stu', 'assign-1')).toBeNull();
+    expect(w.ofType('grading.extensionRevoked')).toEqual([
+      { type: 'grading.extensionRevoked', extensionId: e.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', revokedBy: 'root', orgId: 'org-a' },
+    ]);
   });
 
   it('returns null when there is nothing to revoke, and is refused for people who may not grant', async () => {
@@ -376,7 +382,7 @@ describe('excuse', () => {
     expect(x).toMatchObject({ userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', reason: 'illness', excusedBy: 'teacher' });
     expect(x.excusedAt).toBeInstanceOf(Date);
     expect(w.ofType('grading.excused')).toEqual([
-      { type: 'grading.excused', excusalId: x.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', excusedBy: 'teacher' },
+      { type: 'grading.excused', excusalId: x.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', excusedBy: 'teacher', orgId: 'org-a' },
     ]);
   });
 
@@ -418,8 +424,12 @@ describe('excuse', () => {
     const w = buildWorld();
     const first = await w.service.excuse('assign-1', 'stu', as('teacher'));
     const undone = await w.service.unexcuse('assign-1', 'stu', as('root'));
+    await sleep();
     expect(undone).toMatchObject({ id: first.id, revokedBy: 'root' });
     expect(undone!.revokedAt).toBeInstanceOf(Date);
+    expect(w.ofType('grading.unexcused')).toEqual([
+      { type: 'grading.unexcused', excusalId: first.id, userId: 'stu', contentId: 'assign-1', sectionId: 'sec-a', revokedBy: 'root', orgId: 'org-a' },
+    ]);
     const second = await w.service.excuse('assign-1', 'stu', as('teacher'));
     expect(second.id).not.toBe(first.id);
     expect(w.excusals).toHaveLength(2);

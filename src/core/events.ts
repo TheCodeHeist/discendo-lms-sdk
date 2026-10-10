@@ -26,21 +26,23 @@
  * and `once(...)` for either form when a handler should fire a single time.
  */
 
-import type { Timestamp } from './types.js';
+import type { Timestamp, GuardianScope } from "./types.js";
 
 // --- enrollment events ---
 export interface EnrolledEvent {
-  type: 'enrollment.enrolled';
+  type: "enrollment.enrolled";
   enrollmentId: string;
   userId: string;
   sectionId: string;
-  status: 'active' | 'waitlisted';
+  status: "active" | "waitlisted";
+  orgId?: string;
 }
 export interface DroppedEvent {
-  type: 'enrollment.dropped';
+  type: "enrollment.dropped";
   enrollmentId: string;
   userId: string;
   sectionId: string;
+  orgId?: string;
 }
 /**
  * A waitlisted person was given a seat. `trigger` says how: `'manual'` (someone called
@@ -49,21 +51,31 @@ export interface DroppedEvent {
  * names nobody, so a student who drops themselves is never tied to who moved up.
  */
 export interface PromotedEvent {
-  type: 'enrollment.promoted';
+  type: "enrollment.promoted";
   enrollmentId: string;
   userId: string;
   sectionId: string;
-  previousStatus: 'waitlisted';
-  trigger: 'manual' | 'auto';
+  previousStatus: "waitlisted";
+  trigger: "manual" | "auto";
   actorId?: string;
+  orgId?: string;
+}
+
+/** An automatic promotion attempt failed after a drop. */
+export interface PromotionFailedEvent {
+  type: "enrollment.promotionFailed";
+  sectionId: string;
+  error: string;
+  orgId?: string;
 }
 
 /** A student asked for a seat. Nothing has been decided: this is the cue to tell the reviewers. */
 export interface EnrollmentRequestedEvent {
-  type: 'enrollment.requested';
+  type: "enrollment.requested";
   requestId: string;
   userId: string;
   sectionId: string;
+  orgId?: string;
 }
 /**
  * A request was settled. `sectionId` is the section that was asked for. For `accepted`,
@@ -72,65 +84,34 @@ export interface EnrollmentRequestedEvent {
  * the student got. `reviewerId` is set for `accepted` and `rejected`, never for `withdrawn`.
  */
 export interface EnrollmentRequestDecidedEvent {
-  type: 'enrollment.requestDecided';
+  type: "enrollment.requestDecided";
   requestId: string;
   userId: string;
   sectionId: string;
-  decision: 'accepted' | 'rejected' | 'withdrawn';
+  decision: "accepted" | "rejected" | "withdrawn";
   reviewerId?: string;
   enrollmentId?: string;
-  enrollmentStatus?: 'active' | 'waitlisted' | 'dropped' | 'completed';
+  enrollmentStatus?: "active" | "waitlisted" | "dropped" | "completed";
   grantedSectionId?: string;
+  orgId?: string;
 }
 
 // --- grading events ---
 export interface GradePostedEvent {
-  type: 'grading.gradePosted';
+  type: "grading.gradePosted";
   gradeEntryId: string;
   submissionId: string;
   userId: string;
   score: number;
   maxScore: number;
   graderId: string;
+  contentId?: string;
+  orgId?: string;
 }
 
-// --- content events ---
-export interface ContentPublishedEvent {
-  type: 'content.published';
-  contentId: string;
-  sectionId: string;
-  version: number;
-}
-
-// --- assessment events ---
-export interface SubmissionReceivedEvent {
-  type: 'assessment.submissionReceived';
-  submissionId: string;
-  contentId: string;
-  userId: string;
-  attemptNumber: number;
-}
-
-/**
- * A student submitted a quiz attempt and it was scored. A `Submission` (payload kind `quiz`) now
- * exists for grading to attach to; it does NOT also emit `assessment.submissionReceived`. Sent once per
- * attempt, when that submission is stored.
- */
-export interface QuizSubmittedEvent {
-  type: 'assessment.quizSubmitted';
-  attemptId: string;
-  quizId: string;
-  submissionId: string;
-  userId: string;
-  score: number;
-  maxScore: number;
-  late: boolean;
-}
-
-// --- grading events ---
 /** A student was given extra time on a piece of work (a later deadline, or a longer quiz). */
 export interface ExtensionGrantedEvent {
-  type: 'grading.extensionGranted';
+  type: "grading.extensionGranted";
   extensionId: string;
   userId: string;
   contentId: string;
@@ -140,20 +121,99 @@ export interface ExtensionGrantedEvent {
   grantedBy: string;
   /** Set when this replaced an earlier extension for the same student and content. */
   replacedExtensionId?: string;
+  orgId?: string;
 }
+
+/** Extra time given to a student was revoked. */
+export interface ExtensionRevokedEvent {
+  type: "grading.extensionRevoked";
+  extensionId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  revokedBy: string;
+  orgId?: string;
+}
+
 /** A student was excused from a piece of work, so it no longer counts in their final grade. */
 export interface ExcusedEvent {
-  type: 'grading.excused';
+  type: "grading.excused";
   excusalId: string;
   userId: string;
   contentId: string;
   sectionId: string;
   excusedBy: string;
+  orgId?: string;
+}
+
+/** An excusal was revoked, so the work counts toward the grade again. */
+export interface UnexcusedEvent {
+  type: "grading.unexcused";
+  excusalId: string;
+  userId: string;
+  contentId: string;
+  sectionId: string;
+  revokedBy: string;
+  orgId?: string;
+}
+
+// --- content events ---
+export interface ContentPublishedEvent {
+  type: "content.published";
+  contentId: string;
+  sectionId: string;
+  version: number;
+  orgId?: string;
+}
+
+export interface ContentUnpublishedEvent {
+  type: "content.unpublished";
+  contentId: string;
+  sectionId: string;
+  version: number;
+  orgId?: string;
+}
+
+// --- assessment events ---
+export interface SubmissionReceivedEvent {
+  type: "assessment.submissionReceived";
+  submissionId: string;
+  contentId: string;
+  userId: string;
+  attemptNumber: number;
+  orgId?: string;
+}
+
+/**
+ * A student submitted a quiz attempt and it was scored. A `Submission` (payload kind `quiz`) now
+ * exists for grading to attach to; it does NOT also emit `assessment.submissionReceived`. Sent once per
+ * attempt, when that submission is stored.
+ */
+export interface QuizSubmittedEvent {
+  type: "assessment.quizSubmitted";
+  attemptId: string;
+  quizId: string;
+  submissionId: string;
+  userId: string;
+  score: number;
+  maxScore: number;
+  late: boolean;
+  orgId?: string;
+}
+
+/** An asynchronous plagiarism check hook threw or rejected. */
+export interface PlagiarismCheckFailedEvent {
+  type: "assessment.plagiarismCheckFailed";
+  submissionId: string;
+  contentId: string;
+  userId: string;
+  error: string;
+  orgId?: string;
 }
 
 // --- scheduling events ---
 export interface OccurrenceCancelledEvent {
-  type: 'scheduling.occurrenceCancelled';
+  type: "scheduling.occurrenceCancelled";
   occurrenceId: string;
   templateId: string;
   note?: string;
@@ -162,13 +222,14 @@ export interface OccurrenceCancelledEvent {
   sectionId?: string;
   actorId?: string;
   /** 'admin', or the role the actor acted as in the section ('instructor', or 'ta' when delegated). */
-  actorRole?: 'admin' | 'instructor' | 'ta';
+  actorRole?: "admin" | "instructor" | "ta";
   /** The occurrence's status before this call. */
   previousStatus?: string;
+  orgId?: string;
 }
 /** Carries the occurrence's values AFTER the move, not the patch that was applied. */
 export interface OccurrenceRescheduledEvent {
-  type: 'scheduling.occurrenceRescheduled';
+  type: "scheduling.occurrenceRescheduled";
   occurrenceId: string;
   templateId: string;
   date: Timestamp;
@@ -178,8 +239,85 @@ export interface OccurrenceRescheduledEvent {
   // Oversight, as on the cancelled event; `from` is what the occurrence was before the move.
   sectionId?: string;
   actorId?: string;
-  actorRole?: 'admin' | 'instructor' | 'ta';
-  from?: { date: Timestamp; status: string; roomId?: string; startTime?: string; endTime?: string };
+  actorRole?: "admin" | "instructor" | "ta";
+  from?: {
+    date: Timestamp;
+    status: string;
+    roomId?: string;
+    startTime?: string;
+    endTime?: string;
+  };
+  orgId?: string;
+}
+
+// --- reporting events ---
+export interface AttendanceRecordedEvent {
+  type: "reporting.attendanceRecorded";
+  sessionId: string;
+  userId: string;
+  status: "present" | "absent" | "excused" | "late";
+  recordedAt: Timestamp;
+  recordedBy?: string;
+  sectionId?: string;
+  orgId?: string;
+}
+
+// --- delegation events ---
+export interface DelegationGrantedEvent {
+  type: "delegation.granted";
+  grantId: string;
+  enrollmentId: string;
+  sectionId: string;
+  action: string;
+  grantedBy: string;
+  orgId?: string;
+}
+
+export interface DelegationRevokedEvent {
+  type: "delegation.revoked";
+  grantId: string;
+  enrollmentId: string;
+  sectionId: string;
+  action: string;
+  revokedBy: string;
+  orgId?: string;
+}
+
+// --- guardian events ---
+export interface GuardianLinkCreatedEvent {
+  type: "guardians.linkCreated";
+  linkId: string;
+  guardianId: string;
+  wardId: string;
+  scopes: GuardianScope[];
+  orgId?: string;
+}
+
+export interface GuardianScopesUpdatedEvent {
+  type: "guardians.scopesUpdated";
+  linkId: string;
+  guardianId: string;
+  wardId: string;
+  scopes: GuardianScope[];
+  orgId?: string;
+}
+
+export interface GuardianLinkRevokedEvent {
+  type: "guardians.linkRevoked";
+  linkId: string;
+  guardianId: string;
+  wardId: string;
+  orgId?: string;
+}
+
+// --- communication events ---
+export interface CommunicationDeliveryFailedEvent {
+  type: "communication.deliveryFailed";
+  channel: "announcement" | "bridge";
+  error: string;
+  sectionId?: string;
+  title?: string;
+  orgId?: string;
 }
 
 /**
@@ -192,26 +330,43 @@ export type LmsEvent =
   | EnrolledEvent
   | DroppedEvent
   | PromotedEvent
+  | PromotionFailedEvent
   | EnrollmentRequestedEvent
   | EnrollmentRequestDecidedEvent
   | QuizSubmittedEvent
-  | ExtensionGrantedEvent
-  | ExcusedEvent
-  | GradePostedEvent
-  | ContentPublishedEvent
   | SubmissionReceivedEvent
+  | PlagiarismCheckFailedEvent
+  | GradePostedEvent
+  | ExtensionGrantedEvent
+  | ExtensionRevokedEvent
+  | ExcusedEvent
+  | UnexcusedEvent
+  | ContentPublishedEvent
+  | ContentUnpublishedEvent
   | OccurrenceCancelledEvent
-  | OccurrenceRescheduledEvent;
+  | OccurrenceRescheduledEvent
+  | AttendanceRecordedEvent
+  | DelegationGrantedEvent
+  | DelegationRevokedEvent
+  | GuardianLinkCreatedEvent
+  | GuardianScopesUpdatedEvent
+  | GuardianLinkRevokedEvent
+  | CommunicationDeliveryFailedEvent;
 
 /** Narrows LmsEvent to just the variant(s) matching a given `type` literal. */
-export type LmsEventOfType<T extends LmsEvent['type']> = Extract<LmsEvent, { type: T }>;
+export type LmsEventOfType<T extends LmsEvent["type"]> = Extract<
+  LmsEvent,
+  { type: T }
+>;
 
 /**
  * Handlers may return anything: only a returned promise is awaited, any other
  * value is ignored. Typing this as `void | Promise<void>` would reject
  * perfectly reasonable one-liners like `(e) => received.push(e)`.
  */
-export type Handler<T extends LmsEvent['type']> = (event: LmsEventOfType<T>) => unknown;
+export type Handler<T extends LmsEvent["type"]> = (
+  event: LmsEventOfType<T>,
+) => unknown;
 
 /** Receives every event regardless of type. Register with `on('*', ...)`. */
 export type WildcardHandler = (event: LmsEvent) => unknown;
@@ -247,18 +402,18 @@ export interface EventBusOptions {
  * down by however long handlers take to run.
  */
 export class EventBus {
-  private handlers = new Map<LmsEvent['type'] | '*', Set<ErasedHandler>>();
+  private handlers = new Map<LmsEvent["type"] | "*", Set<ErasedHandler>>();
 
   constructor(private readonly options: EventBusOptions = {}) {}
 
   /**
-   * Registers a handler for one event type, or for every event with `'*'`.
+   * Registers a handler for one event type, or for every event with `'*'` .
    * Returns an unsubscribe function. Registering the same function twice
    * registers it twice.
    */
-  on<T extends LmsEvent['type']>(type: T, handler: Handler<T>): () => void;
-  on(type: '*', handler: WildcardHandler): () => void;
-  on(type: LmsEvent['type'] | '*', handler: ErasedHandler): () => void {
+  on<T extends LmsEvent["type"]>(type: T, handler: Handler<T>): () => void;
+  on(type: "*", handler: WildcardHandler): () => void;
+  on(type: LmsEvent["type"] | "*", handler: ErasedHandler): () => void {
     const set = this.handlers.get(type) ?? new Set<ErasedHandler>();
     set.add(handler);
     this.handlers.set(type, set);
@@ -272,10 +427,10 @@ export class EventBus {
    * most one event even if it (or something it calls) emits re-entrantly.
    * The returned function cancels it if it hasn't fired yet.
    */
-  once<T extends LmsEvent['type']>(type: T, handler: Handler<T>): () => void;
-  once(type: '*', handler: WildcardHandler): () => void;
-  once(type: LmsEvent['type'] | '*', handler: ErasedHandler): () => void {
-    const off = this.on(type as '*', (event) => {
+  once<T extends LmsEvent["type"]>(type: T, handler: Handler<T>): () => void;
+  once(type: "*", handler: WildcardHandler): () => void;
+  once(type: LmsEvent["type"] | "*", handler: ErasedHandler): () => void {
+    const off = this.on(type as "*", (event) => {
       off();
       return handler(event);
     });
@@ -288,7 +443,7 @@ export class EventBus {
    */
   async emit(event: LmsEvent): Promise<void> {
     const specific = this.handlers.get(event.type);
-    const wildcard = this.handlers.get('*');
+    const wildcard = this.handlers.get("*");
     if (!specific?.size && !wildcard?.size) return;
 
     // Snapshot before iterating so a handler that subscribes/unsubscribes
@@ -300,9 +455,11 @@ export class EventBus {
     // here, rather than throwing immediately while this array is being
     // built — which would happen before Promise.allSettled even runs and
     // would break the failure-isolation guarantee for every other handler.
-    const results = await Promise.allSettled(targets.map(async (handler) => handler(event)));
+    const results = await Promise.allSettled(
+      targets.map(async (handler) => handler(event)),
+    );
     for (const result of results) {
-      if (result.status === 'rejected' && this.options.onHandlerError) {
+      if (result.status === "rejected" && this.options.onHandlerError) {
         this.options.onHandlerError(result.reason, event);
       }
     }

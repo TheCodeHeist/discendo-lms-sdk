@@ -15,7 +15,7 @@ events, not kept as mutable state.
 | --- | --- |
 | **You import** | `ReportingService`, `toCsv`, and the types `AttendanceRecord`, `AttendanceStatus`, `AttendanceRepository`, `SessionLocator`, `ReportingServiceOptions`, `StudentAttendanceReport`, `CsvOptions`, `Exportable` |
 | **You implement** | `AttendanceRepository`, `SessionLocator` (to read reports or enforce permissions), and `Exportable` for whatever you want to export |
-| **Emits events** | none |
+| **Emits events** | `reporting.attendanceRecorded` |
 | **Permission actions** | `reporting.recordAttendance` (delegable), `reporting.view` (a guardian can hold it via the `attendance` scope) |
 | **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the second constructor argument, which also needs `sessions` |
 
@@ -219,7 +219,7 @@ classmate's, and a guardian sees only their ward's. See [PERMISSIONS.md](./PERMI
 
 | File | Covers |
 | --- | --- |
-| `test/reporting.test.ts` | every attendance method with enforcement on (who may record and read, delegation, active-student targets, the locator, a rebuilt record that cannot be backdated, staff-only session lists, a student's and a guardian's report, check ordering, no lookups before the actor is known) and off, the completion percent, and `toCsv` (layout, quoting, formula injection and its opt-out) |
+| `test/reporting.test.ts` and `test/reporting-events.test.ts` | every attendance method with enforcement on (who may record and read, delegation, active-student targets, the locator, a rebuilt record that cannot be backdated, staff-only session lists, a student's and a guardian's report, check ordering, no lookups before the actor is known) and off, the completion percent, and `toCsv` (layout, quoting, formula injection and its opt-out) |
 | `test/core-permissions.test.ts` | the two reporting rules, and that `reporting.recordAttendance` is delegable |
 | `test/scheduling-permissions.test.ts` | that scheduling stamps `recordedBy` on attendance too |
 | `test/scheduling-attendance.test.ts` | scheduling's attendance integration |

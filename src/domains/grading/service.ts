@@ -30,6 +30,7 @@ export interface GradeRepository {
 export interface SubmissionLocation {
   sectionId: string;
   userId: string;
+  contentId?: string;
 }
 
 /**
@@ -152,8 +153,9 @@ export class GradingService {
     previousEntryId?: string,
     actor?: ActorContext,
   ): Promise<GradeEntry> {
+    let authInfo: (SubmissionLocation & { orgId?: string }) | undefined;
     if (this.enforcement) {
-      await this.authorizeRecord(this.enforcement, submissionId, userId, graderId, actor);
+      authInfo = await this.authorizeRecord(this.enforcement, submissionId, userId, graderId, actor);
     }
 
     this.validateNumbers(score, maxScore);
@@ -199,9 +201,44 @@ export class GradingService {
       score: entry.score,
       maxScore: entry.maxScore,
       graderId: entry.graderId,
+      ...(authInfo?.contentId !== undefined ? { contentId: authInfo.contentId } : {}),
+      ...(authInfo?.orgId !== undefined ? { orgId: authInfo.orgId } : {}),
     });
 
     return entry;
+  }
+
+  /**
+   * Records a shared grade for every member of a group.
+   * Creates a GradeEntry for each user in `memberUserIds` with the same score and maxScore.
+   */
+  async recordGroupGrade(
+    submissionId: string,
+    memberUserIds: string[],
+    score: number,
+    maxScore: number,
+    graderId: string,
+    options?: { previousEntryIds?: Record<string, string> },
+    actor?: ActorContext,
+  ): Promise<GradeEntry[]> {
+    if (memberUserIds.length === 0) {
+      throw new Error('memberUserIds must contain at least one user');
+    }
+    const entries: GradeEntry[] = [];
+    for (const userId of memberUserIds) {
+      const prevId = options?.previousEntryIds?.[userId];
+      const entry = await this.recordGrade(
+        submissionId,
+        userId,
+        score,
+        maxScore,
+        graderId,
+        prevId,
+        actor,
+      );
+      entries.push(entry);
+    }
+    return entries;
   }
 
   /**
@@ -223,10 +260,17 @@ export class GradingService {
     if (!source.startsWith('system:') || !(this.options.systemGraders ?? []).includes(source)) {
       throw new SystemGraderNotAllowedError(source);
     }
+    let locatedInfo: SubmissionLocation | null = null;
+    let orgId: string | undefined;
     if (this.enforcement) {
-      const located = await this.enforcement.submissions.locate(submissionId);
-      if (!located) throw new Error(`Submission ${submissionId} not found`);
-      if (located.userId !== userId) throw new Error('The submission does not belong to that user');
+      locatedInfo = await this.enforcement.submissions.locate(submissionId);
+      if (!locatedInfo) throw new Error(`Submission ${submissionId} not found`);
+      if (locatedInfo.userId !== userId) throw new Error('The submission does not belong to that user');
+      const sec = await this.enforcement.repos.courses?.findSection?.(locatedInfo.sectionId);
+      if (sec) {
+        const course = await this.enforcement.repos.courses?.findCourse?.(sec.courseId);
+        orgId = course?.orgId;
+      }
     }
     this.validateNumbers(score, maxScore);
 
@@ -246,6 +290,8 @@ export class GradingService {
       score: entry.score,
       maxScore: entry.maxScore,
       graderId: entry.graderId,
+      ...(locatedInfo?.contentId !== undefined ? { contentId: locatedInfo.contentId } : {}),
+      ...(orgId !== undefined ? { orgId } : {}),
     });
     return entry;
   }
@@ -330,14 +376,14 @@ export class GradingService {
     userId: string,
     graderId: string,
     actor: ActorContext | undefined,
-  ): Promise<void> {
+  ): Promise<SubmissionLocation & { orgId?: string }> {
     const action = 'grading.record';
     if (!actor) throw new ActorRequiredError(action);
 
     const located = await enforcement.submissions.locate(submissionId);
     if (!located) throw new PermissionDeniedError(action); // unknown submission: same answer as forbidden
 
-    await authorizeInSection(enforcement.policy, enforcement.repos, action, actor, {
+    const auth = await authorizeInSection(enforcement.policy, enforcement.repos, action, actor, {
       sectionId: located.sectionId,
       ownerId: located.userId,
     });
@@ -348,6 +394,8 @@ export class GradingService {
     if (userId !== located.userId) {
       throw new Error(`Submission ${submissionId} was not submitted by user ${userId}`);
     }
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    return { ...located, ...(orgId !== undefined ? { orgId } : {}) };
   }
 
   private async authorizeView(

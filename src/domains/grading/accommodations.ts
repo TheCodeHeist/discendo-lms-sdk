@@ -1,57 +1,57 @@
-import type { EventBus } from '../../core/events.js';
-import type { RepositoryContext } from '../../core/repositories.js';
-import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { PermissionDeniedError, activeSectionRole } from '../../core/permissions.js';
-import { authorizeInSection } from '../../core/authorization.js';
-import type { AuthorizationRepos } from '../../core/authorization.js';
-import type { Excusal, TimeExtension } from './types.js';
-
-export interface ListOptions {
-  /** Include revoked records. Default false. */
-  includeRevoked?: boolean;
-}
+import type { EventBus } from "../../core/events.js";
+import type {
+  Action,
+  ActorContext,
+  PermissionPolicy,
+} from "../../core/permissions.js";
+import {
+  ActorRequiredError,
+  PermissionDeniedError,
+  activeSectionRole,
+} from "../../core/permissions.js";
+import { authorizeInSection } from "../../core/authorization.js";
+import type { AuthorizationRepos } from "../../core/authorization.js";
+import type { RepositoryContext } from "../../core/repositories.js";
+import type { Excusal, TimeExtension } from "./types.js";
 
 export interface TimeExtensionRepository {
-  create(extension: Omit<TimeExtension, 'id'>): Promise<TimeExtension>;
-  /** The student's extension on this content that has not been revoked, or null. There should never be two. */
+  create(e: Omit<TimeExtension, "id">): Promise<TimeExtension>;
+  findById(id: string): Promise<TimeExtension | null>;
   findActive(userId: string, contentId: string): Promise<TimeExtension | null>;
-  /** Set `revokedAt` and `revokedBy` and return the updated record. */
+  listForContent(
+    contentId: string,
+    options?: { includeRevoked?: boolean },
+  ): Promise<TimeExtension[]>;
   revoke(id: string, at: Date, by: string): Promise<TimeExtension>;
-  listForContent(contentId: string, options?: ListOptions): Promise<TimeExtension[]>;
-  listForUser(userId: string, sectionId: string, options?: ListOptions): Promise<TimeExtension[]>;
 }
 
 export interface ExcusalRepository {
-  create(excusal: Omit<Excusal, 'id'>): Promise<Excusal>;
-  /** The student's excusal for this content that has not been revoked, or null. There should never be two. */
+  create(e: Omit<Excusal, "id">): Promise<Excusal>;
+  findById(id: string): Promise<Excusal | null>;
   findActive(userId: string, contentId: string): Promise<Excusal | null>;
-  /** Set `revokedAt` and `revokedBy` and return the updated record. */
+  listForContent(
+    contentId: string,
+    options?: { includeRevoked?: boolean },
+  ): Promise<Excusal[]>;
+  listForUser(userId: string, sectionId: string): Promise<Excusal[]>;
   revoke(id: string, at: Date, by: string): Promise<Excusal>;
-  listForContent(contentId: string, options?: ListOptions): Promise<Excusal[]>;
-  listForUser(userId: string, sectionId: string, options?: ListOptions): Promise<Excusal[]>;
 }
 
-/** What the service needs: the authorization repositories, the content nodes, and the two new repositories. */
 export type AccommodationRepos = AuthorizationRepos &
-  Pick<RepositoryContext, 'content'> & {
+  Pick<RepositoryContext, "content"> & {
     extensions: TimeExtensionRepository;
     excusals: ExcusalRepository;
   };
 
 export interface AccommodationServiceOptions {
-  /** Required: every method needs an `{ actorId }`, because each record says who made it. */
+  /** Every method enforces this policy and requires an `{ actorId }`. There is no unenforced mode. */
   policy: PermissionPolicy;
 }
 
-/**
- * Per-student exceptions to the normal rules of a piece of work: **extensions** (extra time) and
- * **excusals** (left out of the final grade). Staff and delegated TAs grant and end them, each under
- * their own name; a student sees their own, and so does a guardian with the grades scope.
- *
- * Nothing is deleted: ending one sets `revokedAt`/`revokedBy`, and changing an extension keeps the old
- * one as history. The SDK stores no due dates, so an extension is only an amount of time: see
- * `effectiveDueAt` and `daysLate`, and the `extensions` option of `AssessmentService` for quizzes.
- */
+export interface ListOptions {
+  includeRevoked?: boolean;
+}
+
 export class AccommodationService {
   constructor(
     private readonly repos: AccommodationRepos,
@@ -60,14 +60,11 @@ export class AccommodationService {
   ) {}
 
   /**
-   * Gives the student `extraSeconds` more time on the content. Needs `grading.grantExtension` in the
-   * content's section (admin, instructor, or a TA it was delegated to), and the student must be an
-   * active student of that section. The permission is checked before anything else, so a stranger learns
-   * nothing; unknown content is refused exactly like forbidden content. `extraSeconds` must be a finite
-   * number above zero.
-   *
-   * Granting the same amount again changes nothing and emits nothing. A different amount replaces the
-   * old extension, which stays as a revoked record. Emits `grading.extensionGranted`.
+   * Grants the student extra time on a piece of content: added to deadlines and quiz time limits.
+   * Needs `grading.grantExtension` (admin + instructor, delegable). The target must be an active
+   * student of the content's section; an unknown node is refused like a forbidden one. Idempotent
+   * for the same amount: returns the active record and emits nothing. A different amount replaces
+   * the active record, keeping it as history. Emits `grading.extensionGranted`.
    */
   async grantExtension(
     contentId: string,
@@ -76,19 +73,23 @@ export class AccommodationService {
     actor?: ActorContext,
     options: { reason?: string } = {},
   ): Promise<TimeExtension> {
-    const action: Action = 'grading.grantExtension';
-    const { sectionId, actorId } = await this.authorizeStaff(action, actor, contentId);
+    const action: Action = "grading.grantExtension";
+    const { sectionId, actorId, orgId } = await this.authorizeStaff(
+      action,
+      actor,
+      contentId,
+    );
     await this.requireActiveStudent(userId, sectionId, action);
-    if (typeof extraSeconds !== 'number' || !Number.isFinite(extraSeconds) || extraSeconds <= 0) {
-      throw new Error('extraSeconds must be a finite number above zero');
+    if (!Number.isFinite(extraSeconds) || extraSeconds <= 0) {
+      throw new Error(
+        `extraSeconds must be a positive finite number, got ${extraSeconds}`,
+      );
     }
 
-    const repo = this.repos.extensions;
-    const active = await repo.findActive(userId, contentId);
+    const active = await this.repos.extensions.findActive(userId, contentId);
     if (active && active.extraSeconds === extraSeconds) return active;
-    if (active) await repo.revoke(active.id, new Date(), actorId);
 
-    const created = await repo.create({
+    const created = await this.repos.extensions.create({
       userId,
       contentId,
       sectionId,
@@ -97,8 +98,12 @@ export class AccommodationService {
       grantedBy: actorId,
       grantedAt: new Date(),
     });
+    if (active) {
+      await this.repos.extensions.revoke(active.id, created.grantedAt, actorId);
+    }
+
     void this.events?.emit({
-      type: 'grading.extensionGranted',
+      type: "grading.extensionGranted",
       extensionId: created.id,
       userId,
       contentId,
@@ -106,29 +111,61 @@ export class AccommodationService {
       extraSeconds,
       grantedBy: actorId,
       ...(active ? { replacedExtensionId: active.id } : {}),
+      ...(orgId !== undefined ? { orgId } : {}),
     });
     return created;
   }
 
   /** Ends the student's extension on the content and returns it, or null if they had none. Needs `grading.grantExtension`. */
-  async revokeExtension(contentId: string, userId: string, actor?: ActorContext): Promise<TimeExtension | null> {
-    const { actorId } = await this.authorizeStaff('grading.grantExtension', actor, contentId);
+  async revokeExtension(
+    contentId: string,
+    userId: string,
+    actor?: ActorContext,
+  ): Promise<TimeExtension | null> {
+    const { actorId, orgId } = await this.authorizeStaff(
+      "grading.grantExtension",
+      actor,
+      contentId,
+    );
     const active = await this.repos.extensions.findActive(userId, contentId);
-    return active ? this.repos.extensions.revoke(active.id, new Date(), actorId) : null;
+    if (!active) return null;
+    const revoked = await this.repos.extensions.revoke(
+      active.id,
+      new Date(),
+      actorId,
+    );
+    void this.events?.emit({
+      type: "grading.extensionRevoked",
+      extensionId: revoked.id,
+      userId: revoked.userId,
+      contentId: revoked.contentId,
+      sectionId: revoked.sectionId,
+      revokedBy: actorId,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+    return revoked;
   }
 
   /**
    * The student's current extension on the content, or null. The student can read their own (and a
    * guardian with the `grades` scope their ward's); staff can read anyone's (`grading.view`).
    */
-  async getExtension(contentId: string, userId: string, actor?: ActorContext): Promise<TimeExtension | null> {
+  async getExtension(
+    contentId: string,
+    userId: string,
+    actor?: ActorContext,
+  ): Promise<TimeExtension | null> {
     await this.authorizeView(actor, contentId, userId);
     return this.repos.extensions.findActive(userId, contentId);
   }
 
   /** Everyone's extensions on the content. Staff only (`grading.grantExtension`). */
-  async listExtensions(contentId: string, actor?: ActorContext, options: ListOptions = {}): Promise<TimeExtension[]> {
-    await this.authorizeStaff('grading.grantExtension', actor, contentId);
+  async listExtensions(
+    contentId: string,
+    actor?: ActorContext,
+    options: ListOptions = {},
+  ): Promise<TimeExtension[]> {
+    await this.authorizeStaff("grading.grantExtension", actor, contentId);
     return this.repos.extensions.listForContent(contentId, options);
   }
 
@@ -144,8 +181,12 @@ export class AccommodationService {
     actor?: ActorContext,
     options: { reason?: string } = {},
   ): Promise<Excusal> {
-    const action: Action = 'grading.excuse';
-    const { sectionId, actorId } = await this.authorizeStaff(action, actor, contentId);
+    const action: Action = "grading.excuse";
+    const { sectionId, actorId, orgId } = await this.authorizeStaff(
+      action,
+      actor,
+      contentId,
+    );
     await this.requireActiveStudent(userId, sectionId, action);
 
     const active = await this.repos.excusals.findActive(userId, contentId);
@@ -158,33 +199,66 @@ export class AccommodationService {
       excusedBy: actorId,
       excusedAt: new Date(),
     });
+
     void this.events?.emit({
-      type: 'grading.excused',
+      type: "grading.excused",
       excusalId: created.id,
       userId,
       contentId,
       sectionId,
       excusedBy: actorId,
+      ...(orgId !== undefined ? { orgId } : {}),
     });
     return created;
   }
 
   /** Ends the student's excusal and returns it, or null if they had none. The work counts again. Needs `grading.excuse`. */
-  async unexcuse(contentId: string, userId: string, actor?: ActorContext): Promise<Excusal | null> {
-    const { actorId } = await this.authorizeStaff('grading.excuse', actor, contentId);
+  async unexcuse(
+    contentId: string,
+    userId: string,
+    actor?: ActorContext,
+  ): Promise<Excusal | null> {
+    const { actorId, orgId } = await this.authorizeStaff(
+      "grading.excuse",
+      actor,
+      contentId,
+    );
     const active = await this.repos.excusals.findActive(userId, contentId);
-    return active ? this.repos.excusals.revoke(active.id, new Date(), actorId) : null;
+    if (!active) return null;
+    const revoked = await this.repos.excusals.revoke(
+      active.id,
+      new Date(),
+      actorId,
+    );
+    void this.events?.emit({
+      type: "grading.unexcused",
+      excusalId: revoked.id,
+      userId: revoked.userId,
+      contentId: revoked.contentId,
+      sectionId: revoked.sectionId,
+      revokedBy: actorId,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+    return revoked;
   }
 
   /** The student's current excusal for the content, or null. Readable like `getExtension`. */
-  async getExcusal(contentId: string, userId: string, actor?: ActorContext): Promise<Excusal | null> {
+  async getExcusal(
+    contentId: string,
+    userId: string,
+    actor?: ActorContext,
+  ): Promise<Excusal | null> {
     await this.authorizeView(actor, contentId, userId);
     return this.repos.excusals.findActive(userId, contentId);
   }
 
   /** Everyone's excusals for the content. Staff only (`grading.excuse`). */
-  async listExcusals(contentId: string, actor?: ActorContext, options: ListOptions = {}): Promise<Excusal[]> {
-    await this.authorizeStaff('grading.excuse', actor, contentId);
+  async listExcusals(
+    contentId: string,
+    actor?: ActorContext,
+    options: ListOptions = {},
+  ): Promise<Excusal[]> {
+    await this.authorizeStaff("grading.excuse", actor, contentId);
     return this.repos.excusals.listForContent(contentId, options);
   }
 
@@ -193,24 +267,53 @@ export class AccommodationService {
     action: Action,
     actor: ActorContext | undefined,
     contentId: string,
-  ): Promise<{ sectionId: string; actorId: string }> {
+  ): Promise<{ sectionId: string; actorId: string; orgId?: string }> {
     // Skipped without an actor, so the caller hears "actor required" before anything is looked up.
     const node = actor ? await this.repos.content.findById(contentId) : null;
-    const auth = await authorizeInSection(this.options.policy, this.repos, action, actor, { sectionId: node?.sectionId });
-    return { sectionId: node!.sectionId, actorId: auth.ctx.actor.id };
+    const auth = await authorizeInSection(
+      this.options.policy,
+      this.repos,
+      action,
+      actor,
+      { sectionId: node?.sectionId },
+    );
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    return {
+      sectionId: node!.sectionId,
+      actorId: auth.ctx.actor.id,
+      ...(orgId !== undefined ? { orgId } : {}),
+    };
   }
 
-  private async authorizeView(actor: ActorContext | undefined, contentId: string, userId: string): Promise<void> {
+  private async authorizeView(
+    actor: ActorContext | undefined,
+    contentId: string,
+    userId: string,
+  ): Promise<void> {
     const node = actor ? await this.repos.content.findById(contentId) : null;
-    await authorizeInSection(this.options.policy, this.repos, 'grading.view', actor, {
-      sectionId: node?.sectionId,
-      ownerId: userId,
-      afterCompletion: true, // a completed student keeps read-only access to their own records
-    });
+    await authorizeInSection(
+      this.options.policy,
+      this.repos,
+      "grading.view",
+      actor,
+      {
+        sectionId: node?.sectionId,
+        ownerId: userId,
+        afterCompletion: true, // a completed student keeps read-only access to their own records
+      },
+    );
   }
 
-  private async requireActiveStudent(userId: string, sectionId: string, action: Action): Promise<void> {
-    const membership = await this.repos.enrollments.findByUserAndSection(userId, sectionId);
-    if (activeSectionRole(membership) !== 'student') throw new PermissionDeniedError(action);
+  private async requireActiveStudent(
+    userId: string,
+    sectionId: string,
+    action: Action,
+  ): Promise<void> {
+    const membership = await this.repos.enrollments.findByUserAndSection(
+      userId,
+      sectionId,
+    );
+    if (activeSectionRole(membership) !== "student")
+      throw new PermissionDeniedError(action);
   }
 }

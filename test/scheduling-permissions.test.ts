@@ -225,6 +225,7 @@ describe('cancelOccurrence: an instructor\'s class, an instructor\'s call', () =
         actorRole: 'instructor',
         previousStatus: 'scheduled',
         note: 'Sick today',
+        orgId: 'org-a',
       },
     ]);
   });
@@ -306,6 +307,7 @@ describe('rescheduleOccurrence', () => {
         actorId: 'teacher',
         actorRole: 'instructor',
         from: { date: D('2026-10-12'), status: 'scheduled', roomId: 'room-a1', startTime: '09:00', endTime: '10:00' },
+        orgId: 'org-a',
       },
     ]);
   });

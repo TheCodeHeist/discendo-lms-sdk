@@ -17,6 +17,9 @@ import type {
   GuardianLink,
   Department,
   TaGrant,
+  SectionGroup,
+  GroupMember,
+  CoursePrerequisite,
 } from './types.js';
 
 export interface UserRepository {
@@ -144,6 +147,26 @@ export interface GuardianLinkManagementRepository extends GuardianLinkRepository
  * Bundle of repositories the SDK's service classes are constructed with.
  * Host app wires up real implementations once at startup.
  */
+
+export interface GroupRepository {
+  create(group: Omit<SectionGroup, 'id'>): Promise<SectionGroup>;
+  findById(id: Id): Promise<SectionGroup | null>;
+  listBySection(sectionId: Id, groupSet?: string): Promise<SectionGroup[]>;
+  delete(id: Id): Promise<boolean>;
+  addMember(member: Omit<GroupMember, 'id'>): Promise<GroupMember>;
+  removeMember(groupId: Id, userId: Id): Promise<boolean>;
+  listMembers(groupId: Id): Promise<GroupMember[]>;
+  findMember(groupId: Id, userId: Id): Promise<GroupMember | null>;
+  listGroupsForUser(sectionId: Id, userId: Id): Promise<SectionGroup[]>;
+}
+
+
+export interface CoursePrerequisiteRepository {
+  add(prereq: Omit<CoursePrerequisite, 'id'>): Promise<CoursePrerequisite>;
+  remove(id: Id): Promise<boolean>;
+  listByCourse(courseId: Id): Promise<CoursePrerequisite[]>;
+}
+
 export interface RepositoryContext {
   users: UserRepository;
   courses: CourseRepository;
@@ -160,4 +183,8 @@ export interface RepositoryContext {
   delegations?: DelegationRepository;
   /** Only needed by hosts with guardians. Without it a guardian can read nothing. */
   guardianLinks?: GuardianLinkRepository;
+  /** Only needed for student groups within sections (`GroupService`). */
+  groups?: GroupRepository;
+  /** Only needed for course prerequisites and sequences (`PrerequisiteService`). */
+  coursePrerequisites?: CoursePrerequisiteRepository;
 }

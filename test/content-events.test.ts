@@ -1,17 +1,33 @@
-import { describe, it, expect } from 'bun:test';
-import { ContentService } from '../src/domains/content/index.js';
-import { EventBus } from '../src/core/index.js';
-import type { RepositoryContext } from '../src/core/index.js';
-import type { ContentNode } from '../src/core/index.js';
+import { describe, it, expect } from "bun:test";
+import { ContentService } from "../src/domains/content/index.js";
+import { EventBus } from "../src/core/index.js";
+import type { RepositoryContext } from "../src/core/index.js";
+import type { ContentNode } from "../src/core/index.js";
 
 function makeRepos(): RepositoryContext {
   const nodes = new Map<string, ContentNode>();
   return {
     users: { findById: async () => null, findByExternalRef: async () => null },
-    courses: { findCourse: async () => null, findSection: async () => null, listSections: async () => [] },
+    courses: {
+      findCourse: async (id) =>
+        id === "c-1" ? { id, title: "Course", orgId: "org-c" } : null,
+      findSection: async (id) =>
+        id === "sec-1"
+          ? { id, courseId: "c-1", status: "published" as const }
+          : null,
+      listSections: async () => [],
+    },
     enrollments: {
-      create: async (e) => ({ ...e, id: 'e1' }),
-      update: async (id, patch) => ({ id, userId: 'u', sectionId: 's', role: 'student', status: 'active', enrolledAt: new Date(), ...patch }),
+      create: async (e) => ({ ...e, id: "e1" }),
+      update: async (id, patch) => ({
+        id,
+        userId: "u",
+        sectionId: "s",
+        role: "student",
+        status: "active",
+        enrolledAt: new Date(),
+        ...patch,
+      }),
       findById: async () => null,
       findByUserAndSection: async () => null,
       listBySection: async () => [],
@@ -21,13 +37,13 @@ function makeRepos(): RepositoryContext {
       findById: async (id) => nodes.get(id) ?? null,
       listBySection: async () => [...nodes.values()],
       create: async (n) => {
-        const node: ContentNode = { ...n, id: 'content-1', version: 1 };
+        const node: ContentNode = { ...n, id: "content-1", version: 1 };
         nodes.set(node.id, node);
         return node;
       },
       update: async (id, patch) => {
         const existing = nodes.get(id);
-        if (!existing) throw new Error('not found');
+        if (!existing) throw new Error("not found");
         const updated = { ...existing, ...patch };
         nodes.set(id, updated);
         return updated;
@@ -38,12 +54,16 @@ function makeRepos(): RepositoryContext {
   };
 }
 
-describe('ContentService event emission', () => {
-  it('emits content.published when a node is published', async () => {
+describe("ContentService event emission", () => {
+  it("emits content.published when a node is published", async () => {
     const repos = makeRepos();
     const bus = new EventBus();
-    const received: Array<{ contentId: string; version: number }> = [];
-    bus.on('content.published', (e) => {
+    const received: Array<{
+      contentId: string;
+      version: number;
+      orgId?: string;
+    }> = [];
+    bus.on("content.published", (e) => {
       received.push(e);
     });
 
@@ -51,9 +71,9 @@ describe('ContentService event emission', () => {
     const service = new ContentService(repos, completion, [], bus);
 
     const node = await service.createNode({
-      sectionId: 'sec-1',
-      kind: 'page',
-      title: 'Intro',
+      sectionId: "sec-1",
+      kind: "page",
+      title: "Intro",
       orderIndex: 0,
       published: false,
     });
@@ -62,20 +82,56 @@ describe('ContentService event emission', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0]?.version).toBe(2);
+    expect(received[0]?.orgId).toBe("org-c");
   });
 
-  it('works with no EventBus supplied at all', async () => {
+  it("emits content.unpublished when a node is unpublished", async () => {
+    const repos = makeRepos();
+    const bus = new EventBus();
+    const received: Array<{
+      contentId: string;
+      version: number;
+      orgId?: string;
+    }> = [];
+    bus.on("content.unpublished", (e) => {
+      received.push(e);
+    });
+
+    const completion = { isComplete: async () => true };
+    const service = new ContentService(repos, completion, [], bus);
+
+    const node = await service.createNode({
+      sectionId: "sec-1",
+      kind: "page",
+      title: "Intro",
+      orderIndex: 0,
+      published: true,
+    });
+    const unpub = await service.unpublish(node.id);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(unpub.published).toBe(false);
+    expect(unpub.version).toBe(2);
+    expect(received).toHaveLength(1);
+    expect(received[0]?.contentId).toBe(node.id);
+    expect(received[0]?.version).toBe(2);
+    expect(received[0]?.orgId).toBe("org-c");
+  });
+
+  it("works with no EventBus supplied at all", async () => {
     const repos = makeRepos();
     const completion = { isComplete: async () => true };
     const service = new ContentService(repos, completion); // no prerequisites, no bus
     const node = await service.createNode({
-      sectionId: 'sec-1',
-      kind: 'page',
-      title: 'Intro',
+      sectionId: "sec-1",
+      kind: "page",
+      title: "Intro",
       orderIndex: 0,
       published: false,
     });
     const published = await service.publish(node.id);
     expect(published.published).toBe(true);
+    const unpublished = await service.unpublish(node.id);
+    expect(unpublished.published).toBe(false);
   });
 });

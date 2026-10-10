@@ -24,6 +24,7 @@ import { scoreQuiz } from './scoring.js';
 export interface SubmissionRepository {
   create(sub: Omit<Submission, 'id'>): Promise<Submission>;
   countAttempts(contentId: string, userId: string): Promise<number>;
+  countGroupAttempts?(contentId: string, groupId: string): Promise<number>;
   /**
    * OPTIONAL, and strongly recommended: store the submission as the person's NEXT attempt, as ONE
    * atomic step (a transaction, a lock, a conditional insert). The repository assigns
@@ -71,7 +72,7 @@ export interface QuizRepository {
  */
 export interface AssessmentEnforcement {
   policy: PermissionPolicy;
-  repos: AuthorizationRepos & Pick<RepositoryContext, 'content'>;
+  repos: AuthorizationRepos & Pick<RepositoryContext, 'content' | 'groups'>;
 }
 
 export class AssessmentService {
@@ -102,6 +103,7 @@ export class AssessmentService {
     payload: SubmissionPayload,
     maxAttempts?: number,
     actor?: ActorContext,
+    options?: { groupId?: string },
   ): Promise<Submission> {
     const authorized = await this.authorizeOn('assessment.submit', actor, contentId, userId);
     // With enforcement, offline work is staff's to record (`recordOffline`), not a student's to
@@ -110,48 +112,78 @@ export class AssessmentService {
       throw new Error('A "none" submission is recorded by staff with recordOffline, not submitted');
     }
 
+    if (authorized && options?.groupId) {
+      const groupsRepo = this.enforcement?.repos.groups;
+      if (!groupsRepo) {
+        throw new Error('Group repository is required for group submissions');
+      }
+      const group = await groupsRepo.findById(options.groupId);
+      if (!group || group.sectionId !== authorized.sectionId) {
+        throw new PermissionDeniedError('assessment.submit');
+      }
+      const member = await groupsRepo.findMember(options.groupId, userId);
+      if (!member) {
+        throw new PermissionDeniedError('assessment.submit');
+      }
+    }
+
     let submission: Submission;
+    const draft = {
+      contentId,
+      userId,
+      payload,
+      submittedAt: new Date(),
+      ...(options?.groupId !== undefined ? { groupId: options.groupId } : {}),
+    };
+
     if (this.submissions.createAttempt) {
       // The repository checks the limit and numbers the attempt in one atomic step.
-      const stored = await this.submissions.createAttempt(
-        { contentId, userId, payload, submittedAt: new Date() },
-        maxAttempts,
-      );
+      const stored = await this.submissions.createAttempt(draft, maxAttempts);
       if (!stored) throw new Error('No attempts remaining');
       submission = stored;
     } else {
-      const priorAttempts = await this.submissions.countAttempts(contentId, userId);
+      let priorAttempts: number;
+      if (options?.groupId && this.submissions.countGroupAttempts) {
+        priorAttempts = await this.submissions.countGroupAttempts(contentId, options.groupId);
+      } else {
+        priorAttempts = await this.submissions.countAttempts(contentId, userId);
+      }
+
       if (maxAttempts !== undefined && priorAttempts >= maxAttempts) {
         throw new Error('No attempts remaining');
       }
 
       submission = await this.submissions.create({
-        contentId,
-        userId,
-        payload,
-        submittedAt: new Date(),
+        ...draft,
         attemptNumber: priorAttempts + 1,
       });
     }
 
+    const orgId = authorized?.orgId;
     if (this.plagiarismHook) {
-      // Fire-and-forget by design — don't block submission on a slow external check. A hook
-      // that throws (synchronously) or rejects must never fail the already-stored submission
-      // or surface as an unhandled rejection, so both are swallowed here. The hook owns its
-      // own error reporting (see docs/ASSESSMENT.md).
       const hook = this.plagiarismHook;
       void Promise.resolve()
         .then(() => hook(submission))
-        .catch(() => {});
+        .catch((error) => {
+          void this.events?.emit({
+            type: "assessment.plagiarismCheckFailed",
+            submissionId: submission.id,
+            contentId: submission.contentId,
+            userId: submission.userId,
+            error: error instanceof Error ? error.message : String(error),
+            ...(orgId !== undefined ? { orgId } : {}),
+          });
+        });
     }
 
     // Fire-and-forget: a slow or failing listener must never delay or fail a submission.
     void this.events?.emit({
-      type: 'assessment.submissionReceived',
+      type: "assessment.submissionReceived",
       submissionId: submission.id,
       contentId: submission.contentId,
       userId: submission.userId,
       attemptNumber: submission.attemptNumber,
+      ...(orgId !== undefined ? { orgId } : {}),
     });
 
     return submission;
@@ -166,9 +198,15 @@ export class AssessmentService {
     userId: string,
     maxAttempts: number,
     actor?: ActorContext,
+    options?: { groupId?: string },
   ): Promise<number> {
     await this.authorizeOn('assessment.viewAttempts', actor, contentId, userId);
-    const used = await this.submissions.countAttempts(contentId, userId);
+    let used: number;
+    if (options?.groupId && this.submissions.countGroupAttempts) {
+      used = await this.submissions.countGroupAttempts(contentId, options.groupId);
+    } else {
+      used = await this.submissions.countAttempts(contentId, userId);
+    }
     return Math.max(0, maxAttempts - used);
   }
 
@@ -326,7 +364,7 @@ export class AssessmentService {
     options: SubmitQuizOptions = {},
   ): Promise<QuizResult> {
     const attempt = await this.loadAttempt(attemptId, actor);
-    await this.authorizeAttempt('assessment.submitQuiz', actor, attempt);
+    const authorized = await this.authorizeAttempt('assessment.submitQuiz', actor, attempt);
     if (!attempt) throw new Error(`Quiz attempt ${attemptId} not found`);
     const limit = await this.effectiveLimit(attempt, options.timeLimitSeconds);
 
@@ -342,13 +380,13 @@ export class AssessmentService {
         late: isLate(attempt, limit, now),
       });
       if (closed) {
-        current = await this.finishAttempt(closed);
+        current = await this.finishAttempt(closed, authorized?.orgId);
       } else {
         // Someone else submitted at the same moment; they finish the job, we report what they stored.
         current = (await this.quizzes.findAttempt(attempt.id)) ?? attempt;
       }
     } else if (this.needsFinishing(attempt)) {
-      current = await this.finishAttempt(attempt);
+      current = await this.finishAttempt(attempt, authorized?.orgId);
     }
     return this.resultOf(current, options.revealAnswers === true);
   }
@@ -379,7 +417,7 @@ export class AssessmentService {
   }
 
   /** Stores the quiz submission and the automatic grade, each only if it is not there yet. */
-  private async finishAttempt(attempt: QuizAttempt): Promise<QuizAttempt> {
+  private async finishAttempt(attempt: QuizAttempt, orgId?: string): Promise<QuizAttempt> {
     let current = attempt;
     if (current.submissionId === undefined) {
       const submission = await this.storeQuizSubmission(current);
@@ -393,6 +431,7 @@ export class AssessmentService {
         score: current.score!,
         maxScore: current.maxScore!,
         late: current.late === true,
+        ...(orgId !== undefined ? { orgId } : {}),
       });
     }
     const auto = this.options.autoGrade;
@@ -470,7 +509,7 @@ export class AssessmentService {
     actor: ActorContext | undefined,
     contentId: string,
     ownerId: string,
-  ): Promise<{ sectionId: string; staff: boolean } | undefined> {
+  ): Promise<{ sectionId: string; staff: boolean; orgId?: string } | undefined> {
     const e = this.enforcement;
     if (!e) return undefined;
     // Only needed to find out which section this is about; skipped without an actor so the
@@ -483,7 +522,8 @@ export class AssessmentService {
     const staff = isStaff(auth.ctx);
     if (node && !node.published && !staff) throw new PermissionDeniedError(action);
     // authorizeInSection has already refused a missing node, so there is a section here.
-    return { sectionId: node!.sectionId, staff };
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    return { sectionId: node!.sectionId, staff, ...(orgId !== undefined ? { orgId } : {}) };
   }
 }
 

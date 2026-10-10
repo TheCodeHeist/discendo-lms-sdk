@@ -6,7 +6,8 @@ import { authorize } from '../../core/permissions.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { authorizeInSection } from '../../core/authorization.js';
 import type { Authorized } from '../../core/authorization.js';
-import { EnrollmentNotDroppableError, SectionNotOpenError } from './types.js';
+import { EnrollmentNotDroppableError, SectionNotOpenError, PrerequisiteNotMetError } from './types.js';
+import { PrerequisiteService } from './prerequisites.js';
 import type { EnrollOptions, BatchEnrollRow, BatchReport, BulkEnrollOptions, PromoteOptions } from './types.js';
 
 export interface EnrollmentServiceOptions {
@@ -24,6 +25,8 @@ export interface EnrollmentServiceOptions {
    * `promoteFromWaitlist` can be called to catch up.
    */
   promoteOnDrop?: boolean;
+  enforcePrerequisites?: boolean;
+  gradeSource?: { getCourseGrade(userId: string, courseId: string): Promise<number | null> };
 }
 
 export class EnrollmentService {
@@ -198,6 +201,24 @@ export class EnrollmentService {
 
     await this.assertSameTenant(opts.userId, section);
 
+    if (
+      this.options.enforcePrerequisites &&
+      opts.role === 'student' &&
+      !opts.overridePrerequisites &&
+      this.repos.coursePrerequisites
+    ) {
+      const prereqService = new PrerequisiteService(this.repos, {
+        ...(this.options.gradeSource !== undefined ? { gradeSource: this.options.gradeSource } : {}),
+      });
+      const check = await prereqService.checkPrerequisites({
+        userId: opts.userId,
+        courseId: section.courseId,
+      });
+      if (!check.satisfied) {
+        throw new PrerequisiteNotMetError(section.courseId, opts.userId, check.unmet);
+      }
+    }
+
     // Checked after the organization, so a person of another organization hears "wrong organization".
     if (section.status === 'archived') throw new SectionNotOpenError(section.id, 'archived');
     if (section.status === 'draft' && !opts.allowDraft) throw new SectionNotOpenError(section.id, 'draft');
@@ -302,12 +323,28 @@ export class EnrollmentService {
 
   /** `promoteOnDrop`: a best-effort catch-up that can never fail or undo the drop that led to it. */
   private async promoteAfterDrop(sectionId: string): Promise<void> {
+    let orgId: string | undefined;
     try {
       const section = await this.repos.courses.findSection(sectionId);
       if (!section || section.status !== 'published') return;
+      orgId = await this.orgIdOfSection(section);
       await this.promoteUnchecked(section, 'auto');
-    } catch {
+    } catch (err) {
       // The drop already happened. promoteFromWaitlist() picks up whatever was missed.
+      if (!orgId) {
+        try {
+          const section = await this.repos.courses.findSection(sectionId);
+          if (section) orgId = await this.orgIdOfSection(section);
+        } catch {
+          // ignore
+        }
+      }
+      void this.events?.emit({
+        type: 'enrollment.promotionFailed',
+        sectionId,
+        error: err instanceof Error ? err.message : String(err),
+        ...(orgId !== undefined ? { orgId } : {}),
+      });
     }
   }
 

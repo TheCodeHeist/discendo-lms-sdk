@@ -1,6 +1,10 @@
 import type { Id } from "../../core/types.js";
+import type { EventBus } from "../../core/events.js";
 import type { ActorContext, PermissionPolicy } from "../../core/permissions.js";
-import { PermissionDeniedError, activeSectionRole } from "../../core/permissions.js";
+import {
+  PermissionDeniedError,
+  activeSectionRole,
+} from "../../core/permissions.js";
 import { authorizeInSection, isStaff } from "../../core/authorization.js";
 import type { AuthorizationRepos } from "../../core/authorization.js";
 
@@ -42,15 +46,28 @@ export interface ReportingServiceOptions {
    * service behaves as it always has: no actor, no permission checks.
    */
   enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos };
+  /** Optional EventBus to emit reporting events to. */
+  events?: EventBus | undefined;
 }
 
 /** One student's attendance in a section: the marks, oldest first, and a count per status. */
 export interface StudentAttendanceReport {
   records: AttendanceRecord[];
-  summary: { present: number; absent: number; excused: number; late: number; total: number };
+  summary: {
+    present: number;
+    absent: number;
+    excused: number;
+    late: number;
+    total: number;
+  };
 }
 
-const STATUSES: readonly AttendanceStatus[] = ["present", "absent", "excused", "late"];
+const STATUSES: readonly AttendanceStatus[] = [
+  "present",
+  "absent",
+  "excused",
+  "late",
+];
 
 /** Anything exportable as flat rows can reuse this — gradebook, roster, attendance, etc. */
 export interface Exportable {
@@ -66,12 +83,19 @@ export interface CsvOptions {
   sanitizeFormulas?: boolean;
 }
 
-export function toCsv(exportable: Exportable, options: CsvOptions = {}): string {
+export function toCsv(
+  exportable: Exportable,
+  options: CsvOptions = {},
+): string {
   const rows = exportable.toRows();
   if (rows.length === 0) return "";
   const sanitize = options.sanitizeFormulas !== false;
   const cell = (value: string | number | undefined): string =>
-    escapeCsvCell(typeof value === "string" && sanitize ? neutralizeFormula(value) : String(value ?? ""));
+    escapeCsvCell(
+      typeof value === "string" && sanitize
+        ? neutralizeFormula(value)
+        : String(value ?? ""),
+    );
   const headers = Object.keys(rows[0]!);
   const lines = [headers.map((h) => cell(h)).join(",")];
   for (const row of rows) {
@@ -89,13 +113,19 @@ function escapeCsvCell(value: string): string {
 }
 
 export class ReportingService {
+  private readonly events?: EventBus | undefined;
+
   constructor(
     private readonly attendance: AttendanceRepository,
     private readonly options: ReportingServiceOptions = {},
+    events?: EventBus,
   ) {
     if (options.enforcement && !options.sessions) {
-      throw new Error("ReportingService enforcement needs a SessionLocator (options.sessions)");
+      throw new Error(
+        "ReportingService enforcement needs a SessionLocator (options.sessions)",
+      );
     }
+    this.events = events ?? options.events;
   }
 
   /**
@@ -107,24 +137,66 @@ export class ReportingService {
    * known fields: the time is the service's clock (nobody can backdate a mark), `recordedBy` is the
    * actor, and anything else the caller passed is dropped.
    */
-  async recordAttendance(record: AttendanceRecord, actor?: ActorContext): Promise<void> {
+  async recordAttendance(
+    record: AttendanceRecord,
+    actor?: ActorContext,
+  ): Promise<void> {
     const enforcement = this.options.enforcement;
-    if (!enforcement) return this.attendance.record(record);
+    if (!enforcement) {
+      await this.attendance.record(record);
+      void this.events?.emit({
+        type: "reporting.attendanceRecorded",
+        sessionId: record.sessionId,
+        userId: record.userId,
+        status: record.status,
+        recordedAt: record.recordedAt,
+        ...(record.recordedBy !== undefined
+          ? { recordedBy: record.recordedBy }
+          : {}),
+      });
+      return;
+    }
 
-    const sectionId = actor ? await this.options.sessions!.sectionOf(record.sessionId) : null;
-    await authorizeInSection(enforcement.policy, enforcement.repos, "reporting.recordAttendance", actor, {
-      sectionId: sectionId ?? undefined,
-    });
-    const membership = await enforcement.repos.enrollments.findByUserAndSection(record.userId, sectionId!);
-    if (activeSectionRole(membership) !== "student") throw new PermissionDeniedError("reporting.recordAttendance");
-    if (!STATUSES.includes(record.status)) throw new Error(`Unknown attendance status: ${String(record.status)}`);
+    const sectionId = actor
+      ? await this.options.sessions!.sectionOf(record.sessionId)
+      : null;
+    const auth = await authorizeInSection(
+      enforcement.policy,
+      enforcement.repos,
+      "reporting.recordAttendance",
+      actor,
+      {
+        sectionId: sectionId ?? undefined,
+      },
+    );
+    const membership = await enforcement.repos.enrollments.findByUserAndSection(
+      record.userId,
+      sectionId!,
+    );
+    if (activeSectionRole(membership) !== "student")
+      throw new PermissionDeniedError("reporting.recordAttendance");
+    if (!STATUSES.includes(record.status))
+      throw new Error(`Unknown attendance status: ${String(record.status)}`);
 
-    return this.attendance.record({
+    const stored: AttendanceRecord = {
       sessionId: record.sessionId,
       userId: record.userId,
       status: record.status,
       recordedAt: new Date(),
       recordedBy: actor!.actorId,
+    };
+    await this.attendance.record(stored);
+
+    const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    void this.events?.emit({
+      type: "reporting.attendanceRecorded",
+      sessionId: stored.sessionId,
+      userId: stored.userId,
+      status: stored.status,
+      recordedAt: stored.recordedAt,
+      ...(stored.recordedBy !== undefined ? { recordedBy: stored.recordedBy } : {}),
+      sectionId: sectionId!,
+      ...(orgId !== undefined ? { orgId } : {}),
     });
   }
 
@@ -134,28 +206,47 @@ export class ReportingService {
    * or guardian reads a student's own marks with `attendanceForStudent` instead. Without enforcement
    * it returns what the repository has.
    */
-  async listAttendanceForSession(sessionId: Id, actor?: ActorContext): Promise<AttendanceRecord[]> {
+  async listAttendanceForSession(
+    sessionId: Id,
+    actor?: ActorContext,
+  ): Promise<AttendanceRecord[]> {
     const enforcement = this.options.enforcement;
     if (enforcement) {
-      const sectionId = actor ? await this.options.sessions!.sectionOf(sessionId) : null;
-      const auth = await authorizeInSection(enforcement.policy, enforcement.repos, "reporting.view", actor, {
-        sectionId: sectionId ?? undefined,
-      });
+      const sectionId = actor
+        ? await this.options.sessions!.sectionOf(sessionId)
+        : null;
+      const auth = await authorizeInSection(
+        enforcement.policy,
+        enforcement.repos,
+        "reporting.view",
+        actor,
+        {
+          sectionId: sectionId ?? undefined,
+        },
+      );
       if (!isStaff(auth.ctx)) throw new PermissionDeniedError("reporting.view");
     }
     return this.attendance.listForSession(sessionId);
   }
 
   /**
-   * One student's attendance across a section's sessions, oldest first, with a count per status.
-   * With enforcement (`actor` required) the owner is the student named: they may read their own,
-   * staff of the section may read anyone's, and a guardian whose verified link has the `attendance`
-   * scope may read their ward's, while the ward is an **active student** there. Dropped, waitlisted
-   * and completed students are refused (completed access covers grades and content only). It asks
-   * the repository for one session at a time, once each, so a section with many sessions costs that
-   * many calls. Needs `options.sessions`.
+   * One student's marks in a section: ordered oldest first, with a summary count per status. Needs
+   * `reporting.view` in that section:
+   *  - the student themselves, or staff (instructors, TAs, admins);
+   *  - a guardian whose verified link includes the `attendance` scope, while the student is an
+   *    active student of that section.
+   * A completed student keeps access to their own attendance (and guardians with the scope theirs).
+   * Refuses a student who was never enrolled, or whose enrollment was dropped or waitlisted, with
+   * `PermissionDeniedError` (same as a forbidden section: no probing).
+   *
+   * Without enforcement it returns the records for every session of the section without checking
+   * who calls or whether the student belongs to the section. Needs `options.sessions`.
    */
-  async attendanceForStudent(sectionId: Id, userId: Id, actor?: ActorContext): Promise<StudentAttendanceReport> {
+  async attendanceForStudent(
+    sectionId: Id,
+    userId: Id,
+    actor?: ActorContext,
+  ): Promise<StudentAttendanceReport> {
     const enforcement = this.options.enforcement;
     if (enforcement) {
       await authorizeInSection(enforcement.policy, enforcement.repos, "reporting.view", actor, {
@@ -180,11 +271,6 @@ export class ReportingService {
     return { records, summary };
   }
 
-  /**
-   * Progress is derived from content completion events, not stored as mutable state. The result is
-   * a whole percent from 0 to 100: more completed than total (or a negative count) cannot push it
-   * outside that, and anything that is not a finite number, or a total of zero or less, gives 0.
-   */
   computeCompletionPercent(totalItems: number, completedItems: number): number {
     if (!Number.isFinite(totalItems) || !Number.isFinite(completedItems) || totalItems <= 0) return 0;
     return Math.min(100, Math.max(0, Math.round((completedItems / totalItems) * 100)));

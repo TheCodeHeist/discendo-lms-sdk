@@ -430,7 +430,7 @@ describe('submitAttempt: scoring and recording', () => {
     expect(r.submissionId).toBe('sub-1');
     expect(w.store.attempts[0]!.submissionId).toBe('sub-1');
     expect(w.ofType('assessment.quizSubmitted')).toEqual([
-      { type: 'assessment.quizSubmitted', attemptId: a.id, quizId: 'quiz-1', submissionId: 'sub-1', userId: 'stu', score: 1, maxScore: 4, late: false },
+      { type: 'assessment.quizSubmitted', attemptId: a.id, quizId: 'quiz-1', submissionId: 'sub-1', userId: 'stu', score: 1, maxScore: 4, late: false, orgId: 'org-a' },
     ]);
     expect(w.ofType('assessment.submissionReceived')).toEqual([]);
     expect(await w.service.attemptsRemaining('quiz-1', 'stu', 3, as('stu'))).toBe(2);

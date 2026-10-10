@@ -294,6 +294,40 @@ const pending = await requests.listRequests('sec-1', 'pending', { actorId: admin
 await requests.modify(asked.id, 'sec-2', { actorId: admin.id }, { note: 'Moved to the evening class' });
 ```
 
+## GroupService
+
+Manages student study and project groups within a section. Groups can support self-signup or staff assignment, and optional capacity limits. Exported from `discendo-sdk/enrollment`.
+
+```ts
+const groupService = new GroupService(repos, bus, { policy });
+```
+
+### Methods
+- **`createGroup(input, actor?)`**: Creates a new group for a section. Needs `enrollment.manageGroups` (admin, instructor).
+- **`getGroup(groupId, actor?)`**: Returns group details.
+- **`listGroups(sectionId, actor?)`**: Lists all groups in a section.
+- **`joinGroup(groupId, actor)`**: Enrolls the student actor into the group. Throws `SelfSignupNotAllowedError` if self signup is disabled, `GroupFullError` if max members is reached, `AlreadyInGroupError` if the student is already in a group in this section, or `GroupNotFoundError`.
+- **`leaveGroup(groupId, actor)`**: Removes the student actor from the group.
+- **`assignMember(groupId, userId, actor?)`**: Assigns a student to a group. Needs `enrollment.manageGroups`.
+- **`removeMember(groupId, userId, actor?)`**: Removes a member from a group. Needs `enrollment.manageGroups`.
+
+## PrerequisiteService
+
+Manages course prerequisites, dependency graph validation, and sequential progression checks. Exported from `discendo-sdk/enrollment`.
+
+```ts
+const prereqService = new PrerequisiteService(repos, { gradeSource });
+```
+
+### Methods
+- **`addPrerequisite(input, actor?)`**: Adds a prerequisite requirement (`type: "completion" | "grade" | "course"`). Needs `course.managePrerequisites` (admin, instructor). Throws `CircularPrerequisiteError` if adding this prerequisite creates a cycle.
+- **`removePrerequisite(courseId, prerequisiteCourseId, actor?)`**: Removes a prerequisite requirement. Needs `course.managePrerequisites`.
+- **`listPrerequisites(courseId, actor?)`**: Lists direct prerequisites for a course.
+- **`getPrerequisiteSequence(courseId, actor?)`**: Returns topologically sorted course dependencies for sequencing.
+- **`checkPrerequisites({ userId, courseId })`**: Evaluates whether a user satisfies all prerequisite requirements.
+
+When `enforcePrerequisites: true` is configured on `EnrollmentService`, student enrollments without `overridePrerequisites: true` verify prerequisite completion, throwing `PrerequisiteNotMetError` if requirements are unmet.
+
 ## Permissions at a glance
 
 | Method | Action | Checked against |
@@ -409,3 +443,5 @@ rejection. See [EVENTS.md](./EVENTS.md).
 | `test/enrollment-requests.test.ts` | `EnrollmentRequestService`: asking (identity, tenancy, probing, duplicates, re-asking), withdrawing, listing, accepting (waitlist, queue, idempotence, closed sections, races with and without `decideIfPending`), modifying, rejecting, permissions and the `enrollment.reviewRequest` rule |
 | `test/enrollment-waitlist.test.ts` | `promoteFromWaitlist` (order, free seats, raised capacity, idempotence, section status, races with and without `promoteIfSeatFree`, permissions and their ordering, the `enrollment.promoted` event), `promoteOnDrop`, and newcomers waiting behind the waitlist |
 | `test/delegation.test.ts` | a TA with delegated rights enrolling students through this service |
+| `test/enrollment-groups.test.ts` | `GroupService` group creation, member assignment, self-signup limits, and group permissions |
+| `test/enrollment-prerequisites.test.ts` | `PrerequisiteService` cycle checking, topological sequencing, and prerequisite enforcement on enrollment |

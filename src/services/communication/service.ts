@@ -1,17 +1,31 @@
-import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
-import { PermissionDeniedError } from '../../core/permissions.js';
-import { authorizeInSection, isStaff } from '../../core/authorization.js';
-import type { Authorized, AuthorizationRepos } from '../../core/authorization.js';
-import type { Announcement, AnnouncementAudience, Thread, ThreadPost, NotificationSink } from './types.js';
+import type {
+  Action,
+  ActorContext,
+  PermissionPolicy,
+} from "../../core/permissions.js";
+import { PermissionDeniedError } from "../../core/permissions.js";
+import { authorizeInSection, isStaff } from "../../core/authorization.js";
+import type {
+  Authorized,
+  AuthorizationRepos,
+} from "../../core/authorization.js";
+import type { EventBus } from "../../core/events.js";
+import type {
+  Announcement,
+  AnnouncementAudience,
+  Thread,
+  ThreadPost,
+  NotificationSink,
+} from "./types.js";
 
 export interface AnnouncementRepository {
-  create(a: Omit<Announcement, 'id'>): Promise<Announcement>;
+  create(a: Omit<Announcement, "id">): Promise<Announcement>;
   listBySection(sectionId: string): Promise<Announcement[]>;
 }
 
 export interface ThreadRepository {
-  create(t: Omit<Thread, 'id' | 'posts'>): Promise<Thread>;
-  addPost(threadId: string, post: Omit<ThreadPost, 'id'>): Promise<ThreadPost>;
+  create(t: Omit<Thread, "id" | "posts">): Promise<Thread>;
+  addPost(threadId: string, post: Omit<ThreadPost, "id">): Promise<ThreadPost>;
   findById(id: string): Promise<Thread | null>;
 }
 
@@ -34,17 +48,24 @@ export interface CommunicationServiceOptions {
    * is ignored. Default: the failure is discarded.
    */
   onDeliveryError?: (error: unknown, announcement: Announcement) => void;
+  /** Optional EventBus to emit delivery failure events to. */
+  events?: EventBus | undefined;
 }
 
-const AUDIENCES: readonly AnnouncementAudience[] = ['students', 'guardians'];
+const AUDIENCES: readonly AnnouncementAudience[] = ["students", "guardians"];
 
 export class CommunicationService {
+  private readonly events?: EventBus | undefined;
+
   constructor(
     private readonly announcements: AnnouncementRepository,
     private readonly threads: ThreadRepository,
     private readonly sink?: NotificationSink,
     private readonly options: CommunicationServiceOptions = {},
-  ) {}
+    events?: EventBus,
+  ) {
+    this.events = events ?? options.events;
+  }
 
   /**
    * Posts an announcement to one of the two channels (`students` by default). With enforcement on
@@ -57,13 +78,16 @@ export class CommunicationService {
     sectionId: string,
     title: string,
     body: string,
-    audience: AnnouncementAudience = 'students',
+    audience: AnnouncementAudience = "students",
     actor?: ActorContext,
   ) {
-    if (!AUDIENCES.includes(audience)) throw new Error(`Unknown announcement audience: ${String(audience)}`);
+    if (!AUDIENCES.includes(audience))
+      throw new Error(`Unknown announcement audience: ${String(audience)}`);
     if (this.options.enforcement) {
       await this.authorizeOn(
-        audience === 'guardians' ? 'communication.postGuardianAnnouncement' : 'communication.postAnnouncement',
+        audience === "guardians"
+          ? "communication.postGuardianAnnouncement"
+          : "communication.postAnnouncement",
         actor,
         sectionId,
       );
@@ -76,7 +100,10 @@ export class CommunicationService {
       postedAt: new Date(),
       audience,
     });
-    await this.notify({ type: 'announcementCreated', sectionId, title, audience }, announcement);
+    await this.notify(
+      { type: "announcementCreated", sectionId, title, audience },
+      announcement,
+    );
     return announcement;
   }
 
@@ -97,19 +124,25 @@ export class CommunicationService {
     actor?: ActorContext,
     options: { wardId?: string } = {},
   ): Promise<Announcement[]> {
-    if (!this.options.enforcement) return this.announcements.listBySection(sectionId);
+    if (!this.options.enforcement)
+      return this.announcements.listBySection(sectionId);
 
     const asGuardian = options.wardId !== undefined;
     const auth = await this.authorizeOn(
-      asGuardian ? 'communication.viewGuardianAnnouncements' : 'communication.viewAnnouncements',
+      asGuardian
+        ? "communication.viewGuardianAnnouncements"
+        : "communication.viewAnnouncements",
       actor,
       sectionId,
       options.wardId,
     );
     const all = await this.announcements.listBySection(sectionId);
-    const audienceOf = (a: Announcement): AnnouncementAudience => a.audience ?? 'students';
-    if (asGuardian) return all.filter((a) => audienceOf(a) === 'guardians');
-    return isStaff(auth.ctx) ? all : all.filter((a) => audienceOf(a) === 'students');
+    const audienceOf = (a: Announcement): AnnouncementAudience =>
+      a.audience ?? "students";
+    if (asGuardian) return all.filter((a) => audienceOf(a) === "guardians");
+    return isStaff(auth.ctx)
+      ? all
+      : all.filter((a) => audienceOf(a) === "students");
   }
 
   /**
@@ -117,12 +150,22 @@ export class CommunicationService {
    * `communication.participate` in the thread's section, and the author is always the actor:
    * an `authorId` that is anyone else is refused, so nobody can post in another person's name.
    */
-  async reply(threadId: string, authorId: string, body: string, actor?: ActorContext) {
+  async reply(
+    threadId: string,
+    authorId: string,
+    body: string,
+    actor?: ActorContext,
+  ) {
     if (this.options.enforcement) {
       await this.authorizeOnThread(threadId, actor);
-      if (authorId !== actor!.actorId) throw new PermissionDeniedError('communication.participate');
+      if (authorId !== actor!.actorId)
+        throw new PermissionDeniedError("communication.participate");
     }
-    return this.threads.addPost(threadId, { authorId, body, postedAt: new Date() });
+    return this.threads.addPost(threadId, {
+      authorId,
+      body,
+      postedAt: new Date(),
+    });
   }
 
   /**
@@ -140,7 +183,10 @@ export class CommunicationService {
   }
 
   /** Tells the sink, never letting a failure reach the caller: the announcement is already stored. */
-  private async notify(event: Parameters<NotificationSink['dispatch']>[0], announcement: Announcement): Promise<void> {
+  private async notify(
+    event: Parameters<NotificationSink["dispatch"]>[0],
+    announcement: Announcement,
+  ): Promise<void> {
     const sink = this.sink;
     if (!sink) return;
     try {
@@ -151,15 +197,29 @@ export class CommunicationService {
       } catch {
         // a broken error handler must not fail the post either
       }
+      void this.events?.emit({
+        type: "communication.deliveryFailed",
+        channel: "announcement",
+        error: error instanceof Error ? error.message : String(error),
+        sectionId: announcement.sectionId,
+        title: announcement.title,
+      });
     }
   }
 
   /** Authorizes against a thread's section (taken from the stored thread) and returns the thread. */
-  private async authorizeOnThread(threadId: string, actor: ActorContext | undefined): Promise<Thread> {
+  private async authorizeOnThread(
+    threadId: string,
+    actor: ActorContext | undefined,
+  ): Promise<Thread> {
     // Only needed to find out which section this is about; skipped without an actor so the
     // caller gets "actor required" before anything about the thread is looked up.
     const thread = actor ? await this.threads.findById(threadId) : null;
-    await this.authorizeOn('communication.participate', actor, thread?.sectionId);
+    await this.authorizeOn(
+      "communication.participate",
+      actor,
+      thread?.sectionId,
+    );
     // authorizeOn has already refused a missing thread, so there is one here.
     return thread!;
   }
@@ -171,6 +231,9 @@ export class CommunicationService {
     ownerId?: string,
   ): Promise<Authorized> {
     const e = this.options.enforcement!;
-    return authorizeInSection(e.policy, e.repos, action, actor, { sectionId, ownerId });
+    return authorizeInSection(e.policy, e.repos, action, actor, {
+      sectionId,
+      ownerId,
+    });
   }
 }

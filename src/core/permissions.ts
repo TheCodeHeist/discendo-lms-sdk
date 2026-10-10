@@ -70,6 +70,8 @@ export const DEFAULT_RULES = {
   'enrollment.grantRole.instructor': { roles: ['admin'] },
   'enrollment.grantRole.ta': { roles: ['admin', 'instructor'] },
   'enrollment.grantRole.student': { roles: ['admin', 'instructor'], delegable: true },
+  'enrollment.manageGroups': { roles: ['admin', 'instructor'] },
+  'course.managePrerequisites': { roles: ['admin', 'instructor'] },
   // content
   'content.view': { roles: ['admin', 'instructor', 'ta', 'student'], afterCompletion: true },
   'content.manage': { roles: ['admin', 'instructor'], delegable: true },
@@ -82,6 +84,9 @@ export const DEFAULT_RULES = {
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
+  'assessment.manageRubric': { roles: ['admin', 'instructor'] },
+  'assessment.assignPeerReviews': { roles: ['admin', 'instructor'] },
+  'assessment.submitPeerReview': { ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   // Per-student exceptions. Delegable: an instructor may hand them to a TA, who then acts under their own name.
   'grading.grantExtension': { roles: ['admin', 'instructor'], delegable: true },

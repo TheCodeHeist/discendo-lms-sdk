@@ -107,6 +107,8 @@ policy.
 | `enrollment.grantRole.instructor` | admin | — | — | — |
 | `enrollment.grantRole.ta` | admin, instructor | — | — | — |
 | `enrollment.grantRole.student` | admin, instructor | — | — | yes |
+| `enrollment.manageGroups` | admin, instructor | — | — | — |
+| `course.managePrerequisites` | admin, instructor | — | — | — |
 | `content.view` | admin, instructor, ta, student | — | — | — |
 | `content.manage` | admin, instructor | — | — | yes |
 | `assessment.submit` | — | student | — | — |
@@ -115,6 +117,9 @@ policy.
 | `assessment.submitQuiz` | — | student | — | — |
 | `assessment.viewAttempts` | admin, instructor, ta | student | — | — |
 | `assessment.recordOffline` | admin, instructor | — | — | yes |
+| `assessment.manageRubric` | admin, instructor | — | — | — |
+| `assessment.assignPeerReviews` | admin, instructor | — | — | — |
+| `assessment.submitPeerReview` | — | student | — | — |
 | `grading.record` | admin, instructor, ta | — | — | — |
 | `grading.view` | admin, instructor, ta | student | grades | — |
 | `grading.grantExtension` | admin, instructor | — | — | yes |

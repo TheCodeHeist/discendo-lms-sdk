@@ -15,7 +15,7 @@ delivery mechanism.
 | --- | --- |
 | **You import** | `CommunicationService`, `CommunicationEnforcement`, `CommunicationServiceOptions`, `bridgeEventBusToNotificationSink`, and the types in `types.ts` |
 | **You implement** | `AnnouncementRepository`, `ThreadRepository`, and a `NotificationSink` |
-| **Emits events** | none itself; it *consumes* `grading.gradePosted` through the bridge |
+| **Emits events** | `communication.deliveryFailed` (when sink dispatch fails) |
 | **Permission actions** | `communication.postAnnouncement` (delegable), `communication.postGuardianAnnouncement`, `communication.viewAnnouncements`, `communication.viewGuardianAnnouncements`, `communication.participate` |
 | **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the fourth constructor argument |
 
@@ -154,7 +154,7 @@ const unsubscribe = bridgeEventBusToNotificationSink(bus, sink, {
 
 | Option | Why |
 | --- | --- |
-| `resolveContentId(submissionId)` | `grading.gradePosted` identifies work by `submissionId`, but a `gradePosted` notification needs the `contentId`, and grading cannot know it. You own the submission store, so you supply the lookup (sync or async). **Without it, grade events are not forwarded at all.** Returning `undefined` skips that grade rather than dispatching a made-up id |
+| `resolveContentId(submissionId)` | Fallback lookup if `grading.gradePosted` does not carry `contentId` directly. If `event.contentId` is present on the event, it is used immediately. Returning `undefined` skips that grade rather than dispatching a made-up id |
 | `onError(error)` | Called when the sink fails or `resolveContentId` throws. The bridge never lets these propagate: a broken notification channel must not surface as a failure in whatever emitted the event. Default: discarded |
 
 It returns an **unsubscribe** function, and other bus events (enrollment, scheduling and
@@ -226,8 +226,7 @@ await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId:
   'announcements', actor)` lists them (see [GUARDIANS.md](./GUARDIANS.md)), but it needs an
   actor who is an instructor of the section or an admin, so a queued job has to carry the poster
   or an admin.
-- **A failing sink is discarded unless you pass `onDeliveryError`.** There is no
-  `deliveryFailed` event yet; it is planned for the events round.
+- **A failing sink emits `communication.deliveryFailed`** to the bus (and invokes `onDeliveryError` if configured).
 - **A thread tied to unpublished content is still readable** by students of the section
   (`Thread.contentId` is not checked against the content's draft state).
 - **A completed student cannot read announcements or threads.** Read-only access after
