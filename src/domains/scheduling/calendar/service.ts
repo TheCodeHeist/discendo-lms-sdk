@@ -31,8 +31,54 @@ export class CalendarService {
       );
     }
     lines.push('END:VCALENDAR');
-    return lines.join('\r\n');
+    return lines.map(foldLine).join('\r\n') + '\r\n';
   }
+}
+
+/**
+ * Folds a line at 75 octets per RFC 5545 section 3.1.
+ * Subsequent lines start with a single space.
+ */
+function foldLine(line: string): string {
+  // Fast path for ASCII lines that are short
+  if (line.length <= 75 && !/[\u0080-\uFFFF]/.test(line)) {
+    return line;
+  }
+
+  const encoder = new TextEncoder();
+  if (encoder.encode(line).length <= 75) return line;
+
+  let folded = '';
+  let currentPos = 0;
+
+  while (currentPos < line.length) {
+    let nextPos = currentPos;
+    let byteCount = 0;
+    const limit = currentPos === 0 ? 75 : 74;
+
+    while (nextPos < line.length) {
+      const char = line.codePointAt(nextPos);
+      if (char === undefined) break; // Should not happen
+      const charStr = String.fromCodePoint(char);
+      const charLen = charStr.length; // 1 or 2 for surrogate pairs
+      const charBytes = encoder.encode(charStr).length;
+
+      if (byteCount + charBytes > limit && byteCount > 0) {
+        break;
+      }
+
+      byteCount += charBytes;
+      nextPos += charLen;
+    }
+
+    if (currentPos > 0) {
+      folded += '\r\n ';
+    }
+    folded += line.substring(currentPos, nextPos);
+    currentPos = nextPos;
+  }
+
+  return folded;
 }
 
 function formatIcalDate(d: Date): string {
