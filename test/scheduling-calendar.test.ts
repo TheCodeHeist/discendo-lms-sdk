@@ -75,7 +75,7 @@ describe('CalendarService.toIcal', () => {
   }
 
   it('produces just the calendar shell for an empty list', () => {
-    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN', 'END:VCALENDAR'].join(CRLF));
+    expect(icalFor([])).toBe(['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//lms-sdk//EN', 'END:VCALENDAR', ''].join(CRLF));
   });
 
   it('renders one event with UID, DTSTAMP, DTSTART and SUMMARY', () => {
@@ -92,6 +92,7 @@ describe('CalendarService.toIcal', () => {
         'SUMMARY:Essay 1',
         'END:VEVENT',
         'END:VCALENDAR',
+        '',
       ].join(CRLF),
     );
   });
@@ -157,13 +158,13 @@ describe('CalendarService.toIcal', () => {
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
       expect(lines.filter((l) => l.startsWith('UID:'))).toEqual(['UID:a1']);
       expect(lines.filter((l) => l.startsWith('SUMMARY:'))).toHaveLength(1);
-      expect(lines).toHaveLength(10); // shell (3) + VEVENT block (6) + END:VCALENDAR
+      expect(lines).toHaveLength(11); // shell (3) + VEVENT block (6) + END:VCALENDAR + trailing CRLF split produces empty string
     });
 
     it('cannot be used to inject lines through the id either', () => {
       const lines = one('T', 'x\r\nBEGIN:VEVENT').split(CRLF);
       expect(lines.filter((l) => l === 'BEGIN:VEVENT')).toHaveLength(1);
-      expect(lines).toHaveLength(10);
+      expect(lines).toHaveLength(11);
     });
 
     it('leaves ordinary text, including unicode, untouched', () => {
@@ -171,12 +172,35 @@ describe('CalendarService.toIcal', () => {
     });
   });
 
-  // Known RFC 5545 gaps, deliberately not implemented yet. The bodies throw so
-  // that running with `bun test --todo` reports them as unimplemented rather
-  // than as accidental passes.
-  const notImplemented = () => {
-    throw new Error('not implemented');
-  };
-  it.todo('folds content lines longer than 75 octets (RFC 5545 section 3.1)', notImplemented);
-  it.todo('terminates the final line (END:VCALENDAR) with CRLF like every other line', notImplemented);
+  it('folds content lines longer than 75 octets (RFC 5545 section 3.1)', () => {
+    const title = 'A'.repeat(100);
+    const out = icalFor([{ id: 'a1', title, dueAt: new Date('2026-10-05T10:00:00Z') }]);
+    const lines = out.split(CRLF);
+
+    // SUMMARY: + 67 A's = 75 octets
+    expect(lines).toContain('SUMMARY:' + 'A'.repeat(67));
+    // Continuation line: space + 33 A's = 34 octets
+    expect(lines).toContain(' ' + 'A'.repeat(33));
+  });
+
+  it('folds content lines longer than 75 octets safely counting multi-byte characters', () => {
+    // 漢字 is 6 bytes in UTF-8 (2 chars * 3 bytes each)
+    const title = '漢字'.repeat(25); // 150 bytes
+    const out = icalFor([{ id: 'a1', title, dueAt: new Date('2026-10-05T10:00:00Z') }]);
+    const lines = out.split(CRLF);
+
+    // SUMMARY: is 8 bytes. We can fit 11 '漢字' (66 bytes) in the first line (8+66=74 bytes).
+    // The 12th '漢字' would make it 74+6=80 bytes, which exceeds 75.
+    expect(lines).toContain('SUMMARY:' + '漢字'.repeat(11));
+    // The next line starts with a space (1 byte). Limit is 74 bytes.
+    // We can fit 12 '漢字' (72 bytes). 1+72=73 bytes.
+    expect(lines).toContain(' ' + '漢字'.repeat(12));
+    // The last line has the remaining 2 '漢字'.
+    expect(lines).toContain(' ' + '漢字'.repeat(2));
+  });
+
+  it('terminates the final line (END:VCALENDAR) with CRLF like every other line', () => {
+    const out = icalFor([]);
+    expect(out.endsWith('END:VCALENDAR\r\n')).toBe(true);
+  });
 });
