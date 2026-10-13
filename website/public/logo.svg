@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6366f1"/>
+      <stop offset="1" stop-color="#f59e0b"/>
+    </linearGradient>
+  </defs>
+  <!-- open book -->
+  <path d="M32 18c-6-4.5-14-6-24-5v34c10-1 18 .5 24 5 6-4.5 14-6 24-5V13c-10-1-18 .5-24 5z" fill="url(#g)"/>
+  <path d="M32 18v34" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- "D" spark -->
+  <path d="M15 24h6a7 7 0 0 1 0 14h-6z" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="M40 26h10M40 32h10M40 38h7" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/>
+</svg>
