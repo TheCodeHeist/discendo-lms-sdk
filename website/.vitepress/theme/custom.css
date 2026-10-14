@@ -1,0 +1,63 @@
+/**
+ * Discendo brand: indigo primary, amber accent.
+ * Overrides VitePress default theme variables.
+ */
+
+:root {
+  --vp-c-brand-1: #4f46e5;
+  --vp-c-brand-2: #6366f1;
+  --vp-c-brand-3: #4338ca;
+  --vp-c-brand-soft: rgba(99, 102, 241, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #4f46e5 20%, #f59e0b 100%);
+
+  --vp-home-hero-image-background-image: linear-gradient(135deg, #6366f1 30%, #f59e0b 100%);
+  --vp-home-hero-image-filter: blur(56px);
+}
+
+.dark {
+  --vp-c-brand-1: #a5b4fc;
+  --vp-c-brand-2: #818cf8;
+  --vp-c-brand-3: #6366f1;
+  --vp-c-brand-soft: rgba(129, 140, 248, 0.16);
+}
+
+@media (min-width: 640px) {
+  :root {
+    --vp-home-hero-image-filter: blur(64px);
+  }
+}
+
+@media (min-width: 960px) {
+  :root {
+    --vp-home-hero-image-filter: blur(72px);
+  }
+}
+
+/* "Planned" stub pages, removed as pages are written */
+.planned-page {
+  padding: 1.25rem 1.5rem;
+  border: 1px dashed var(--vp-c-divider);
+  border-radius: 12px;
+  color: var(--vp-c-text-2);
+}
+
+/* Home page: code sample block under the features */
+.home-showcase {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 0 24px 64px;
+}
+
+@media (min-width: 640px) {
+  .home-showcase {
+    padding: 0 48px 64px;
+  }
+}
+
+@media (min-width: 960px) {
+  .home-showcase {
+    padding: 0 64px 96px;
+  }
+}

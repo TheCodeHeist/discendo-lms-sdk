@@ -1,0 +1,16 @@
+{
+  "name": "discendo-sdk-website",
+  "private": true,
+  "type": "module",
+  "description": "Documentation website for discendo-sdk",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "mermaid": "^12.2.0",
+    "vitepress": "^1.6.4",
+    "vitepress-plugin-mermaid": "^2.0.17"
+  }
+}
