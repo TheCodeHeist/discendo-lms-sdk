@@ -21,7 +21,7 @@ export default withMermaid(
 
     head: [
       ["link", { rel: "icon", type: "image/svg+xml", href: `${base}logo.svg` }],
-      ["meta", { name: "theme-color", content: "#4f46e5" }],
+      ["meta", { name: "theme-color", content: "#681f6e" }],
       ["meta", { property: "og:type", content: "website" }],
       ["meta", { property: "og:title", content: "Discendo SDK" }],
       [

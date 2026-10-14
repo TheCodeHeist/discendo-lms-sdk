@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./assets/logo.svg" alt="Discendo Logo" width="160" />
+</p>
+
 # DiscendoLMS SDK | A framework-agnostic SDK for any Learning Management System (LMS)
 
 > **STILL IN EARLY DEVELOPMENT — expect breaking changes and incomplete coverage. The SDK is not yet ready for production use.**
@@ -21,12 +25,12 @@ with [Getting Started](./docs/GETTING_STARTED.md).
 Source is organized into layers, each with its own `README.md` explaining
 what belongs there:
 
-| Layer | What goes here | Start with |
-| --- | --- | --- |
-| [`src/core/`](./src/core/README.md) | Shared types, repository interfaces, the `EventBus`, tenancy and permissions | `events.ts` |
-| [`src/domains/`](./src/domains/README.md) | Modules that own a primary entity: enrollment, content, assessment, grading, delegation, scheduling | [`scheduling/README.md`](./src/domains/scheduling/README.md) |
-| [`src/services/`](./src/services/README.md) | Cross-cutting modules that consume what domains produce: communication, reporting, admin | — |
-| `src/interop/` | Pluggable protocol seams (LTI, SSO, SCORM/xAPI), no implementations | — |
+| Layer                                       | What goes here                                                                                      | Start with                                                   |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [`src/core/`](./src/core/README.md)         | Shared types, repository interfaces, the `EventBus`, tenancy and permissions                        | `events.ts`                                                  |
+| [`src/domains/`](./src/domains/README.md)   | Modules that own a primary entity: enrollment, content, assessment, grading, delegation, scheduling | [`scheduling/README.md`](./src/domains/scheduling/README.md) |
+| [`src/services/`](./src/services/README.md) | Cross-cutting modules that consume what domains produce: communication, reporting, admin            | —                                                            |
+| `src/interop/`                              | Pluggable protocol seams (LTI, SSO, SCORM/xAPI), no implementations                                 | —                                                            |
 
 **The one rule:** a module may import only `core` and its own files, never
 another domain or service. Modules coordinate through the shared `EventBus`
