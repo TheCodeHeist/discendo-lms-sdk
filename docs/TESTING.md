@@ -61,7 +61,7 @@ await grading.computeFinalGradeForUser("sam", "bio-a", { categories: [{ name: "a
 | Field | What it is |
 | --- | --- |
 | `services` | `enrollment`, `enrollmentRequests`, `groups`, `prerequisites`, `content`, `assessment`, `rubrics`, `peerReviews`, `grading`, `accommodations`, `delegation`, `guardians`, `scheduling`, `communication`, `reporting`, `admin` |
-| `repos` | every repository, by name: the twelve core ones (`users`, `courses`, `enrollments`, `content`, ...) plus `contentRevisions`, `contentPrerequisites`, `submissions`, `quizzes`, `rubrics`, `rubricEvaluations`, `peerReviews`, `grades`, `extensions`, `excusals`, `gradeReleases`, `scheduling`, `attendance`, `announcements`, `threads`, `audit` |
+| `repos` | every repository, by name: the twelve core ones (`users`, `courses`, `enrollments`, `content`, ...) plus `contentRevisions`, `contentPrerequisites`, `submissions`, `quizzes`, `rubrics`, `rubricEvaluations`, `peerReviews`, `grades`, `extensions`, `excusals`, `gradeReleases`, `scheduling`, `attendance`, `announcements`, `threads`, `reminderLog`, `audit` |
 | `bus` | the `EventBus` every service emits to |
 | `policy` | the permission policy in force |
 | `notifications` | a `RecordingNotificationSink`: its `sent` array is what `CommunicationService` would have delivered |
@@ -106,9 +106,9 @@ single process.
 | assessment | `InMemorySubmissionRepository` (adds `findById`, `listByContent`), `InMemoryQuizRepository` (`seedQuestions`), `InMemoryRubricRepository`, `InMemoryRubricEvaluationRepository`, `InMemoryPeerReviewRepository` |
 | grading | `InMemoryGradeRepository` (`place(submissionId, { sectionId, category, contentId })`, or a `locate` function; `listForSubmission`), `InMemoryTimeExtensionRepository`, `InMemoryExcusalRepository`, `InMemoryGradeReleaseRepository` (`history`) |
 | scheduling | `InMemorySchedulingRepository` (both `SchedulingRepository` and `SchedulingSettingsRepository`; `seedTemplate`, `seedRoom`, `seedGroup`, ...) |
-| communication | `InMemoryAnnouncementRepository`, `InMemoryThreadRepository`, `RecordingNotificationSink` |
-| reporting | `InMemoryAttendanceRepository`, `InMemorySessionLocator` |
-| admin | `InMemoryAuditRepository` |
+| communication | `InMemoryAnnouncementRepository`, `InMemoryThreadRepository` (with `listBySection`), `InMemoryReminderLog`, `RecordingNotificationSink` |
+| reporting | `InMemoryAttendanceRepository` (with `listForSessions`), `InMemorySessionLocator` |
+| admin | `InMemoryAuditRepository` (with `query`, keyset-paginated) |
 
 A few choices worth knowing, all of them within what the interfaces allow:
 
@@ -150,7 +150,7 @@ There is one suite per interface:
 | assessment | `submissionRepositoryContract`, `quizRepositoryContract`, `rubricRepositoryContract`, `rubricEvaluationRepositoryContract`, `peerReviewRepositoryContract`; all at once with `assessmentRepositoryContracts({ ... })` |
 | grading | `gradeRepositoryContract`, `timeExtensionRepositoryContract`, `excusalRepositoryContract`, `gradeReleaseRepositoryContract`; all at once with `gradingRepositoryContracts({ ... })` |
 | scheduling | `schedulingRepositoryContract`, `schedulingSettingsRepositoryContract` |
-| communication | `announcementRepositoryContract`, `threadRepositoryContract`; both with `communicationRepositoryContracts({ ... })` |
+| communication | `announcementRepositoryContract`, `threadRepositoryContract`, `reminderLogContract`; all with `communicationRepositoryContracts({ ... })` |
 | reporting | `attendanceRepositoryContract` |
 | admin | `auditRepositoryContract` |
 

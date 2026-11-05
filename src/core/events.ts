@@ -374,7 +374,7 @@ export interface GuardianLinkRevokedEvent {
 // --- communication events ---
 export interface CommunicationDeliveryFailedEvent {
   type: "communication.deliveryFailed";
-  channel: "announcement" | "bridge";
+  channel: "announcement" | "bridge" | "reminder";
   error: string;
   sectionId?: string;
   title?: string;

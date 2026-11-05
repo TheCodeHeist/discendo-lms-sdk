@@ -75,6 +75,7 @@ export async function authorizeInSection(
       role,
       delegated: role === 'ta' && membership ? await verifiedGrants(repos, membership.id, target.sectionId) : undefined,
       completedRole: target.afterCompletion === true ? completedSectionRole(membership) : undefined,
+      departmentAdmin: administersDepartment(user, course) || undefined,
     },
     resourceOrgId: course.orgId,
     resourceOwnerId: target.ownerId,
@@ -107,6 +108,19 @@ export async function authorizeWithinOwnOrg(
   const ctx: PermissionContext = { actor: user, resourceOrgId: user.orgId, resourceOwnerId: target.ownerId };
   await authorize(policy, action, ctx);
   return { policy, ctx };
+}
+
+/**
+ * Whether `user` administers the department of `course`: the course has a department, the user
+ * lists it, and both belong to the same organization. The organization check matters because two
+ * organizations may use the same department id.
+ */
+function administersDepartment(
+  user: { orgId?: string | undefined; adminOfDepartments?: string[] | undefined },
+  course: { orgId?: string | undefined; departmentId?: string | undefined },
+): boolean {
+  if (course.departmentId === undefined || !Array.isArray(user.adminOfDepartments)) return false;
+  return user.adminOfDepartments.includes(course.departmentId) && sameOrg(user.orgId, course.orgId);
 }
 
 /**
