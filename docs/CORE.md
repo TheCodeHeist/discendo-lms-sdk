@@ -235,9 +235,9 @@ actor and their enrollment); each module's page says which.
 - **Some repositories are not used by any service yet.** `OrganizationRepository` and
   `TermRepository` exist for hosts; `AcademicTerm` and `Organization` are not read by the
   SDK's own services.
-- **Repository behaviour is documented, not tested for you.** There is no shared contract
-  test suite to run against your implementations. The only reference implementation in the
-  package tree is scheduling's in-memory repository, and it is for tests and development.
+- **Repository behaviour is checked only if you run the checks.** `discendo-sdk/testing` has a
+  contract suite for every repository interface and an in-memory reference implementation of
+  each (see [TESTING.md](./TESTING.md)), but nothing makes a host run them.
 - **`Identity` is deliberately thin.** No names, emails or credentials, so the SDK cannot
   display or look anyone up by them.
 - **No built-in persistence** of any kind, by design.

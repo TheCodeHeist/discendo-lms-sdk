@@ -13,6 +13,10 @@ import { join, relative, resolve, dirname, sep } from 'node:path';
  *   domains   may import: core, and files within its OWN module
  *   services  may import: core, and files within its OWN module
  *   interop   may import: core, and files within its OWN module
+ *
+ * A module's own `testing/` folder (in-memory repositories, contract suites) follows the same
+ * rule as the module. Only `src/testing/`, which builds `discendo-sdk/testing`, may import every
+ * module, as the root barrel does.
  */
 const SRC = resolve(import.meta.dir, '../src');
 
@@ -21,7 +25,6 @@ function tsFiles(dir: string): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) {
-      if (name === 'testing') continue; // in-memory test helpers are exempt
       out.push(...tsFiles(full));
     } else if (name.endsWith('.ts') && !name.endsWith('.d.ts')) {
       out.push(full);
@@ -35,7 +38,8 @@ function moduleOf(file: string): string {
   const parts = relative(SRC, file).split(sep);
   const layer = parts[0]!;
   if (layer === 'domains' || layer === 'services') return `${layer}/${parts[1]}`;
-  if (parts.length === 1) return 'root';
+  // src/testing/ wires every module together for `discendo-sdk/testing`, like the root barrel does.
+  if (parts.length === 1 || layer === 'testing') return 'root';
   return layer;
 }
 
@@ -93,12 +97,12 @@ describe('architecture: layering rules', () => {
     expect(missing).toEqual([]);
   });
 
-  it('src/ contains only the four layers and the root barrel', () => {
+  it('src/ contains only the four layers, the testing barrel and the root barrel', () => {
     // A module folder sitting directly under src/ (e.g. src/scheduling/) would
     // pass every other check here, because it just looks like a module named
     // "scheduling". That is exactly how leftover pre-restructure copies went
     // unnoticed, so the allowed top-level entries are spelled out.
-    const allowed = ['core', 'domains', 'services', 'interop', 'index.ts'];
+    const allowed = ['core', 'domains', 'services', 'interop', 'testing', 'index.ts'];
     const unexpected = readdirSync(SRC).filter((name) => !allowed.includes(name));
     expect(unexpected).toEqual([]);
   });
