@@ -154,6 +154,12 @@ export interface PermissionContext {
      * has `afterCompletion`. It is never a `role`: a completed enrollment still grants nothing else.
      */
     completedRole?: Role | undefined;
+    /**
+     * True when the actor administers the department of this section's course, in the same
+     * organization. ALREADY verified (see `authorizeInSection`); it makes them an `admin` for this
+     * section only. A policy must never work it out from `actor.adminOfDepartments` itself.
+     */
+    departmentAdmin?: boolean | undefined;
   };
   /**
    * Organization that owns the target, or `undefined` when the target belongs
@@ -252,7 +258,8 @@ export function effectiveRoles(ctx: PermissionContext): Role[] {
   if (!ctx.section) return [...ctx.actor.roles];
   const roles: Role[] = [];
   if (ctx.section.role !== undefined) roles.push(ctx.section.role);
-  if (ctx.actor.roles.includes('admin') && !roles.includes('admin')) roles.push('admin');
+  const admin = ctx.actor.roles.includes('admin') || ctx.section.departmentAdmin === true;
+  if (admin && !roles.includes('admin')) roles.push('admin');
   return roles;
 }
 

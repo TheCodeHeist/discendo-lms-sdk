@@ -59,6 +59,7 @@ interface Identity {
   externalRef?: string;   // the host's own user record, if different
   roles: Role[];
   orgId?: Id;             // the organization this person belongs to
+  adminOfDepartments?: Id[];  // admin of these departments' sections only (see PERMISSIONS.md)
 }
 ```
 

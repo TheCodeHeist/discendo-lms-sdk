@@ -216,8 +216,9 @@ This is built in `CommunicationService` (see [COMMUNICATION.md](./COMMUNICATION.
 
 ## Known limitations
 
-- **Whole-organization admins only.** Any admin of the organization can manage any link in it;
-  department-scoped admins are not built.
+- **Whole-organization admins only.** Any admin of the organization can manage any link in it.
+  A department admin (see [PERMISSIONS.md](./PERMISSIONS.md)) cannot, because a link belongs to a
+  person, not to a section.
 - **No bulk import.** Links are created one at a time (a school with a roster of guardians
   loops over `createLink`, and gets one error per bad row to handle).
 - **Create, update and revoke are not atomic.** Two admins creating the same link at the same
