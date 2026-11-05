@@ -1,7 +1,7 @@
 {
   "name": "discendo-sdk",
   "version": "0.1.0",
-  "description": "Framework- and database-agnostic LMS logic SDK",
+  "description": "Framework- and database-agnostic LMS logic SDK: enrollment, content, assessment, grading, scheduling and more, with permissions, multi-tenancy and zero runtime dependencies",
   "keywords": [
     "lms",
     "learning-management-system",
@@ -12,7 +12,12 @@
     "grading",
     "assessment",
     "scheduling",
-    "typescript"
+    "typescript",
+    "quiz",
+    "gradebook",
+    "timetable",
+    "multi-tenant",
+    "permissions"
   ],
   "author": {
     "name": "Md Riyasat Hossain",
@@ -23,7 +28,7 @@
     "type": "git",
     "url": "git+https://github.com/TheCodeHeist/discendo-lms-sdk.git"
   },
-  "homepage": "https://github.com/TheCodeHeist/discendo-lms-sdk#readme",
+  "homepage": "https://thecodeheist.github.io/discendo-lms-sdk/",
   "bugs": {
     "url": "https://github.com/TheCodeHeist/discendo-lms-sdk/issues"
   },
@@ -37,7 +42,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "exports": {
     ".": {
