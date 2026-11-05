@@ -1,7 +1,8 @@
 # Migration Guide
 
-What changed in ways that touch **your** code, and what to do about it. Most changes since the
-first release candidate add things, and need nothing from you. This page lists only the ones that
+What changed in ways that touch **your** code, and what to do about it. This page covers the move
+from 0.1.0 (the GitHub release) to 0.2.0 (the first npm release). Most changes add things, and need
+nothing from you. This page lists only the ones that
 do, most likely to affect you first.
 
 | Change | Affects you if | Effort |

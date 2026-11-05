@@ -1,6 +1,6 @@
 {
   "name": "discendo-sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Framework- and database-agnostic LMS logic SDK: enrollment, content, assessment, grading, scheduling and more, with permissions, multi-tenancy and zero runtime dependencies",
   "keywords": [
     "lms",
