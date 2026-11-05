@@ -59,6 +59,7 @@ interface Identity {
   externalRef?: string;   // the host's own user record, if different
   roles: Role[];
   orgId?: Id;             // the organization this person belongs to
+  adminOfDepartments?: Id[];  // admin of these departments' sections only (see PERMISSIONS.md)
 }
 ```
 
@@ -133,6 +134,7 @@ interface ContentNode {
   orderIndex: number;
   published: boolean;
   version: number;
+  availableFrom?: Date; availableUntil?: Date; dueAt?: Date;   // UTC; see CONTENT.md
 }
 ```
 
@@ -228,6 +230,24 @@ actor and their enrollment); each module's page says which.
 | `TenantMismatchError` | something from one organization is used with another's | [TENANCY.md](./TENANCY.md) |
 | `UnknownDepartmentError` | a course names a department that was not found | [TENANCY.md](./TENANCY.md) |
 
+## Content dates (`content-availability.ts`)
+
+`contentAvailability(node, now?)` says where a content node's dates put it: `'not-yet-open'` before
+`availableFrom`, `'closed'` after `availableUntil`, otherwise `'open'`. Both ends are inclusive.
+`ContentNotAvailableError` (with `contentId` and `availability`) is what content and assessment
+throw at a student who is too early or too late. They live in `core` because both modules need
+them. See [CONTENT.md](./CONTENT.md).
+
+`ContentRepository.update` takes a `ContentNodeUpdate`. A field that is absent is left alone, and a
+field present with the value `undefined` must be **cleared**; that is how a date is removed. Some
+ORMs treat `undefined` as "leave it alone", so map it to `NULL`. `contentRepositoryContract` checks
+it. A repository that stores whole objects (a document store, a cache, a test fake) can call
+`applyContentUpdate(node, patch)`, which applies a patch exactly that way.
+
+**Upgrading.** An `update` written as `{ ...node, ...patch }` still clears the field correctly at
+runtime. Under `exactOptionalPropertyTypes` it no longer typechecks, because a patch field may now be
+`undefined`. Write `applyContentUpdate(node, patch)` instead.
+
 ## Known limitations
 
 - **The roles are fixed.** `Role` is a closed union of four. You can add *actions* and
@@ -235,9 +255,9 @@ actor and their enrollment); each module's page says which.
 - **Some repositories are not used by any service yet.** `OrganizationRepository` and
   `TermRepository` exist for hosts; `AcademicTerm` and `Organization` are not read by the
   SDK's own services.
-- **Repository behaviour is documented, not tested for you.** There is no shared contract
-  test suite to run against your implementations. The only reference implementation in the
-  package tree is scheduling's in-memory repository, and it is for tests and development.
+- **Repository behaviour is checked only if you run the checks.** `discendo-sdk/testing` has a
+  contract suite for every repository interface and an in-memory reference implementation of
+  each (see [TESTING.md](./TESTING.md)), but nothing makes a host run them.
 - **`Identity` is deliberately thin.** No names, emails or credentials, so the SDK cannot
   display or look anyone up by them.
 - **No built-in persistence** of any kind, by design.

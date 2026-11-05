@@ -106,6 +106,32 @@ export interface GradePostedEvent {
   maxScore: number;
   graderId: string;
   contentId?: string;
+  /**
+   * Present only when grades are held until released (`GradingService`'s `releases` option): false
+   * while the student cannot see this grade yet. Do not tell the student about a grade with
+   * `released: false`; `grading.gradesReleased` says when they can see it.
+   */
+  released?: boolean;
+  orgId?: string;
+}
+
+/** Staff released the held grades of one piece of content to the students of a section. */
+export interface GradesReleasedEvent {
+  type: "grading.gradesReleased";
+  sectionId: string;
+  contentId: string;
+  releaseId: string;
+  releasedBy: string;
+  orgId?: string;
+}
+
+/** Staff hid the grades of one piece of content from the students of a section again. */
+export interface GradesHiddenEvent {
+  type: "grading.gradesHidden";
+  sectionId: string;
+  contentId: string;
+  releaseId: string;
+  hiddenBy: string;
   orgId?: string;
 }
 
@@ -166,6 +192,18 @@ export interface ContentPublishedEvent {
   orgId?: string;
 }
 
+/** A content node was edited (`ContentService.updateNode` or `restoreRevision`); its version went up. */
+export interface ContentUpdatedEvent {
+  type: "content.updated";
+  contentId: string;
+  sectionId: string;
+  version: number;
+  /** The fields that changed: any of `title`, `kind`, `parentId`, `availableFrom`, `availableUntil`, `dueAt`. */
+  changedFields: string[];
+  updatedBy?: string;
+  orgId?: string;
+}
+
 export interface ContentUnpublishedEvent {
   type: "content.unpublished";
   contentId: string;
@@ -198,6 +236,29 @@ export interface QuizSubmittedEvent {
   score: number;
   maxScore: number;
   late: boolean;
+  /** Present (true) when a question waits to be scored by hand: `score` counts it as 0 for now and no grade is recorded yet. */
+  pendingReview?: boolean;
+  orgId?: string;
+}
+
+/**
+ * A staff member scored one question of a submitted quiz attempt by hand
+ * (`AssessmentService.gradeQuizQuestion`). `score` is the attempt's new total; `pendingReview`
+ * says whether other questions still wait.
+ */
+export interface QuizQuestionGradedEvent {
+  type: "assessment.quizQuestionGraded";
+  attemptId: string;
+  quizId: string;
+  questionId: string;
+  userId: string;
+  /** The points given for this question. */
+  points: number;
+  score: number;
+  maxScore: number;
+  pendingReview: boolean;
+  /** Who scored it (with enforcement on). */
+  graderId?: string;
   orgId?: string;
 }
 
@@ -313,7 +374,7 @@ export interface GuardianLinkRevokedEvent {
 // --- communication events ---
 export interface CommunicationDeliveryFailedEvent {
   type: "communication.deliveryFailed";
-  channel: "announcement" | "bridge";
+  channel: "announcement" | "bridge" | "reminder";
   error: string;
   sectionId?: string;
   title?: string;
@@ -334,15 +395,19 @@ export type LmsEvent =
   | EnrollmentRequestedEvent
   | EnrollmentRequestDecidedEvent
   | QuizSubmittedEvent
+  | QuizQuestionGradedEvent
   | SubmissionReceivedEvent
   | PlagiarismCheckFailedEvent
   | GradePostedEvent
+  | GradesReleasedEvent
+  | GradesHiddenEvent
   | ExtensionGrantedEvent
   | ExtensionRevokedEvent
   | ExcusedEvent
   | UnexcusedEvent
   | ContentPublishedEvent
   | ContentUnpublishedEvent
+  | ContentUpdatedEvent
   | OccurrenceCancelledEvent
   | OccurrenceRescheduledEvent
   | AttendanceRecordedEvent

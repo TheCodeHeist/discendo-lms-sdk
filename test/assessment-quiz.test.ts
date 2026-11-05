@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { applyContentUpdate } from '../src/core/index.js';
 import {
   AssessmentService,
   scoreQuiz,
@@ -28,9 +29,9 @@ describe('scoreQuiz', () => {
     expect(r.score).toBe(1);
     expect(r.maxScore).toBe(4);
     expect(r.questions).toEqual([
-      { questionId: 'q1', selectedChoiceIndex: 0, correctChoiceIndex: 0, correct: true, points: 1, earned: 1 },
-      { questionId: 'q2', selectedChoiceIndex: 0, correctChoiceIndex: 1, correct: false, points: 2, earned: 0 },
-      { questionId: 'q3', correctChoiceIndex: 2, correct: false, points: 1, earned: 0 },
+      { questionId: 'q1', type: 'single_choice', status: 'correct', answer: 0, correctAnswer: 0, selectedChoiceIndex: 0, correctChoiceIndex: 0, correct: true, points: 1, earned: 1 },
+      { questionId: 'q2', type: 'single_choice', status: 'incorrect', answer: 0, correctAnswer: 1, selectedChoiceIndex: 0, correctChoiceIndex: 1, correct: false, points: 2, earned: 0 },
+      { questionId: 'q3', type: 'single_choice', status: 'unanswered', correctAnswer: 2, correctChoiceIndex: 2, correct: false, points: 1, earned: 0 },
     ]);
   });
 
@@ -54,7 +55,7 @@ describe('scoreQuiz', () => {
   });
 
   it('is 0 out of 0 for a quiz with no questions', () => {
-    expect(scoreQuiz([], {})).toEqual({ score: 0, maxScore: 0, questions: [] });
+    expect(scoreQuiz([], {})).toEqual({ score: 0, maxScore: 0, pendingReview: 0, questions: [] });
   });
 
   it('treats a choice index that is not exactly the answer as wrong, whatever it is', () => {
@@ -137,7 +138,7 @@ function buildWorld(
       findById: async (id) => nodes.get(id) ?? null,
       listBySection: async () => [],
       create: async (x) => ({ ...x, id: 'c', version: 1 }),
-      update: async (id, patch) => ({ ...nodes.get(id)!, ...patch }),
+      update: async (id, patch) => applyContentUpdate(nodes.get(id)!, patch),
       reorder: async () => {},
     },
     guardianLinks: { findActive: async () => null },
@@ -260,7 +261,7 @@ describe('getAttemptQuestions', () => {
     const views = await w.service.getAttemptQuestions(a.id, as('stu'));
     expect(views.map((v) => v.id)).toEqual(a.questionOrder);
     expect(JSON.stringify(views)).not.toContain('correctChoiceIndex');
-    expect(views.find((v) => v.id === 'q2')).toEqual({ id: 'q2', prompt: 'Two?', choices: ['a', 'b'], points: 2 });
+    expect(views.find((v) => v.id === 'q2')).toEqual({ id: 'q2', type: 'single_choice', prompt: 'Two?', choices: ['a', 'b'], points: 2 });
   });
 
   it('shows what the student has answered so far, so a page can pick up where it left off', async () => {
@@ -413,9 +414,9 @@ describe('submitAttempt: scoring and recording', () => {
     const a = await answered(w, { q1: 0, q2: 0 });
     const r = await w.service.submitAttempt(a.id, as('stu'), { revealAnswers: true });
     expect(r.questions).toEqual([
-      { questionId: 'q1', selectedChoiceIndex: 0, correctChoiceIndex: 0, correct: true, points: 1, earned: 1 },
-      { questionId: 'q2', selectedChoiceIndex: 0, correctChoiceIndex: 1, correct: false, points: 2, earned: 0 },
-      { questionId: 'q3', correctChoiceIndex: 2, correct: false, points: 1, earned: 0 },
+      { questionId: 'q1', type: 'single_choice', status: 'correct', answer: 0, correctAnswer: 0, selectedChoiceIndex: 0, correctChoiceIndex: 0, correct: true, points: 1, earned: 1 },
+      { questionId: 'q2', type: 'single_choice', status: 'incorrect', answer: 0, correctAnswer: 1, selectedChoiceIndex: 0, correctChoiceIndex: 1, correct: false, points: 2, earned: 0 },
+      { questionId: 'q3', type: 'single_choice', status: 'unanswered', correctAnswer: 2, correctChoiceIndex: 2, correct: false, points: 1, earned: 0 },
     ]);
   });
 

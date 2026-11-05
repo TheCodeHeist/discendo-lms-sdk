@@ -29,46 +29,113 @@ export function applyLatePolicy(
   }
 }
 
+/** Why an entry was left out of a final grade. */
+export type SkippedEntryReason = 'invalid-max-score' | 'invalid-score';
+
+/** One category's part in a final grade (see `explainFinalGrade`). */
+export interface CategoryBreakdown {
+  name: string;
+  /** The weight from the scheme. */
+  weight: number;
+  /** The share of the final grade it actually carries, after renormalizing (0 to 1). 0 if it has no grades yet. */
+  effectiveWeight: number;
+  /** The category average as a percentage (0 to 100), or null when nothing in it counts yet. */
+  percent: number | null;
+  /** The entries averaged, by id. */
+  counted: string[];
+  /** The entries left out by the category's `dropLowestN`, lowest first. */
+  dropped: string[];
+}
+
+/** A final grade with its working shown. */
+export interface FinalGradeExplanation {
+  /** The final percentage (0 to 100), exactly what `computeFinalGrade` returns. */
+  percent: number;
+  /** One per category of the scheme, in the scheme's order. */
+  categories: CategoryBreakdown[];
+  /**
+   * Entries that could not be counted, with why: a maximum of zero or less, or a score that is
+   * negative or not a finite number. `recordGrade` never stores these; they come from data written
+   * some other way, and are listed so they can be found and fixed instead of quietly not counting.
+   */
+  skipped: Array<{ entryId: string; category: string; reason: SkippedEntryReason }>;
+  /** Entries in a category the scheme does not have, so they count for nothing. */
+  uncategorized: Array<{ entryId: string; category: string }>;
+}
+
 /**
- * Computes a weighted final grade (0–100) from a set of graded entries,
- * grouped by category name, respecting drop-lowest-N per category.
+ * Computes a weighted final grade (0-100) from a set of graded entries, grouped by category name,
+ * respecting drop-lowest-N per category, and shows the working: what each category contributed,
+ * which entries were dropped, and which could not be counted at all (and why). Pure.
+ *
+ * A category with no countable grades yet is left out and the others are renormalized, so a
+ * partly graded course does not tank towards zero.
+ */
+export function explainFinalGrade(
+  entriesByCategory: Map<string, GradeEntry[]>,
+  scheme: GradingScheme,
+): FinalGradeExplanation {
+  const skipped: FinalGradeExplanation['skipped'] = [];
+  const working: Array<Omit<CategoryBreakdown, 'effectiveWeight'> & { average: number | null }> = [];
+
+  for (const category of scheme.categories) {
+    const valid: Array<{ id: string; fraction: number }> = [];
+    for (const e of entriesByCategory.get(category.name) ?? []) {
+      const reason = invalidReason(e);
+      if (reason) skipped.push({ entryId: e.id, category: category.name, reason });
+      else valid.push({ id: e.id, fraction: e.score / e.maxScore });
+    }
+    // Lowest first; ties keep their order, so which of two equal grades is dropped is stable.
+    valid.sort((a, b) => a.fraction - b.fraction);
+    const dropCount = Math.min(category.dropLowestN ?? 0, valid.length);
+    const kept = valid.slice(dropCount);
+    const average = kept.length > 0 ? kept.reduce((sum, v) => sum + v.fraction, 0) / kept.length : null;
+    working.push({
+      name: category.name,
+      weight: category.weight,
+      percent: average === null ? null : average * 100,
+      counted: kept.map((v) => v.id),
+      dropped: valid.slice(0, dropCount).map((v) => v.id),
+      average,
+    });
+  }
+
+  const weightUsed = working.reduce((sum, c) => sum + (c.average === null ? 0 : c.weight), 0);
+  const total = working.reduce((sum, c) => sum + (c.average === null ? 0 : c.average * c.weight), 0);
+  const known = new Set(scheme.categories.map((c) => c.name));
+  const uncategorized: FinalGradeExplanation['uncategorized'] = [];
+  for (const [name, entries] of entriesByCategory) {
+    if (!known.has(name)) for (const e of entries) uncategorized.push({ entryId: e.id, category: name });
+  }
+
+  return {
+    percent: weightUsed > 0 ? (total / weightUsed) * 100 : 0,
+    categories: working.map(({ average, ...c }) => ({
+      ...c,
+      effectiveWeight: average === null || weightUsed <= 0 ? 0 : c.weight / weightUsed,
+    })),
+    skipped,
+    uncategorized,
+  };
+}
+
+/**
+ * Computes a weighted final grade (0-100) from a set of graded entries, grouped by category name,
+ * respecting drop-lowest-N per category. An entry that cannot be a grade (a maximum of zero or
+ * less, a negative score, or a number that is not finite) is ignored, as if it were not there, so
+ * one bad row cannot turn a whole grade into Infinity or NaN; `explainFinalGrade` lists them.
  */
 export function computeFinalGrade(
   entriesByCategory: Map<string, GradeEntry[]>,
   scheme: GradingScheme,
 ): number {
-  let total = 0;
-  let weightUsed = 0;
-
-  for (const category of scheme.categories) {
-    const entries = entriesByCategory.get(category.name) ?? [];
-    if (entries.length === 0) continue;
-
-    // An entry that cannot be a grade (a maximum of zero or less, a negative score, or a number that
-    // is not finite) is ignored, as if it were not there: one bad row must not turn a whole
-    // student's grade into Infinity or NaN. `recordGrade` refuses to store such entries, so this
-    // only matters for data that was written some other way.
-    const percentages = entries
-      .filter(isCountable)
-      .map((e) => e.score / e.maxScore)
-      .sort((a, b) => a - b);
-
-    const dropped = category.dropLowestN ?? 0;
-    const kept = percentages.slice(dropped);
-    if (kept.length === 0) continue;
-
-    const categoryAvg = kept.reduce((sum, p) => sum + p, 0) / kept.length;
-    total += categoryAvg * category.weight;
-    weightUsed += category.weight;
-  }
-
-  // Renormalize if some categories had no grades yet, so a partially-graded
-  // course doesn't unfairly tank toward zero.
-  return weightUsed > 0 ? (total / weightUsed) * 100 : 0;
+  return explainFinalGrade(entriesByCategory, scheme).percent;
 }
 
-function isCountable(e: GradeEntry): boolean {
-  return Number.isFinite(e.score) && Number.isFinite(e.maxScore) && e.score >= 0 && e.maxScore > 0;
+function invalidReason(e: GradeEntry): SkippedEntryReason | undefined {
+  if (typeof e.maxScore !== 'number' || !Number.isFinite(e.maxScore) || e.maxScore <= 0) return 'invalid-max-score';
+  if (typeof e.score !== 'number' || !Number.isFinite(e.score) || e.score < 0) return 'invalid-score';
+  return undefined;
 }
 
 export function toLetterGrade(percent: number, scale: GradeScale): string {

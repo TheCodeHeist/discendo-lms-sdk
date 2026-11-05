@@ -26,6 +26,11 @@ import { EnrollmentService, GradingService, SchedulingService } from "discendo-s
 Prefer subpath imports in real apps to keep bundles small — the root barrel
 is a convenience for quick scripts and tests.
 
+**Want to try it before writing any database code?** `createInMemoryLms()` from
+`discendo-sdk/testing` gives you every service, wired together on in-memory storage, in one
+call. See [TESTING.md](./TESTING.md). That page also has the contract suites, which check the
+repositories you write in the next step.
+
 ## 2. Implement the repository interfaces you need
 
 Every module that touches persistence defines a repository interface; you
@@ -54,10 +59,23 @@ class PrismaGradeRepository implements GradeRepository {
     });
   }
   async listForUserInSection(userId: string, sectionId: string) {
-    return this.prisma.gradeEntry.findMany({ where: { userId, sectionId } });
+    // Each entry must say which grading-scheme category it counts towards (and, if you use
+    // excusals, which content it is for). A GradeEntry does not carry these, so join them in.
+    const rows = await this.prisma.gradeEntry.findMany({
+      where: { userId, submission: { content: { sectionId } } },
+      include: { submission: { include: { content: true } } },
+    });
+    return rows.map(({ submission, ...entry }) => ({
+      ...entry,
+      category: submission.content.category,
+      contentId: submission.content.id,
+    }));
   }
 }
 ```
+
+Then check it against the SDK's expectations with its contract suite,
+`gradeRepositoryContract` from `discendo-sdk/testing` (see [TESTING.md](./TESTING.md)).
 
 You only need to implement the repositories for the modules you're actually
 using. `core`'s `RepositoryContext` bundles five required repositories (`users`,

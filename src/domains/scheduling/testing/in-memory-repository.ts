@@ -1,8 +1,8 @@
 /**
- * In-memory reference implementation of SchedulingRepository. Not exported
- * from the package root — intended for tests and local dev only, so the
- * SDK stays free of any bundled storage engine. Copy/adapt this as a
- * starting point for a real (SQLite/Postgres/etc.) implementation.
+ * In-memory reference implementation of SchedulingRepository and SchedulingSettingsRepository.
+ * Not exported from the package root: it ships in `discendo-sdk/testing`, for tests, demos and
+ * local development. Copy/adapt it as a starting point for a real (SQLite/Postgres/etc.)
+ * implementation, and check yours with `schedulingRepositoryContract`.
  */
 import type { Id } from '../../../core/types.js';
 import type { SchedulingRepository, SchedulingSettingsRepository } from '../repositories.js';

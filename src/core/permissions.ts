@@ -82,6 +82,8 @@ export const DEFAULT_RULES = {
   'assessment.answerQuiz': { ownRoles: ['student'] },
   'assessment.submitQuiz': { ownRoles: ['student'] },
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
+  // Scoring a quiz question by hand (an essay, or overriding the automatic result): the same staff who record grades.
+  'assessment.gradeQuiz': { roles: ['admin', 'instructor', 'ta'] },
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'assessment.manageRubric': { roles: ['admin', 'instructor'] },
@@ -89,6 +91,8 @@ export const DEFAULT_RULES = {
   'assessment.submitPeerReview': { ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   // Per-student exceptions. Delegable: an instructor may hand them to a TA, who then acts under their own name.
+  // Showing held grades to the students of a section, or hiding them again.
+  'grading.release': { roles: ['admin', 'instructor'], delegable: true },
   'grading.grantExtension': { roles: ['admin', 'instructor'], delegable: true },
   'grading.excuse': { roles: ['admin', 'instructor'], delegable: true },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades', afterCompletion: true },
@@ -150,6 +154,12 @@ export interface PermissionContext {
      * has `afterCompletion`. It is never a `role`: a completed enrollment still grants nothing else.
      */
     completedRole?: Role | undefined;
+    /**
+     * True when the actor administers the department of this section's course, in the same
+     * organization. ALREADY verified (see `authorizeInSection`); it makes them an `admin` for this
+     * section only. A policy must never work it out from `actor.adminOfDepartments` itself.
+     */
+    departmentAdmin?: boolean | undefined;
   };
   /**
    * Organization that owns the target, or `undefined` when the target belongs
@@ -248,7 +258,8 @@ export function effectiveRoles(ctx: PermissionContext): Role[] {
   if (!ctx.section) return [...ctx.actor.roles];
   const roles: Role[] = [];
   if (ctx.section.role !== undefined) roles.push(ctx.section.role);
-  if (ctx.actor.roles.includes('admin') && !roles.includes('admin')) roles.push('admin');
+  const admin = ctx.actor.roles.includes('admin') || ctx.section.departmentAdmin === true;
+  if (admin && !roles.includes('admin')) roles.push('admin');
   return roles;
 }
 

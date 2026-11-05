@@ -3,6 +3,7 @@ import type { Action, ActorContext } from '../../../core/permissions.js';
 import { authorizeInSection, authorizeWithinOwnOrg } from '../../../core/authorization.js';
 import type { Authorized } from '../../../core/authorization.js';
 import { sameOrg } from '../../../core/tenancy.js';
+import { effectiveRoles } from '../../../core/permissions.js';
 import { SchedulingTargetNotFoundError } from '../types.js';
 import type { ClassOccurrence, ClassSessionTemplate } from '../types.js';
 import type { SchedulingDeps, SchedulingEnforcement } from './context.js';
@@ -143,7 +144,7 @@ export class SchedulingAccess {
 
 /** 'admin' if the actor is one, else the role they acted as in the section, if it is staff. */
 function actorRoleOf(auth: Authorized): 'admin' | 'instructor' | 'ta' | undefined {
-  if (auth.ctx.actor.roles.includes('admin')) return 'admin';
+  if (effectiveRoles(auth.ctx).includes('admin')) return 'admin';
   const role = auth.ctx.section?.role;
   return role === 'instructor' || role === 'ta' ? role : undefined;
 }

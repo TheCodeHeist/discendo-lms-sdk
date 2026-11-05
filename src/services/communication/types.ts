@@ -5,6 +5,8 @@
  */
 export type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
+  /** Held grades of one piece of content were released: tell the section's students who have one. */
+  | { type: 'gradesReleased'; sectionId: string; contentId: string }
   | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
   | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
 
@@ -42,4 +44,18 @@ export interface Thread {
   sectionId: string;
   title: string;
   posts: ThreadPost[];
+  /** Who started it (`CommunicationService.startThread`). Absent on threads made another way. */
+  createdBy?: string;
+  createdAt?: Date;
+}
+
+/**
+ * Remembers which due-date reminders were already sent, so `sendDueDateReminders` can run on a
+ * schedule (every hour, say) without telling anyone twice. `claim` must be atomic: store the key
+ * and return true if it was not there, or return false if it was (an insert that ignores
+ * duplicates). The key names the student, the content and the due date, so moving a due date
+ * makes a fresh reminder due.
+ */
+export interface ReminderLog {
+  claim(key: string): Promise<boolean>;
 }

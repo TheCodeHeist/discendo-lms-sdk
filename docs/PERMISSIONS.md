@@ -116,6 +116,7 @@ policy.
 | `assessment.answerQuiz` | — | student | — | — |
 | `assessment.submitQuiz` | — | student | — | — |
 | `assessment.viewAttempts` | admin, instructor, ta | student | — | — |
+| `assessment.gradeQuiz` | admin, instructor, ta | — | — | — |
 | `assessment.recordOffline` | admin, instructor | — | — | yes |
 | `assessment.manageRubric` | admin, instructor | — | — | — |
 | `assessment.assignPeerReviews` | admin, instructor | — | — | — |
@@ -124,6 +125,7 @@ policy.
 | `grading.view` | admin, instructor, ta | student | grades | — |
 | `grading.grantExtension` | admin, instructor | — | — | yes |
 | `grading.excuse` | admin, instructor | — | — | yes |
+| `grading.release` | admin, instructor | — | — | yes |
 | `communication.postAnnouncement` | admin, instructor | — | — | yes |
 | `communication.postGuardianAnnouncement` | admin, instructor | — | — | — |
 | `communication.viewAnnouncements` | admin, instructor, ta, student | — | — | — |
@@ -252,6 +254,32 @@ look anything up. `resourceOrgId` is a required key so a caller cannot forget it
 and a JavaScript caller that omits it is treated as saying "no organization", which
 fails closed.
 
+## Department administrators
+
+A head of department can be an admin for **their department's sections only**: give their account
+`adminOfDepartments: ['sci', ...]` (department ids of their own organization) instead of the `admin`
+role.
+
+```ts
+users.seed({ id: 'sci-head', roles: ['instructor'], orgId: 'school', adminOfDepartments: ['sci'] });
+// in any section whose course has departmentId 'sci' (and orgId 'school'): an admin
+// everywhere else, and for every organization-wide action: an instructor
+```
+
+- **Inside their departments they are an admin**, as if they had the `admin` role there: enrolling
+  people, managing content, grading, scheduling, and anything else an admin may do in a section.
+  They do not need an enrollment of their own. Events that say who acted report `actorRole: 'admin'`.
+- **Outside them they are whatever their `roles` say.** That covers a course of another department,
+  a course with no department, and another organization that happens to use the same department id.
+- **No organization-wide admin actions**, because those belong to no section: managing guardian links,
+  reading or searching the audit log, setting teacher qualifications, and the planning and room
+  settings. Those stay with the organization's admins (the `admin` role).
+- **How it is decided:** `authorizeInSection` checks that the section's course has a department, that
+  the account lists it, and that both are in the same organization. Only then does it set
+  `section.departmentAdmin` in the `PermissionContext`, and `effectiveRoles` adds `admin` for that
+  section. The flag is set nowhere else. **A custom policy must use that flag (or `effectiveRoles`),
+  never `actor.adminOfDepartments`**, which is only what the account says.
+
 ## After a student completes a section
 
 A student whose enrollment is `completed` keeps **read-only** access to **their own
@@ -379,13 +407,16 @@ This is the checklist the existing services follow, for anyone extending the SDK
 - **Denials are not recorded by default.** A refusal throws; nothing is emitted or logged. Wrap
   calls with [`AdminService.audited(..., { recordDenials: true })`](./ADMIN.md) to write them to
   the audit log, or catch `PermissionDeniedError` yourself.
-- **No department-scoped roles.** An admin is an admin of the whole organization.
+- **Department admins are admins, not a role of their own.** In their sections they can do whatever an
+  admin can. There is no "head of department" with a narrower set of actions; for that, write a
+  policy that looks at `section.departmentAdmin`. Organization-wide actions stay with full admins.
 - **The actor id is trusted** (see the top of this page).
 
 ## Tests
 
 | File | Covers |
 | --- | --- |
+| `test/core-department-admins.test.ts` | department admins: acting as admin in their department's sections (enrolling, content, the scheduling oversight label), nothing in other departments, courses with no department or another organization reusing the id, no organization-wide admin actions, the policy trusting only the verified flag, and `authorizeInSection` checking the department even for a policy with no tenant check |
 | `test/core-permissions.test.ts` | the policy: every rule, tenant check in both directions, `ownRoles`, guardian and delegated paths, overrides, the role hierarchy, `authorize`, `activeSectionRole`, `effectiveRoles` |
 | `test/enrollment-permissions.test.ts` | enforcement in `EnrollmentService` |
 | `test/grading-permissions.test.ts` | enforcement in `GradingService`, including guardians |

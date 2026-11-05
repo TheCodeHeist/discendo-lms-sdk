@@ -41,13 +41,19 @@ interface Submission {
   recordedBy?: string;   // set only when staff recorded it with recordOffline
 }
 
-interface QuizQuestion {
-  id: string;
-  prompt: string;
-  choices: string[];
-  correctChoiceIndex: number;
-  points?: number;           // what a right answer earns, default 1
-}
+// Every question has these, plus the fields of its type (see "Question types" below):
+//   id: string; prompt: string;
+//   points?: number;    // what a fully right answer earns, default 1
+//   penalty?: number;   // negative marking: what a wrong answer costs, default 0
+type QuizQuestion =
+  | SingleChoiceQuestion     // type?: 'single_choice' (the default); choices; correctChoiceIndex
+  | MultipleChoiceQuestion   // type: 'multiple_choice'; choices; correctChoiceIndexes; scoring?
+  | TrueFalseQuestion        // type: 'true_false'; correctAnswer: boolean
+  | ShortAnswerQuestion      // type: 'short_answer'; acceptedAnswers; caseSensitive?; maxLength?
+  | NumericQuestion          // type: 'numeric'; correctValue; tolerance?
+  | EssayQuestion;           // type: 'essay'; maxLength?   (scored by a person)
+
+type QuizAnswer = number | number[] | boolean | string;   // which one depends on the question's type
 
 interface QuizAttempt {
   id: string;
@@ -56,27 +62,37 @@ interface QuizAttempt {
   questionOrder: string[];   // the question ids in this attempt's own order
   startedAt: Date;
   submittedAt?: Date;        // set on submission; an attempt without it is open
-  answers?: Record<string, number>;  // question id to the choice the student saved
+  answers?: Record<string, QuizAnswer>;    // question id to what the student saved
   score?: number; maxScore?: number; late?: boolean;   // set on submission
+  manualScores?: Record<string, number>;   // points given by hand, by question id
+  pendingReview?: boolean;   // true while a question still waits to be scored by hand
   submissionId?: string;     // the Submission stored for it
   gradeEntryId?: string;     // the grade autoGrade recorded
 }
 
 interface QuizQuestionView {   // a question as a student sees it: no answer key
-  id: string; prompt: string; choices: string[]; points?: number;
-  selectedChoiceIndex?: number;   // what they have saved so far
+  id: string; type: QuizQuestionType; prompt: string;
+  choices: string[];           // empty for the types without choices
+  points?: number; penalty?: number; maxLength?: number;
+  answer?: QuizAnswer;         // what they have saved so far
+  selectedChoiceIndex?: number;   // the same, for single choice only (kept for existing callers)
 }
 
 interface QuestionResult {
   questionId: string;
-  selectedChoiceIndex?: number;   // absent if unanswered
-  correctChoiceIndex: number;
-  correct: boolean; points: number; earned: number;
+  type: QuizQuestionType;
+  status: 'correct' | 'partial' | 'incorrect' | 'unanswered' | 'pending' | 'graded';
+  answer?: QuizAnswer;                                  // absent if unanswered
+  correctAnswer?: number | number[] | boolean | string[];  // the key; absent for an essay
+  correct: boolean; points: number;
+  earned: number;                                       // negative when a penalty applied
+  selectedChoiceIndex?: number; correctChoiceIndex?: number;   // single choice only, as before
 }
 
 interface QuizResult {
   attemptId: string; quizId: string; userId: string;
   score: number; maxScore: number; submittedAt: Date; late: boolean;
+  pendingReview: boolean;         // a question still waits to be scored by hand
   submissionId?: string; gradeEntryId?: string;
   questions?: QuestionResult[];   // the breakdown with the answer key: only when it may be shown
 }
@@ -146,25 +162,46 @@ interface QuizRepository {
   createAttempt(attempt: Omit<QuizAttempt, 'id'>): Promise<QuizAttempt>;
   findAttempt(id: string): Promise<QuizAttempt | null>;
   findOpenAttempt(quizId: string, userId: string): Promise<QuizAttempt | null>;
-  saveAnswer(attemptId: string, questionId: string, choiceIndex: number): Promise<QuizAttempt | null>;
-  closeAttempt(attemptId: string, close: { submittedAt: Date; score: number; maxScore: number; late: boolean }): Promise<QuizAttempt | null>;
-  updateAttempt(attemptId: string, patch: { submissionId?: string; gradeEntryId?: string }): Promise<QuizAttempt>;
+  saveAnswer(attemptId: string, questionId: string, answer: QuizAnswer): Promise<QuizAttempt | null>;
+  closeAttempt(attemptId: string, close: { submittedAt: Date; score: number; maxScore: number; late: boolean; pendingReview?: boolean }): Promise<QuizAttempt | null>;
+  // optional, recommended if staff score questions by hand: set ONE hand score atomically
+  saveManualScore?(attemptId: string, questionId: string, points: number): Promise<QuizAttempt | null>;
+  updateAttempt(attemptId: string, patch: {
+    submissionId?: string; gradeEntryId?: string;
+    score?: number; maxScore?: number; pendingReview?: boolean; manualScores?: Record<string, number>;
+  }): Promise<QuizAttempt>;
 }
 ```
+
+**Upgrading a `QuizRepository` written before question types.** Make three changes:
+
+- An answer is now a `QuizAnswer`: a number, a list of numbers, a boolean or a string. Store
+  `answers` as JSON, not as integers.
+- `closeAttempt` can also be given `pendingReview`.
+- `updateAttempt` can be given `score`, `maxScore`, `pendingReview` and `manualScores`. Merge them
+  in the same way as the other fields.
+
+`quizRepositoryContract` (see [TESTING.md](./TESTING.md)) checks all of this.
 
 The five quiz-answering methods are required, so a host that implemented the old two-method
 `QuizRepository` has to add them (a compile error tells you). What each must do:
 
 - **`findOpenAttempt(quizId, userId)`**: the person's attempt of this quiz with no `submittedAt`,
   newest first if there are several, or `null`.
-- **`saveAnswer(attemptId, questionId, choiceIndex)`**: set `answers[questionId]` and keep the
+- **`saveAnswer(attemptId, questionId, answer)`**: set `answers[questionId]` and keep the
   attempt's other answers, **only if the attempt exists and is still open**, and return it; `null`
   otherwise. Do it as one step in the store (a JSON-path update), not read-modify-write, so two answers
   saved at once do not lose each other.
 - **`closeAttempt(attemptId, close)`**: set `submittedAt`, `score`, `maxScore` and `late` **only if the
   attempt is still open**, as one atomic step (`UPDATE ... WHERE submittedAt IS NULL`), and return the
   updated attempt or `null`. This is what makes a double submit score once.
-- **`updateAttempt`**: store the `submissionId` and `gradeEntryId` the service attaches.
+- **`updateAttempt`**: merge in the bookkeeping the service attaches: `submissionId` and
+  `gradeEntryId`, and, when a question is scored by hand, the new `score`, `maxScore` and
+  `pendingReview` (and `manualScores` when there is no `saveManualScore`).
+- **`saveManualScore?(attemptId, questionId, points)`** (optional): set `manualScores[questionId]`,
+  keeping the other hand scores, **only if the attempt has been submitted**, as one step in the
+  store, and return the updated attempt or `null`. Without it, two graders scoring different
+  questions of one attempt at the same moment can lose one of the scores.
 
 **`createAttempt?(draft, maxAttempts?)`** is optional, and recommended wherever an attempt limit
 matters. Implement it as **one atomic step** (a transaction, a lock, or a conditional insert): the
@@ -250,7 +287,7 @@ await grading.record(/* ... */ sub.id /* ... */);
   works on unpublished content when the actor is staff.
 - Without enforcement it needs no actor and checks nothing, as with the other methods.
 
-### `generateAttempt(quizId, userId, randomize = true, actor?): Promise<QuizAttempt>`
+### `generateAttempt(quizId, userId, randomize = true, actor?, { maxAttempts? }): Promise<QuizAttempt>`
 
 Reads the quiz's questions, takes their ids, shuffles that order when `randomize` is
 true (a Fisher-Yates shuffle, per attempt, not stored globally), and stores a new
@@ -260,41 +297,63 @@ true (a Fisher-Yates shuffle, per attempt, not stored globally), and stores a ne
 new one** (`randomize` only matters for a new attempt). Starting over is therefore not a way to
 see the questions again; a new attempt can be started once the last one is submitted.
 
+**`maxAttempts`** limits how many attempts the student may submit. Once they have submitted that
+many (counted from their quiz submissions), starting another throws `AttemptLimitReachedError`
+(message `No attempts remaining`, with `quizId` and `maxAttempts`). An open attempt is still
+resumed. The limit is yours to pass on each call, like the time limit, and must be a whole number
+from 1 up. With enforcement on, the content must be a `quiz`; anything else throws
+`WrongContentKindError` (`expected`, `actual`).
+
 ## Taking a quiz
 
 ```ts
 const attempt = await assessment.generateAttempt(quizId, studentId, true, actor);
 const questions = await assessment.getAttemptQuestions(attempt.id, actor);   // no answer key
-await assessment.saveAnswer(attempt.id, questions[0].id, 2, actor);          // as often as they like
+await assessment.saveAnswer(attempt.id, "q1", 2, actor);              // single choice: a choice index
+await assessment.saveAnswer(attempt.id, "q2", [0, 3], actor);         // multiple choice: indexes
+await assessment.saveAnswer(attempt.id, "q3", true, actor);           // true/false
+await assessment.saveAnswer(attempt.id, "q4", "Paris", actor);        // short answer or essay: text
+await assessment.saveAnswer(attempt.id, "q5", 9.81, actor);           // numeric
 const result = await assessment.submitAttempt(attempt.id, actor, { timeLimitSeconds: 1800 });
 // result: { score, maxScore, late, submissionId, gradeEntryId?, ... }
 ```
 
 ### `getAttemptQuestions(attemptId, actor?): Promise<QuizQuestionView[]>`
 
-The attempt's questions in the attempt's own order, as `QuizQuestionView`: **no
-`correctChoiceIndex`**, plus `selectedChoiceIndex` for what the student has saved, so a page
-can pick up where it left off. A question removed from the quiz since the attempt began is left
+The attempt's questions in the attempt's own order, as `QuizQuestionView`: each with its `type`,
+**and no answer key of any kind**, plus `answer` for what the student has saved, so a page can
+pick up where it left off. A question removed from the quiz since the attempt began is left
 out. **Show a quiz to a student with this, never with `QuizRepository.getQuestions`**, whose
 questions carry the answer key. Only the attempt's own student may ask (`assessment.answerQuiz`).
 
-### `saveAnswer(attemptId, questionId, choiceIndex, actor?, { timeLimitSeconds? }): Promise<QuizAttempt>`
+### `saveAnswer(attemptId, questionId, answer, actor?, { timeLimitSeconds? }): Promise<QuizAttempt>`
 
 Saves one answer, replacing an earlier answer to the same question; call it as the student works so
-nothing is lost if they stop. The question must be in the attempt and `choiceIndex` a whole number
-that is one of its choices, or `InvalidAnswerError` (`reason`: `question-not-in-attempt` or
-`choice-out-of-range`). A submitted attempt throws `AttemptClosedError`; after the time limit
+nothing is lost if they stop. The question must be in the attempt and the answer must be the kind its
+type takes, or `InvalidAnswerError` with a `reason`:
+
+| `reason` | When |
+| --- | --- |
+| `question-not-in-attempt` | the question is not part of this attempt |
+| `wrong-answer-type` | not a number (single choice, numeric: a finite one), a non-empty list (multiple choice), a boolean (true/false) or text (short answer, essay) |
+| `choice-out-of-range` | a choice index that is not one of the question's choices, or the same choice twice |
+| `answer-too-long` | text longer than the question's `maxLength` (short answer: 1000 by default; essay: no limit by default) |
+
+A multiple-choice answer is stored sorted. A submitted attempt throws `AttemptClosedError`; after the time limit
 `AttemptExpiredError`. `timeLimitSeconds` is passed by you on each call (the SDK stores no quiz
 settings) and counts from `startedAt`; it must be a finite number above zero.
 
 ### `submitAttempt(attemptId, actor?, { timeLimitSeconds?, revealAnswers? }): Promise<QuizResult>`
 
-1. Scores the saved answers with `scoreQuiz` and closes the attempt atomically (`closeAttempt`).
+1. Scores the saved answers with `scoreQuiz` and closes the attempt atomically (`closeAttempt`). If a
+   question waits to be scored by hand (an essay), the attempt is closed with `pendingReview: true`
+   and its score counts that question as 0 for now.
 2. Stores a `Submission` with payload `{ kind: 'quiz', attemptId }`, numbered with the student's other
    submissions of that quiz, so [grading](./GRADING.md) can attach to it. It does **not** emit
    `assessment.submissionReceived` and starts no plagiarism check.
 3. Emits `assessment.quizSubmitted`.
-4. With `autoGrade`, records the score as a grade (below).
+4. With `autoGrade`, records the score as a grade (below), unless the attempt is pending review:
+   then the grade waits for `gradeQuizQuestion`.
 
 A submission after `timeLimitSeconds` is **flagged `late: true` but still scored**, from the answers
 saved in time (answers after the limit were refused). The result has no answer key unless
@@ -315,13 +374,61 @@ breakdown is worked out from the quiz as it is now, so if questions were edited 
 with the stored score. Without enforcement it is included only when `revealAnswers` is true. With
 enforcement this is `assessment.viewAttempts`: staff, or the attempt's own student.
 
-### Scoring: `scoreQuiz(questions, answers, order?): QuizScore`
+### `gradeQuizQuestion(attemptId, questionId, points, actor?): Promise<QuizResult>`
 
-A pure function you can also call yourself. A right answer earns the question's `points` (default 1); a
-wrong or missing answer earns 0, **never less**. Only the questions in `order` (the attempt's own list) are
-scored, in that order, and a question removed from the quiz is skipped, so `maxScore` is what this
-attempt could have earned. `points` must be a finite number from 0 up, or it throws. One choice per
-question; there are no multi-select or written answers yet.
+Scores one question of a **submitted** attempt by hand, replacing any earlier hand score for it.
+An essay gets its points this way. It also **overrides the automatic result of any other type**,
+for example to accept a spelling the key did not list. `points` must be from 0 to the question's
+points; anything else throws `InvalidManualScoreError`, and so does an attempt that is not
+submitted yet. A question that is not part of the attempt throws `InvalidAnswerError`.
+
+The attempt's score is then worked out again with every hand score. When no question is left
+pending and `autoGrade` is on, the score is recorded as a grade:
+
+- If the attempt already had an automatic grade, the new one **supersedes** it, so the earlier
+  grade stays as history and exactly one is current.
+- An essay attempt is graded once its last essay is scored, never before.
+
+It emits `assessment.quizQuestionGraded` and returns the result with its breakdown. With
+enforcement on it needs `assessment.gradeQuiz` in the quiz's section, which by default means admins,
+instructors and TAs. A student cannot score anything, not even their own attempt.
+
+## Question types
+
+A question with no `type` is a single-choice question, so quizzes stored before the other types
+existed keep working, and their results keep `selectedChoiceIndex` and `correctChoiceIndex`.
+
+| `type` | Extra fields | The answer | Right when |
+| --- | --- | --- | --- |
+| `single_choice` (default) | `choices`, `correctChoiceIndex` | a choice index | it is `correctChoiceIndex` |
+| `multiple_choice` | `choices`, `correctChoiceIndexes`, `scoring?` | a list of choice indexes | `all_or_nothing` (default): exactly the right set, in any order. `partial`: each right pick earns `points / right choices`, each wrong pick takes that much away, down to 0 for the question |
+| `true_false` | `correctAnswer: boolean` | a boolean | it equals `correctAnswer` |
+| `short_answer` | `acceptedAnswers`, `caseSensitive?`, `maxLength?` | text | it matches an accepted answer, ignoring leading, trailing and repeated spaces, and ignoring case unless `caseSensitive` |
+| `numeric` | `correctValue`, `tolerance?` | a number | it is within `tolerance` (default 0) of `correctValue` |
+| `essay` | `maxLength?` | text | a person decides: it is `pending` until `gradeQuizQuestion` scores it |
+
+**Negative marking.** A question's `penalty` is what a **wrong** answer costs. A blank answer is
+never penalised, so leaving a question blank is the safe choice. A partial multiple-choice answer
+is not penalised either (it earned something), and neither is an essay. However many penalties
+there are, **the quiz total never goes below 0**.
+
+### Scoring: `scoreQuiz(questions, answers, order?, manualScores?): QuizScore`
+
+A pure function you can also call yourself, for example to preview a score. It works like this:
+
+- Each question earns up to its `points` (default 1), according to its type (above). A wrong
+  answer earns minus its `penalty`, and a blank earns 0.
+- `manualScores` (question id to points) replace the automatic result for those questions.
+- `score` is the total, never below 0. `pendingReview` counts the questions still waiting for a
+  person.
+- Only the questions in `order` (the attempt's own list) are scored, in that order, and a question
+  removed from the quiz is skipped. So `maxScore` is what this attempt could have earned.
+- Every scored question is checked with `validateQuizQuestion`, which throws
+  `InvalidQuizQuestionError`. Call it yourself when a quiz is authored, so a broken question
+  (a key outside its choices, no accepted answers, negative points, an unknown type) is refused
+  before any student meets it.
+
+`questionTypeOf(question)` gives a question's type, with the `single_choice` default filled in.
 
 ### Extra time: the `extensions` option
 
@@ -348,7 +455,10 @@ const assessment = new AssessmentService(subs, quizzes, hook, bus, enforcement, 
 
 On submission the score is recorded as a grade for the quiz's `Submission` through
 `GradingService.recordSystemGrade` (see [GRADING.md](./GRADING.md)), once per attempt; the entry id is kept
-as `gradeEntryId`. A quiz worth 0 points has no grade (grades need a maximum above zero). Without
+as `gradeEntryId`. A quiz worth 0 points has no grade (grades need a maximum above zero). An attempt
+pending review gets its grade when its last hand-scored question is scored. A later hand score
+replaces the grade with a new one, passing the old entry as `previousEntryId`, so the old grade is
+superseded rather than overwritten. Without
 `autoGrade`, the grade is yours to post, from `assessment.quizSubmitted` or the result.
 
 ## The plagiarism hook (read this)
@@ -396,6 +506,7 @@ specifics.
 | `generateAttempt` | `assessment.startAttempt` | the student themselves, for their own attempt only |
 | `getAttemptQuestions`, `saveAnswer` | `assessment.answerQuiz` | the attempt's own student only: no staff, not even an admin |
 | `submitAttempt` | `assessment.submitQuiz` | the attempt's own student only |
+| `gradeQuizQuestion` | `assessment.gradeQuiz` | staff of the section: admins, instructors and TAs |
 | `getResult` | `assessment.viewAttempts` | staff of the section for anyone's (with the breakdown); a student for their own |
 | `attemptsRemaining` | `assessment.viewAttempts` | staff (admin, instructor, TA) for anyone; a student for themselves |
 | `recordOffline` | `assessment.recordOffline` | admins and instructors; a TA only when delegated. The student must be an active student of the section |
@@ -431,8 +542,13 @@ Nothing is emitted and nothing is stored for a refused call.
 after each stored submission. A failing listener never fails the submission.
 
 `assessment.quizSubmitted` (`attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`,
-`late`) once per quiz attempt, when its submission is stored. A quiz attempt does not also emit
-`assessment.submissionReceived`. See [EVENTS.md](./EVENTS.md).
+`late`, and `pendingReview: true` when a question waits for a person) once per quiz attempt, when its
+submission is stored. A quiz attempt does not also emit `assessment.submissionReceived`.
+
+`assessment.quizQuestionGraded` (`attemptId`, `quizId`, `questionId`, `userId`, `points`, `score`,
+`maxScore`, `pendingReview`, `graderId?`) each time staff score a question by hand. When
+`pendingReview` is false the attempt is fully scored, which makes it a good moment to tell the
+student. See [EVENTS.md](./EVENTS.md).
 
 ## Known limitations
 
@@ -442,10 +558,18 @@ after each stored submission. A failing listener never fails the submission.
   below).
 - **A failing plagiarism hook is swallowed without a trace** (see above), and its
   result is discarded. The SDK has no error channel for it yet.
-- **Single-choice questions only.** No multi-select, true/false weighting, written answers or partial
-  credit; the SDK has no negative marking either.
-- **No attempt limit for quizzes.** `generateAttempt` takes no `maxAttempts`; quiz submissions do count
-  in `attemptsRemaining`, so a host can check that before starting one.
+- **Six question types, no more.** There are no matching, ordering, fill-in-several-blanks or file-upload
+  questions. Short answers match text exactly (after spacing and case are normalized): there is no
+  fuzzy matching, no regular expressions and no list of misspellings beyond `acceptedAnswers`. A
+  person can accept one with `gradeQuizQuestion`.
+- **The quiz attempt limit is not atomic.** `generateAttempt` counts submitted attempts and then
+  creates one, so two simultaneous starts at the limit can both succeed.
+- **Rescoring by hand is not atomic either.** Two graders scoring questions of the same attempt at the
+  same moment each work the total out again and write it. The total written last wins, and it can
+  miss the other grader's score until the next rescore. Each hand score itself is kept (with
+  `saveManualScore`).
+- **Rescoring uses the quiz as it is now.** If questions were edited after the attempt was submitted,
+  a hand score works the total out from the edited questions.
 - **Two simultaneous `generateAttempt` calls can each start an attempt**; the next call resumes the
   newest. A uniqueness rule on one open attempt per person and quiz in your store prevents it.
 - **A half-finished submission is only finished by the student calling `submitAttempt` again.** If the
@@ -455,14 +579,19 @@ after each stored submission. A failing listener never fails the submission.
 - **A failing `autoGrade` is loud, not silent.** `submitAttempt` throws (the quiz is submitted; retry to
   grade it), which is the opposite of the plagiarism hook's swallowed errors.
 - **The answer key is the host's to protect.** `QuizRepository.getQuestions` and `getResult`'s
-  breakdown carry `correctChoiceIndex`; only `getAttemptQuestions` is safe to show a student.
+  breakdown carry the key (`correctAnswer`, `acceptedAnswers`, ...); only `getAttemptQuestions` is safe
+  to show a student.
 - **The time limit is yours to pass on every call**, and uses the server's clock from `startedAt`.
-- **No prerequisite gating and no due dates** here. Use `ContentService.isUnlocked`
-  ([CONTENT.md](./CONTENT.md)) and the availability windows in
-  [CALENDAR.md](./CALENDAR.md).
-- **The content kind is not checked.** Nothing stops `submit` being called on a page, or
-  `generateAttempt` on an assignment.
-- **The shuffle uses `Math.random`**: unseeded and not reproducible.
+- **Dates are enforced, prerequisites are not.** With enforcement on, a student cannot submit, start a
+  quiz or save a quiz answer before the content's `availableFrom` or after its `availableUntil`
+  (`ContentNotAvailableError`); a started attempt can still be submitted after closing. A submission
+  after `dueAt` is accepted and not flagged. Prerequisites are not checked: use
+  `ContentService.checkAccess` ([CONTENT.md](./CONTENT.md)) before showing the work.
+- **The content kind is checked only for quiz attempts, and only with enforcement on.**
+  `generateAttempt` refuses content that is not a `quiz`. Nothing stops `submit` being called on a
+  page, and without enforcement the service cannot see the content at all.
+- **The shuffle cannot be seeded**, so an attempt's order is not reproducible. It uses the Web Crypto
+  API (`globalThis.crypto`), which Node 20+, Bun, Deno, browsers and edge runtimes provide.
 - `grading.view` covers a guardian's view of grades; there is no guardian access to
   attempts.
 
@@ -477,5 +606,6 @@ after each stored submission. A failing listener never fails the submission.
 | `test/assessment-rubrics.test.ts` | `scoreRubric` validation and calculation, `RubricService` CRUD, draft gating, staff evaluations, and owner visibility |
 | `test/assessment-peer-review.test.ts` | `PeerReviewService` distribution fairness, no self-assignments, rubric tie-in, anonymous masking, and permission gating |
 | `test/assessment-groups.test.ts` | Group submissions: member validation, group attempt consumption, and attempt limits |
+| `test/assessment-question-types.test.ts` | every question type in `scoreQuiz` (multiple choice all-or-nothing and partial, true/false, short-answer normalization and case, numeric tolerance, essays pending and graded, hand scores overriding), negative marking (wrong answers only, the 0 floor), `validateQuizQuestion`; and through `createInMemoryLms`: the key-free view of each type, answer validation per type, the whole essay review (pending, no grade, who may score, the grade recorded once), a rescore superseding the earlier grade, `maxAttempts`, and the content-kind check |
 | `test/assessment-quiz.test.ts` | extra quiz time from extensions; `scoreQuiz`; resuming an open attempt; the answer-key-free view; saving answers (validation, closed, expired, races); submitting (scoring, the quiz submission and its numbering, idempotence, double submit, late flag, half-done recovery); `autoGrade`; `getResult` and who sees the breakdown; the two new student-only actions |
 | `test/core-permissions.test.ts` | the three assessment rules ("assessment rules") |

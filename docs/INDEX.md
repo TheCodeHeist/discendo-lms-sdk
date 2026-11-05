@@ -18,6 +18,7 @@ under "Known limitations".
 | If you want to… | Read |
 | --- | --- |
 | wire the SDK into an application | [GETTING_STARTED.md](./GETTING_STARTED.md) |
+| try the SDK with no database, or test your own repositories | [TESTING.md](./TESTING.md) |
 | understand the shared types and the repositories you implement | [CORE.md](./CORE.md) |
 | decide who may do what, and turn enforcement on | [PERMISSIONS.md](./PERMISSIONS.md) |
 | host several institutions in one deployment | [TENANCY.md](./TENANCY.md) |
@@ -51,6 +52,7 @@ tests that cover it.
 | **reporting** | `discendo-sdk/reporting` | [REPORTING.md](./REPORTING.md) | Attendance, completion percentage, CSV export |
 | **admin** | `discendo-sdk/admin` | [ADMIN.md](./ADMIN.md) | Audit logging: `withAudit`, and `AdminService` (`audited`, `history`, organization-aware) |
 | **interop** | `discendo-sdk/interop` | [INTEROP.md](./INTEROP.md) | Type-only seams for LTI, SSO and SCORM/xAPI import |
+| **testing** | `discendo-sdk/testing` | [TESTING.md](./TESTING.md) | `createInMemoryLms()`, an in-memory implementation of every repository, and a contract suite for each interface to check your own against |
 
 ### What is built, and what enforces permissions
 
@@ -127,6 +129,7 @@ src/
     scheduling/   (service/, rules/, solver/, calendar/, testing/ — see its README)
   services/     cross-cutting modules that consume what domains produce
     communication/   reporting/   admin/
+  testing/      discendo-sdk/testing: wires every module's testing/ folder together
   interop/      pluggable protocol seams only (LTI, SSO, SCORM/xAPI)
   index.ts      root barrel — re-exports every module
 test/

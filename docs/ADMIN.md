@@ -120,6 +120,30 @@ enforcement** (`actor` required):
 
 Entries with `outcome: 'denied'` are included.
 
+### `searchAudit(query?, actor?): Promise<AuditPage>`
+
+Searches the log by **who** (`actorId`), **what** (`targetId`, `action`), **outcome** (`'allowed'` or
+`'denied'`) and **when** (`from`, `to`, both inclusive), **newest first**, a page at a time:
+
+```ts
+let page = await admin.searchAudit({ actorId: 'ms-lee', from: lastMonday, limit: 100 }, as(principal));
+while (page.nextCursor) {
+  page = await admin.searchAudit({ actorId: 'ms-lee', from: lastMonday, limit: 100, cursor: page.nextCursor }, as(principal));
+}
+```
+
+- `limit` is from 1 to 500 (default 50). `nextCursor` is there while there may be more: pass it back
+  as `cursor`, unchanged.
+- **With enforcement** it needs `admin.viewAuditLog`. That means an organization's admins: not
+  department admins, not instructors. It **only ever searches the admin's own organization**: an
+  `orgId` in the query is replaced by theirs, and what the repository returns is checked again.
+- It needs the optional **`AuditRepository.query(query)`**. The query is every field above plus a
+  `limit` the service always sets, and `orgId` (`null` means "no organization"). It returns
+  `{ entries, nextCursor? }`, newest first by `timestamp` and then `id`, so the order is stable.
+  Use keyset pagination: encode the last entry's timestamp and id as the cursor, and continue after
+  it. Pages then stay correct while new entries are written, which an `OFFSET` would not.
+  `auditRepositoryContract` checks the filters and that paging returns every entry once.
+
 ### Existing audit entries: a migration
 
 Entries written by plain `withAudit`, or before organizations existed, have **no `orgId`**, so with
@@ -160,11 +184,11 @@ The audit log is for the rest, and for a single view across modules.
 - **Failures other than refusals are not audited**, and refusals only if you opt in.
 - **The audit write is not in the same transaction** as the operation. If the process stops between
   the two, the action happened and the entry does not exist.
-- **`history` is by target only.** No query by actor or time range, and no pagination. Adding them
-  needs new repository methods.
+- **Searching needs `AuditRepository.query`.** Without it only `history` (by target, no paging) works.
 - **`withAudit` and a host that passes its own `actorId` are trusted.** Only `audited` with
   enforcement takes the actor and organization from the stored account.
-- **No department-scoped admins.** Any admin of the organization can read its whole audit trail.
+- **The audit log is organization-wide.** Department admins cannot read it at all, and any full admin
+  can read all of it. Entries carry no department, so there is nothing to scope by.
 - **Only the service is guarded.** Your own code can still read the repository directly.
 - **No events** are emitted when an entry is written.
 
@@ -172,5 +196,6 @@ The audit log is for the rest, and for a single view across modules.
 
 | File | Covers |
 | --- | --- |
+| `test/admin-audit-search.test.ts` | `searchAudit`: filters by actor, action and dates, newest first, paging with the cursor, the organization wall (whatever the query says, and re-checked against a repository that ignores it), admins only (not instructors or department admins), limit and date validation, and a repository without `query` |
 | `test/admin.test.ts` | `withAudit` (order, successes only, a failing write), `history` and `audited` with enforcement on (admins only, the organization wall in both directions and with none, the actor and organization taken from the stored account, an unknown or missing actor, opt-in refusals, loud write failures, check ordering) and off, and `diffObjects` |
 | `test/core-permissions.test.ts` | that `admin.viewAuditLog` is the organization's admins alone, never delegated |

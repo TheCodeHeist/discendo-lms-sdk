@@ -177,8 +177,9 @@ permission check.
 
 - **The check is also skipped on the idempotent path.** If the person is already
   enrolled, `enroll` returns the existing record before any tenant logic.
-- **No department-scoped administrators.** An admin is an admin of the whole
-  organization. Department-level administration is not built.
+- **Department administrators act only in sections.** An account's `adminOfDepartments` makes it an
+  admin of those departments' sections (see [PERMISSIONS.md](./PERMISSIONS.md)), but never for an
+  organization-wide action, and a department admin cannot manage the departments themselves.
 - **`OrganizationRepository` and `AcademicTerm.orgId` are not read by any
   service.** They are there for hosts.
 - **The SDK does not stop you creating a course with the wrong organization.**
