@@ -332,8 +332,8 @@ if (!check.ok) {
 
 ## Where to go from here
 
-- Read `SCHEDULING.md` in full before relying on the solver in production —
-  in particular the "Known limitations" section (no soft-constraint
+- Read [SCHEDULING_SOLVER.md](./SCHEDULING_SOLVER.md) in full before relying on the solver in
+  production, in particular its "Known limitations" section (no soft-constraint
   optimization, the `interval > 1` availability limitation, and the
   one-room-per-week-per-template assumption).
 - [INDEX.md](./INDEX.md) lists a dedicated page for every module, each with its types,

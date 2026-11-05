@@ -4,6 +4,14 @@
 auto-scheduling solver. This is the largest and most involved module in the
 SDK. Subpath: `discendo-sdk/scheduling`.
 
+**Scheduling is documented across three pages:**
+
+- **This page:** the domain model, the repositories, and `SchedulingService` (the class a host calls).
+- [SCHEDULING_RULES.md](./SCHEDULING_RULES.md): the pure rule functions (recurrence, occurrence
+  generation, conflicts, availability, room matching, qualifications, attendance validation).
+- [SCHEDULING_SOLVER.md](./SCHEDULING_SOLVER.md): the auto-scheduling solver, its soft
+  constraints and the adapter between stored data and the solver.
+
 **A note on `scheduling/calendar/`.** Inside this module sits a small,
 self-contained sub-module, `calendar/`, that handles assignment due-date
 windows (locked/open/closed) and iCal export. It shares no code with the
@@ -65,7 +73,15 @@ src/domains/scheduling/
                           TeacherQualification, ClassSessionTemplate, ClassOccurrence,
                           Room, SchedulingGroup
   repositories.ts         SchedulingRepository interface
-  service.ts              SchedulingService — the class most host apps interact with
+  service.ts              SchedulingService — the facade most host apps interact with
+  service/                Its implementation, one concern per file
+    context.ts              Options, enforcement, check-result types, shared dependencies
+    access.ts               Every permission and organization check, in one place
+    checks.ts               checkConflicts / checkAvailabilityForResources / checkRoomForOccurrence / checkAll
+    occurrences.ts          Materialize, cancel, reschedule, list, attendance
+    auto-schedule.ts        planAutoSchedule / applyAutoSchedulePlan
+    settings.ts             Availability, preferences, qualifications
+    validation.ts           Input validation for settings and plans
   rules/                  Pure constraint checks (no I/O, no repository)
     recurrence.ts           Shared "does this rule fire on this date" logic
     conflict.ts             Pure double-booking detection over occurrences
@@ -136,7 +152,7 @@ interface AvailabilityRule {
 A recurring window during which a resource is usable _at all_ — independent
 of whether it's actually booked. Availability is **opt-in**: a resource
 with zero `AvailabilityRule`s on file is treated as always available
-everywhere in this module (see `availability.ts` below). This lets a
+everywhere in this module (see `availability.ts` in [SCHEDULING_RULES.md](./SCHEDULING_RULES.md)). This lets a
 single-tutor setup skip declaring hours entirely, while an institution that
 wants "teachers can only be booked 9–5" adds rules to enforce it.
 
@@ -168,7 +184,7 @@ manually or via `SchedulingService.planAutoSchedule` /
 
 `courseId` is a loose reference to whatever the host calls "the course" (for
 example `core.Course.id`). Scheduling never resolves it; it is consulted only by
-the teacher-qualification check (see `teacher-qualification.ts` below), and a
+the teacher-qualification check (see `teacher-qualification.ts` in [SCHEDULING_RULES.md](./SCHEDULING_RULES.md)), and a
 template without one is never checked.
 
 ### `ClassOccurrence`
@@ -323,505 +339,13 @@ own test suite. Exposes seed helpers for tests: `seedTemplate`, `seedRoom`,
 
 ---
 
-## `recurrence.ts` — shared date-matching logic
-
-```ts
-function atMidnightUtc(d: Date): Date;
-function addDays(d: Date, days: number): Date;
-function ruleFiresOn(
-  rule: RecurrenceRule,
-  anchorFrom: Date,
-  date: Date,
-): boolean;
-```
-
-`ruleFiresOn` is the single place that answers "does this rule fire on this
-specific date?" — both `generator.ts` and `availability.ts` call it, so the
-interval/anchor-week math exists in exactly one place. It:
-
-- Throws if `rule.raw` is set (see the `RecurrenceRule` note above)
-- Checks the date's weekday is in `rule.byDay`
-- Computes weeks elapsed since the Monday of `anchorFrom`'s week, and
-  requires `weeksSinceAnchor % rule.interval === 0` — this is what makes
-  "every 2nd week" stable no matter what date range you query, as long as
-  you always anchor to the same `anchorFrom` (typically the owning
-  template's or rule's own `validFrom`)
-- Does **not** check `validFrom`/`validUntil` bounds itself — callers clamp
-  those separately, since `generator.ts` and `availability.ts` clamp
-  differently (generation clamps the _iteration range_; availability
-  checking clamps a single _queried date_)
-
----
-
-## `generator.ts` — occurrence materialization
-
-```ts
-function generateOccurrences(
-  template: ClassSessionTemplate,
-  rangeStart: Date,
-  rangeEnd: Date,
-): Array<Omit<ClassOccurrence, "id">>;
-```
-
-Expands a template's `RecurrenceRule` into dated occurrences within
-`[rangeStart, rangeEnd]`, further clamped to the template's own
-`validFrom`/`validUntil`.
-
-**Deliberately windowed — never "generate forever."** A template's rule can
-be open-ended (no `validUntil`), so materializing "everything" isn't a valid
-operation. The intended usage pattern is a rolling window: keep the next N
-days (e.g. 90) materialized at all times, calling this periodically, rather
-than trying to generate a whole term or an unbounded future in one call.
-
----
-
-## `conflict.ts` — pure double-booking detection
-
-```ts
-interface ResourceConflict {
-  resourceType: "teacher" | "room" | "group";
-  resourceId: string;
-  occurrenceA: ClassOccurrence;
-  occurrenceB: ClassOccurrence;
-}
-
-function effectiveWindow(
-  occ: ClassOccurrence,
-  templateStart: string,
-  templateEnd: string,
-): { start: string; end: string };
-function findConflictsForResource(
-  resourceType: "teacher" | "room" | "group",
-  resourceId: string,
-  candidate: ClassOccurrence,
-  candidateWindow: { start: string; end: string },
-  existing: ClassOccurrence[],
-  existingWindows: Map<string, { start: string; end: string }>,
-): ResourceConflict[];
-```
-
-Pure — no repository access, no recurrence math, just interval overlap on a
-matching date. `effectiveWindow` resolves an occurrence's actual start/end,
-preferring its own override fields over the template's. `findConflictsForResource`:
-
-- Skips comparing an occurrence to itself
-- **Treats cancelled occurrences as never conflicting** — a cancelled slot
-  frees the resource entirely
-- Only compares occurrences on the same calendar date
-- Flags a conflict only when time windows actually overlap
-
-This module is usable completely standalone: a host app doing purely manual
-scheduling gets conflict checking without ever touching the solver.
-
----
-
-## `availability.ts` — pure resource-availability checks
-
-```ts
-interface AvailabilityCheckResult {
-  available: boolean;
-  reason?: string;
-}
-
-function checkAvailability(
-  rules: AvailabilityRule[],
-  date: Date,
-  startTime: string,
-  endTime: string,
-): AvailabilityCheckResult;
-```
-
-Answers "is this resource even allowed to be booked here?" — independent of
-whether it's already booked (that's `conflict.ts`'s job; a resource can be
-simultaneously available and double-booked). Behavior:
-
-- **Empty `rules` array → always available.** Availability enforcement is
-  opt-in per resource.
-- Otherwise, at least one rule must cover the date (via `ruleFiresOn`, plus
-  `validFrom`/`validUntil` bounds) **and** fully contain the requested
-  `[startTime, endTime]` window.
-- Multiple rules for the same resource are OR'd together — this supports
-  split shifts (e.g. a teacher available 9–12 and again 14–18) by supplying
-  two `AvailabilityRule`s.
-
----
-
-## `room-matching.ts` — pure capacity/feature matching
-
-```ts
-interface RoomRequirement {
-  minCapacity: number;
-  requiredFeatures?: string[];
-}
-
-interface RoomMatchResult {
-  suitable: boolean;
-  reasons: string[];
-}
-
-function checkRoomSuitability(
-  room: Room,
-  requirement: RoomRequirement,
-): RoomMatchResult;
-function findSuitableRooms(rooms: Room[], requirement: RoomRequirement): Room[];
-```
-
-No booking or conflict awareness — a room can be "suitable" here and still
-be double-booked (see `conflict.ts`) or outside its own open hours (see
-`availability.ts`, since rooms can have `AvailabilityRule`s too). All three
-checks are combined in `SchedulingService.checkAll` and in the solver.
-
-`checkRoomSuitability` reports **all** applicable reasons at once (both a
-capacity shortfall and missing features, if both apply), not just the
-first problem found.
-
----
-
-## `teacher-qualification.ts` — who may teach what
-
-```ts
-interface QualificationCheckResult {
-  qualified: boolean;
-  reason?: string;
-}
-
-function checkTeacherQualified(
-  teacherId: Id,
-  courseId: string | undefined,
-  qualifications: TeacherQualification[],
-): QualificationCheckResult;
-
-function checkAllTeachersQualified(
-  teacherIds: Id[],
-  courseId: string | undefined,
-  qualifications: TeacherQualification[],
-): QualificationCheckResult[];
-```
-
-Pure and time-blind: it answers only the **staffing** question, independent of
-when. A teacher can be fully qualified and still be double-booked (`conflict.ts`) or
-off shift (`availability.ts`).
-
-`checkTeacherQualified` is `{ qualified: true }` when `courseId` is `undefined`
-(nothing to check against), when the teacher has no record in `qualifications`, or when
-the course is in their `qualifiedCourseIds`. Otherwise it returns
-`{ qualified: false, reason }` naming the teacher and the course.
-
-`checkAllTeachersQualified` is what a **multi-teacher** session needs: **every**
-co-teacher must be qualified, not just one. It returns one failure per unqualified
-teacher, so an empty array means everyone is fine.
-
-Qualification is enforced by the **solver** (an unqualified session is reported as
-unplaceable with the reason) and therefore by `planAutoSchedule`. It is **not**
-part of `SchedulingService.checkAll`, which covers conflicts, availability and room
-suitability only.
-
----
-
-## `solver/` — the auto-scheduling solver
-
-This is the NP-hard part: given a set of classes that need a room and time,
-and a set of constraints (capacity, features, teacher/room/group
-availability, no double-booking), produce a conflict-free assignment. Class
-timetabling is a well-known NP-complete problem (it reduces to graph
-coloring), so this module does not attempt to guarantee a global optimum —
-it uses a backtracking search with a strong ordering heuristic, bounded so
-it always terminates with a usable partial result rather than hanging.
-
-### Design choice: zero runtime dependencies
-
-The solver is implemented in pure TypeScript with no external solver
-library (no OR-Tools/CP-SAT binding). This matches the project's
-`package.json`, which declares no hard runtime dependencies. The module
-comments explicitly note this as swappable: a CP-SAT-backed adapter could
-be added later behind the same `SchedulingProblem -> SolveResult` function
-signature for institutions large enough to need it, without changing
-anything upstream.
-
-### `solver/types.ts`
-
-```ts
-interface UnscheduledSession {
-  id: Id;
-  sectionId: Id;
-  courseId?: Id; // only for qualification checks
-  teacherIds: Id[];
-  groupId: Id;
-  groupSize: number;
-  requiredRoomFeatures?: string[];
-  candidateDays: Weekday[];
-  durationMinutes: number;
-}
-
-interface SolverRoom {
-  id: Id;
-  capacity: number;
-  features: string[];
-}
-
-interface ResourceAvailabilityWindow {
-  resourceType: "teacher" | "room" | "group";
-  resourceId: Id;
-  day: Weekday;
-  startTime: string;
-  endTime: string;
-}
-
-interface SchedulingProblem {
-  sessions: UnscheduledSession[];
-  rooms: SolverRoom[];
-  availability: ResourceAvailabilityWindow[];
-  teacherQualifications?: TeacherQualification[]; // opt-in; see teacher-qualification.ts
-  candidateSlotsPerDay: string[]; // e.g. every 30 min from 08:00-18:00
-  days: Weekday[];
-}
-
-interface PlacedSession {
-  sessionId: Id;
-  roomId: Id;
-  days: Weekday[];
-  startTime: string;
-  endTime: string;
-}
-
-interface UnplaceableSession {
-  sessionId: Id;
-  reason: string;
-}
-
-type SolveStatus = "COMPLETE" | "PARTIAL" | "INFEASIBLE";
-
-interface SolveResult {
-  status: SolveStatus;
-  placements: PlacedSession[];
-  unplaced: UnplaceableSession[];
-  totalPenalty: number; // weighted soft-constraint penalty of the schedule found; 0 if none supplied
-}
-
-interface SolverOptions {
-  maxBacktrackSteps?: number; // default 200,000
-  softConstraints?: SoftConstraint[]; // preferences, see soft-constraints.ts
-}
-```
-
-**Critical semantic to understand: `UnscheduledSession.candidateDays` is not
-"pick any one of these days."** The solver treats it as a single atomic
-requirement — it finds **one room and one start/end time that work across
-every day in `candidateDays` simultaneously** (e.g. "Room 4, 10:00–11:00, on
-Mon/Wed/Fri"), matching how institutions actually schedule recurring
-classes (the same room and time slot for every meeting of the week, not a
-different room each day). `PlacedSession.days` reflects this — it's the
-full set of days the single placement applies to, not one day per
-`UnscheduledSession`.
-
-> **Note on this design:** the solver went through a real redesign
-> mid-development. Its first version placed a session on only one day even
-> when `candidateDays` (then modeled on the raw `RecurrenceRule`) listed
-> several — silently under-scheduling any class meeting more than once a
-> week. This was caught while wiring `solver-adapter.ts` and fixed by
-> changing `PlacedSession.day: Weekday` to `PlacedSession.days: Weekday[]`
-> and rewriting candidate generation to validate a candidate room/time
-> against _all_ required days before accepting it. A regression test
-> (`scheduling-solver.test.ts` / the "does not create a candidate if the
-> room/time fails on even one of the candidate days" case) exists
-> specifically to guard against this recurring.
-
-The `SolverRoom` availability model is a **flattened, single representative
-week** — the solver reasons about "does this fire on Monday at 10am in
-general," not about specific calendar dates. Recurrence across actual
-calendar weeks is handled separately, afterward, by `generator.ts`. See
-`solver-adapter.ts` below for how real `AvailabilityRule`s (which are
-date-anchored and can have `interval > 1`) get flattened into this shape,
-and the one real limitation that flattening has.
-
-### `solver/backtracking.ts` — the algorithm
-
-```ts
-function solveSchedule(
-  problem: SchedulingProblem,
-  options?: SolverOptions,
-): SolveResult;
-```
-
-**Approach: most-constrained-variable backtracking.**
-
-0. **Qualification first.** Before any searching, every session's teachers are
-   checked with `checkAllTeachersQualified`. A session with an unqualified teacher
-   can never be placed whatever the room or time, so it is pulled out up front and
-   reported in `unplaced` with the specific reason ("Teacher t1 is not listed as
-   qualified for course c1."), rather than the generic "no slot found". It never
-   blocks the other sessions.
-1. **Sort sessions by how few valid candidates they have, hardest first.**
-   For each session, candidates are precomputed once: every `(room,
-startTime)` pair where the room has sufficient capacity and required
-   features, and where every teacher, the group, and the room are available
-   (per `ResourceAvailabilityWindow`) across _all_ of the session's
-   `candidateDays` at that time. Sessions with fewer valid candidates are
-   scheduled first — this is the single biggest lever against combinatorial
-   blowup: a session with only one qualifying room and one available time
-   slot must never be left until last, after everything else has already
-   claimed it.
-2. **Try each candidate** for the current session, best-scoring first when soft
-   constraints are supplied (see `soft-constraints.ts` below), in generated order
-   otherwise; skip any that conflicts with a placement already made this search — same room, same
-   day, overlapping time; or same group; or a shared teacher, again on a
-   shared day with overlapping time.
-3. **Recurse.** If every remaining session places successfully, done. If a
-   branch dead-ends, backtrack and try the next candidate.
-4. **Bounded by `maxBacktrackSteps`** (default 200,000) — rather than
-   hanging on a pathological input, the search gives up and returns
-   whatever was validly placed so far as `PARTIAL`.
-5. If a session has **zero** candidates at all (no room/day/time
-   combination satisfies capacity, features, and availability), or if every
-   candidate it does have leads to a dead end further down the search, it's
-   recorded in `unplaced` with a reason, and the search continues with the
-   remaining sessions — **one impossible session never blocks every other
-   session from getting a result.**
-
-Overall status:
-
-- `COMPLETE` — every session placed
-- `PARTIAL` — some placed, some not
-- `INFEASIBLE` — nothing could be placed at all
-
-### `solver/soft-constraints.ts` — preferences
-
-Hard constraints (capacity, features, availability, qualification, no double-booking)
-decide whether a placement is *allowed*. **Soft constraints** decide which of the allowed
-placements is *better*, and **never make a solve fail**.
-
-```ts
-interface SoftConstraint {
-  name: string;
-  weight: number;                          // penalties are multiplied by this
-  penalty(ctx: CandidateContext): number;  // >= 0; 0 = fully satisfied
-}
-
-interface CandidateContext {
-  session: UnscheduledSession;
-  roomId: Id;
-  days: Weekday[];
-  startTime: string;
-  endTime: string;
-  placedSoFar: ReadonlyMap<string, PlacedSession>;   // only this branch of the search
-  sessionsById: ReadonlyMap<string, UnscheduledSession>;
-}
-
-function scoreCandidate(constraints: SoftConstraint[], ctx: CandidateContext): number;
-```
-
-Three constraint builders are provided:
-
-| Builder | Penalty |
-| --- | --- |
-| `teacherTimePreference(teacherId, earliest, latest, weight = 1)` | for a session that teacher teaches, the **minutes** by which the start falls outside `[earliest, latest]` (10 minutes early costs less than 3 hours early); 0 inside the window or for other teachers' sessions |
-| `preferredRoomForCourse(courseId, preferredRoomIds, weight = 1)` | for a session of that course, a flat `1` if the room is not in the list, else 0; 0 for other courses and for sessions with no `courseId` |
-| `spaceOutSameDaySessions(weight = 1, minGapMinutes = 30)` | for each already-placed session of the **same group** on a shared day, the shortfall in minutes below `minGapMinutes` between the two; an actual overlap is a hard conflict and is not penalized here |
-
-`spaceOutSameDaySessions` can only choose a *start time*. A session's days are fixed by its
-own rule, so it cannot move a class to another day.
-
-```ts
-const { result } = await service.planAutoSchedule(templateIds, grid, undefined, {
-  softConstraints: [
-    teacherTimePreference('t1', '10:00', '15:00', 2),
-    preferredRoomForCourse('physics', ['lab-a', 'lab-b']),
-    spaceOutSameDaySessions(),
-  ],
-});
-result.totalPenalty;   // how well the schedule it found satisfied them
-```
-
-**What this does and does not guarantee.** The solver commits to the *first* feasible
-assignment it finds; it does not compare complete schedules. Soft constraints work by
-**ordering**: each session's candidates are scored and sorted so the search *tries
-lower-penalty candidates first*, which tends to land on a good schedule but is a greedy
-heuristic, not an optimum. `totalPenalty` reports the score of the one schedule found, so you
-can see how it turned out or compare runs with different constraint sets. With no soft
-constraints supplied, behaviour is exactly the earlier first-feasible search and
-`totalPenalty` is `0`.
-
-### `solver-adapter.ts` — bridging repository data and the solver
-
-```ts
-function flattenAvailabilityForSolver(
-  rules: AvailabilityRule[],
-  resourceType: "teacher" | "room" | "group",
-  resourceId: Id,
-): { windows: ResourceAvailabilityWindow[]; skipped: AvailabilityRule[] };
-
-function roomToSolverRoom(room: Room): SolverRoom;
-
-const ALL_WEEKDAYS: Weekday[];   // ['MO', 'TU', 'WE', 'TH', 'FR', 'SA', 'SU']
-
-interface SolvedTemplatePatch {
-  templateId: Id;
-  roomId: Id;
-  startTime: string;
-  endTime: string;
-  days: Weekday[];
-}
-function placementsToTemplatePatches(
-  placements: PlacedSession[],
-): SolvedTemplatePatch[];
-```
-
-**Known, documented limitation:** `flattenAvailabilityForSolver` only
-translates `AvailabilityRule`s with `interval === 1` (fires every week)
-faithfully into the solver's single-representative-week model. A
-fortnightly-or-sparser rule (`interval > 1`) has no single representative
-week that correctly represents it — treating it as "always available on its
-by-days" would under-constrain the solve, and treating it as "never
-available" would over-constrain it, so **neither is picked silently: such
-rules are skipped**, and the skipped resource is reported back via the
-`skipped` array (surfaced as `skippedAvailability` in
-`SchedulingService.planAutoSchedule`'s return value) so the caller can
-decide — e.g. warn the user, or fall back to manual placement for that
-specific resource.
-
-`SolvedTemplatePatch` maps directly onto `ClassSessionTemplate`'s existing
-`roomId`/`startTime`/`endTime` fields and `rule.byDay`, with no per-day
-splitting needed — a direct consequence of the multi-day-atomic solver
-design above.
-
----
-
-## `attendance.ts` — attendance validation
-
-```ts
-type AttendanceMark = 'present' | 'absent' | 'excused' | 'late';
-interface AttendanceEntry { sessionId: Id; userId: Id; status: AttendanceMark; recordedAt: Date; recordedBy?: Id }
-
-/** What scheduling needs from an attendance store (a structural subset of reporting's). */
-interface AttendanceRecorder {
-  record(entry: AttendanceEntry): Promise<void>;
-  listForSession(sessionId: Id): Promise<AttendanceEntry[]>;
-}
-
-interface AttendanceValidationError {
-  reason: 'occurrence-not-found' | 'occurrence-cancelled';
-  message: string;
-}
-
-function validateAttendanceTarget(occurrence: ClassOccurrence | null): AttendanceValidationError | undefined;
-```
-
-`validateAttendanceTarget` is pure: it takes the occurrence rather than fetching it. It refuses a
-missing occurrence and a **cancelled** one (a class that never happened must not be marked, or
-reporting's "classes held" counts would be wrong). A `scheduled`, `moved` or `completed` occurrence is
-valid. A host that really needs a note for a cancelled class should model it separately.
-
-With enforcement on, `recordAttendanceForOccurrence` stamps `recordedBy` with the actor, like
-`ReportingService.recordAttendance` does, so the two ways of recording attendance leave the same
-audit trail. Without enforcement it is not set.
-
-The shapes are defined here, structurally identical to the ones in the reporting module, so the
-two modules need not import each other and one repository implementation can serve both (see
-[REPORTING.md](./REPORTING.md)).
-
----
 
 ## `service.ts` — `SchedulingService`
+
+`SchedulingService` is a facade: each group of methods below lives in its own file under
+`src/domains/scheduling/service/`, and all of them share one set of permission and organization
+checks (`src/domains/scheduling/service/access.ts`). Hosts only ever construct and call
+`SchedulingService`; the parts are not exported.
 
 The class most host apps interact with directly. Constructed with a
 `SchedulingRepository`, and optionally an `AttendanceRecorder` and an `EventBus`:
@@ -1082,45 +606,31 @@ validates.
 
 ---
 
+
 ## Test inventory
 
-Fifteen files under `test/`, all for `bun:test`:
+Fifteen files under `test/` cover scheduling, all for `bun:test`. The rule and solver tests are
+listed on [SCHEDULING_RULES.md](./SCHEDULING_RULES.md) and [SCHEDULING_SOLVER.md](./SCHEDULING_SOLVER.md).
+These cover the service:
 
 | File | Covers |
 | --- | --- |
-| `scheduling.test.ts` | `conflict.ts`: overlap, back-to-back non-overlap, cancelled occurrences, cross-date isolation, `effectiveWindow` |
-| `scheduling-generator.test.ts` | `generator.ts`: weekly and fortnightly expansion, `validFrom`/`validUntil` clamping |
-| `scheduling-availability.test.ts` | `availability.ts`: no-rules default, in/out of hours, wrong weekday, date bounds, split shifts, fortnightly availability |
-| `scheduling-room-matching.test.ts` | `room-matching.ts`: capacity, features, combined violations, `findSuitableRooms` |
-| `scheduling-teacher-qualification.test.ts` | `checkTeacherQualified` and `checkAllTeachersQualified`: no `courseId`, no record on file, an empty list, multi-teacher |
-| `scheduling-solver.test.ts` | `solveSchedule`: basic placement, infeasible by capacity or feature, the multi-day-atomic regression, teacher contention, room double-booking avoidance, most-constrained-first ordering, `PARTIAL` results |
-| `scheduling-solver-qualifications.test.ts` | the solver with qualifications: unqualified sessions unplaced with a reason and never blocking others, all co-teachers required |
-| `scheduling-soft-constraints.test.ts` | the three constraint builders and `scoreCandidate`, each in isolation |
-| `scheduling-solver-soft-constraints.test.ts` | the solver with preferences: `totalPenalty`, preferred slots and rooms chosen, spacing, still feasible when preferences cannot all be met, hard constraints never overridden |
 | `scheduling-service-autoschedule.test.ts` | `planAutoSchedule` + `applyAutoSchedulePlan` end to end against `InMemorySchedulingRepository` |
 | `scheduling-service-qualifications.test.ts` | `planAutoSchedule` with qualifications on file |
 | `scheduling-service-events.test.ts` | the cancel and reschedule events, no event on materializing, a throwing listener, working with no bus |
 | `scheduling-permissions.test.ts` | enforcement end to end: who may cancel, move, plan, apply, record attendance, read the timetable and manage settings; the organization wall on rooms, teachers, groups and courses; a forged plan; the oversight on the events; saved preferences and qualifications reaching the planner; behaviour with enforcement off |
-| `scheduling-attendance.test.ts` | `validateAttendanceTarget` and the service's attendance methods |
 | `scheduling-calendar.test.ts` | the calendar sub-module; see [CALENDAR.md](./CALENDAR.md) |
 
 ### Verification
 
 Three checks apply to this module, as to the rest of the SDK: `npx tsc --noEmit`, a strict typecheck
-of the tests, and `bun test`. They are listed in "Verifying a change" in the root `README.md`. The
-solver has a regression test for the multi-day placement bug described above.
+of the tests, and `bun test`. They are listed in "Verifying a change" in the root `README.md`.
 
-## Known limitations / not yet implemented
+## Known limitations
 
-- **Soft constraints are a heuristic, not an optimizer.** The solver orders
-  candidates by penalty and commits to the first feasible assignment; it never
-  compares complete schedules, so the result is a *good* schedule, not the best
-  one. Only three constraint kinds exist (teacher time window, preferred room,
-  spacing), and "spread a course's sessions across the week" is not one of
-  them, because a session's days are fixed by its own rule.
-- **Qualification is not part of `checkAll`.** It is enforced by the solver
-  (and so by `planAutoSchedule`), but a manual placement checked with
-  `checkAll` is not tested for it.
+See also the limitations of the [rules](./SCHEDULING_RULES.md#known-limitations) and the
+[solver](./SCHEDULING_SOLVER.md#known-limitations).
+
 - **Organization checks need enforcement.** Without it the service cannot resolve a section's
   organization, so a plan may use any room. Turn enforcement on in a multi-organization deployment.
 - **`rescheduleOccurrence` does not run the conflict, availability or room checks itself.** An
@@ -1143,19 +653,3 @@ solver has a regression test for the multi-day placement bug described above.
 - **Sections are loose references without enforcement.** `sectionId` and `courseId` on a
   template are plain ids that scheduling does not resolve, so it cannot tell whether they exist.
   With enforcement a template whose section or course is missing is refused like a forbidden one.
-- **No CP-SAT / external solver adapter.** By design (matches the project's
-  zero-runtime-dependency stance), but noted as a natural extension point
-  for institutions large enough to need a stronger solver than backtracking
-  provides.
-- **`AvailabilityRule.interval > 1` is not usable by the solver.** See
-  `solver-adapter.ts` above — such rules are skipped and reported, not
-  silently mishandled, but they are also not enforced during auto-scheduling.
-- **`RecurrenceRule.raw` (arbitrary RRULE strings) is not evaluated
-  anywhere.** The field exists as a schema escape hatch only;
-  `recurrence.ts` throws if it encounters one.
-- **The solver assumes one room/time for a template's entire week.** A
-  template that genuinely needs a different room on different days (e.g.
-  lab on Monday, lecture hall on Wednesday) isn't representable as a single
-  `UnscheduledSession` — it would need to be split into separate
-  `UnscheduledSession`s with different `id`s upstream, which nothing
-  currently automates.

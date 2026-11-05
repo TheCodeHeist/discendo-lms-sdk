@@ -43,7 +43,9 @@ tests that cover it.
 | **content** | `discendo-sdk/content` | [CONTENT.md](./CONTENT.md) | The content tree, publishing and versioning, prerequisite gating |
 | **assessment** | `discendo-sdk/assessment` | [ASSESSMENT.md](./ASSESSMENT.md) | Submissions, attempt limits, quiz attempts with randomization, a plagiarism-check seam |
 | **grading** | `discendo-sdk/grading` | [GRADING.md](./GRADING.md) | Grade recording with full history, weighted final grades, late penalties, letter grades, student extensions and excusals, curves and GPA |
-| **scheduling** | `discendo-sdk/scheduling` | [SCHEDULING.md](./SCHEDULING.md) | Timetables: recurring templates, occurrences, conflicts, availability, room matching and an auto-scheduling solver. By far the largest module |
+| **scheduling** | `discendo-sdk/scheduling` | [SCHEDULING.md](./SCHEDULING.md) | Timetables: recurring templates, occurrences, conflicts, availability, room matching and an auto-scheduling solver. The service and domain model |
+| scheduling: rules | `discendo-sdk/scheduling` | [SCHEDULING_RULES.md](./SCHEDULING_RULES.md) | The pure rule functions: recurrence, occurrence generation, conflicts, availability, room matching, qualifications |
+| scheduling: solver | `discendo-sdk/scheduling` | [SCHEDULING_SOLVER.md](./SCHEDULING_SOLVER.md) | The auto-scheduling solver, soft constraints and the solver adapter |
 | scheduling: calendar | `discendo-sdk/scheduling/calendar` | [CALENDAR.md](./CALENDAR.md) | Availability windows (locked, open, closed) and iCal export of due dates |
 | **communication** | `discendo-sdk/communication` | [COMMUNICATION.md](./COMMUNICATION.md) | Announcements, thread replies, and the bridge from events to a notification sink |
 | **reporting** | `discendo-sdk/reporting` | [REPORTING.md](./REPORTING.md) | Attendance, completion percentage, CSV export |
@@ -122,7 +124,7 @@ src/
                 Imports nothing else in the SDK.
   domains/      modules that own a primary entity a host persists
     enrollment/   content/   assessment/   grading/   delegation/   guardians/
-    scheduling/   (rules/, solver/, calendar/, testing/ — see its README)
+    scheduling/   (service/, rules/, solver/, calendar/, testing/ — see its README)
   services/     cross-cutting modules that consume what domains produce
     communication/   reporting/   admin/
   interop/      pluggable protocol seams only (LTI, SSO, SCORM/xAPI)
@@ -150,8 +152,7 @@ seam with no implementation? `interop/`.
   use explicit `.js` extensions even though the source is `.ts`.
 - **Build:** `tsc -p tsconfig.json` emits to `dist/`, matching the `package.json`
   `exports` map (one entry per module subpath).
-- **Dependencies:** none at runtime. `zod` is declared as a peer dependency but nothing
-  imports it yet.
+- **Dependencies:** none at runtime, and no peer dependencies.
 - **Checks:** `npx tsc --noEmit` typechecks the source, but not the tests (and `bun test`
   does not typecheck either), so the tests are typechecked separately. See "Verifying a
   change" in the [root README](../README.md).
