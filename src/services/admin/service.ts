@@ -22,9 +22,44 @@ export interface AuditEntry {
   diff?: Record<string, { before: unknown; after: unknown }>;
 }
 
+/**
+ * What `AdminService.searchAudit` asks for. Every field narrows the search; an absent one does not.
+ * `orgId: null` means entries that belong to no organization (an absent `orgId` means any
+ * organization; with enforcement the service always sets it).
+ */
+export interface AuditQuery {
+  orgId?: string | null;
+  actorId?: string;
+  targetId?: string;
+  action?: string;
+  /** `'allowed'`: entries with no `outcome` (the action happened). `'denied'`: recorded refusals. */
+  outcome?: 'allowed' | 'denied';
+  /** Inclusive. */
+  from?: Date;
+  /** Inclusive. */
+  to?: Date;
+  /** How many entries per page, from 1 to 500. Default 50. */
+  limit?: number;
+  /** The `nextCursor` of the previous page. Opaque: pass it back as you got it. */
+  cursor?: string;
+}
+
+/** One page of a search: newest first. `nextCursor` is there when there may be more. */
+export interface AuditPage {
+  entries: AuditEntry[];
+  nextCursor?: string;
+}
+
 export interface AuditRepository {
   append(entry: Omit<AuditEntry, 'id'>): Promise<AuditEntry>;
   listForTarget(targetId: string): Promise<AuditEntry[]>;
+  /**
+   * OPTIONAL: the entries matching every given field of `query`, newest first (by `timestamp`,
+   * then by `id`, so the order is stable), `query.limit` at a time, resuming after
+   * `query.cursor`. Needed by `AdminService.searchAudit`. Keyset pagination (the last entry's
+   * timestamp and id, encoded) keeps pages stable while new entries are written.
+   */
+  query?(query: AuditQuery & { limit: number }): Promise<AuditPage>;
 }
 
 /**
@@ -123,6 +158,34 @@ export class AdminService {
     const orgId = auth.ctx.actor.orgId;
     const entries = await this.audit.listForTarget(targetId);
     return entries.filter((e) => e.targetId === targetId && sameOrg(e.orgId, orgId));
+  }
+
+  /**
+   * Searches the audit log by who (`actorId`), what (`targetId`, `action`), outcome and when
+   * (`from`, `to`), newest first, a page at a time (`limit`, default 50, at most 500; pass the
+   * returned `nextCursor` back as `cursor` for the next page). Needs `AuditRepository.query`.
+   *
+   * With enforcement (`actor` required) this needs `admin.viewAuditLog`, which an organization's
+   * admins hold (not department admins), and it **only ever searches the admin's own
+   * organization**: any `orgId` in the query is replaced by theirs.
+   */
+  async searchAudit(query: AuditQuery = {}, actor?: ActorContext): Promise<AuditPage> {
+    const run = this.audit.query?.bind(this.audit);
+    const enforcement = this.options.enforcement;
+    let scoped: AuditQuery = { ...query };
+    if (enforcement) {
+      const auth = await authorizeWithinOwnOrg(enforcement.policy, enforcement.repos, 'admin.viewAuditLog', actor);
+      scoped = { ...query, orgId: auth.ctx.actor.orgId ?? null };
+    }
+    if (!run) throw new Error('searchAudit needs AuditRepository.query');
+    const limit = query.limit ?? 50;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500) throw new Error('limit must be a whole number from 1 to 500');
+    if (query.from && query.to && query.from.getTime() > query.to.getTime()) throw new Error('from must not be after to');
+    const page = await run({ ...scoped, limit });
+    if (!enforcement) return page;
+    // Re-check what came back: the repository is trusted for speed, not for the organization wall.
+    const orgId = scoped.orgId ?? undefined;
+    return { ...page, entries: page.entries.filter((e) => sameOrg(e.orgId, orgId)) };
   }
 
   /**

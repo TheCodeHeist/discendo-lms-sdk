@@ -108,7 +108,7 @@ single process.
 | scheduling | `InMemorySchedulingRepository` (both `SchedulingRepository` and `SchedulingSettingsRepository`; `seedTemplate`, `seedRoom`, `seedGroup`, ...) |
 | communication | `InMemoryAnnouncementRepository`, `InMemoryThreadRepository` (with `listBySection`), `InMemoryReminderLog`, `RecordingNotificationSink` |
 | reporting | `InMemoryAttendanceRepository` (with `listForSessions`), `InMemorySessionLocator` |
-| admin | `InMemoryAuditRepository` |
+| admin | `InMemoryAuditRepository` (with `query`, keyset-paginated) |
 
 A few choices worth knowing, all of them within what the interfaces allow:
 

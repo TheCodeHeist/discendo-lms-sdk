@@ -82,6 +82,13 @@ export interface Identity {
   roles: Role[];
   /** The organization this person belongs to. Unset in single-tenant use. */
   orgId?: Id;
+  /**
+   * The departments this person administers. In a section whose course belongs to one of them,
+   * inside this person's own organization, they act as an `admin` (see `authorizeInSection`);
+   * everywhere else, and for every organization-wide action, they are whatever their `roles` say.
+   * A full organization admin has `admin` in `roles` instead.
+   */
+  adminOfDepartments?: Id[];
 }
 
 /**
