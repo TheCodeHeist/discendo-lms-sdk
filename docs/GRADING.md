@@ -123,7 +123,7 @@ Records a shared grade for every member of a group submission. Creates a distinc
 4. Creates the entry (`gradedAt` is now), then marks the previous one superseded.
 4. Emits `grading.gradePosted`.
 
-### `recordSystemGrade(submissionId, userId, score, maxScore, source): Promise<GradeEntry>`
+### `recordSystemGrade(submissionId, userId, score, maxScore, source, previousEntryId?): Promise<GradeEntry>`
 
 Records a grade made by the system instead of a person, such as the automatic score of a quiz
 (see `autoGrade` in [ASSESSMENT.md](./ASSESSMENT.md)). **It takes no actor and checks no permission**, so
@@ -138,7 +138,11 @@ from being a back door:
   used), or it throws and stores nothing.
 
 The score is validated like any grade (`InvalidGradeError`, `allowExtraCredit`). It is always a new
-entry (no regrade), and `grading.gradePosted` is emitted with the source as `graderId`.
+entry, and `grading.gradePosted` is emitted with the source as `graderId`. With `previousEntryId`
+it is a regrade, exactly as in `recordGrade`: the previous entry must be the current entry of the
+same submission, and it is superseded, never overwritten (with `supersedeIfCurrent`, a race gives
+`GradeConflictError`). A quiz uses this when a question is scored by hand after the quiz was already
+graded.
 
 ### `computeFinalGradeForUser(userId, sectionId, scheme, actor?): Promise<number>`
 
@@ -505,7 +509,7 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | `test/grading.test.ts` | the pure calculations: weighting, dropping the lowest, renormalizing, letter bands, late penalties |
 | `test/grading-curve-gpa.test.ts` | `applyCurve` (each curve kind, the never-lower rule, the cap, rounding, bad input), `curveEntries` (exact scores kept, whole-class curves), `computeGpa` and `toGpaPoints` (weighting, excluded and unknown letters, bonus, percent route, null result, rounding) |
 | `test/grading-accommodations.test.ts` | `effectiveDueAt`, `daysLate`; `AccommodationService` (grant, replace, revoke, excuse, un-excuse, reading, delegation, tenancy, probing, idempotence, events); final grades leaving out excused work |
-| `test/grading-system.test.ts` | `recordSystemGrade`: the `system:` prefix and allow-list, the numbers, no actor needed, the submission-owner check with enforcement, the event |
+| `test/grading-system.test.ts` | `recordSystemGrade`: the `system:` prefix and allow-list, the numbers, no actor needed, the submission-owner check with enforcement, the event; a regrade through `previousEntryId` is covered in `test/assessment-question-types.test.ts` |
 | `test/atomic-repositories.test.ts` | regrading races with and without `supersedeIfCurrent` (one winner, the loser kept as history and told who won, only the winner announced and counted), alongside the capacity and attempt-limit races |
 | `test/grading-validation.test.ts` | the number checks in `recordGrade` (each bad case, the boundaries, extra credit on and off, a refused regrade leaving the current grade alone, the permission check coming first) and `computeFinalGrade` skipping entries that cannot be a grade |
 | `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, completed students and their guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |

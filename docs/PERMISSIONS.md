@@ -116,6 +116,7 @@ policy.
 | `assessment.answerQuiz` | — | student | — | — |
 | `assessment.submitQuiz` | — | student | — | — |
 | `assessment.viewAttempts` | admin, instructor, ta | student | — | — |
+| `assessment.gradeQuiz` | admin, instructor, ta | — | — | — |
 | `assessment.recordOffline` | admin, instructor | — | — | yes |
 | `assessment.manageRubric` | admin, instructor | — | — | — |
 | `assessment.assignPeerReviews` | admin, instructor | — | — | — |

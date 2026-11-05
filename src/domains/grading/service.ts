@@ -159,39 +159,7 @@ export class GradingService {
     }
 
     this.validateNumbers(score, maxScore);
-
-    if (previousEntryId !== undefined) {
-      const previous = await this.grades.findById(previousEntryId);
-      if (!previous) throw new Error(`Previous grade entry ${previousEntryId} not found`);
-      if (previous.submissionId !== submissionId) {
-        throw new Error('Previous grade entry belongs to a different submission');
-      }
-      if (previous.supersededBy !== undefined) {
-        throw new Error('Previous grade entry has already been superseded');
-      }
-    }
-
-    const entry = await this.grades.create({
-      submissionId,
-      userId,
-      score,
-      maxScore,
-      graderId,
-      gradedAt: new Date(),
-    });
-    if (previousEntryId) {
-      if (this.grades.supersedeIfCurrent) {
-        // An atomic compare-and-set: only one regrade of an entry can win.
-        if (!(await this.grades.supersedeIfCurrent(previousEntryId, entry.id))) {
-          const winnerId = (await this.grades.findById(previousEntryId))?.supersededBy;
-          // Keep the loser's entry as history, behind the winner, so exactly one stays current.
-          if (winnerId !== undefined) await this.grades.markSuperseded(entry.id, winnerId);
-          throw new GradeConflictError(entry.id, previousEntryId, winnerId);
-        }
-      } else {
-        await this.grades.markSuperseded(previousEntryId, entry.id);
-      }
-    }
+    const entry = await this.writeEntry(submissionId, userId, score, maxScore, graderId, previousEntryId);
 
     void this.events?.emit({
       type: 'grading.gradePosted',
@@ -256,6 +224,7 @@ export class GradingService {
     score: number,
     maxScore: number,
     source: string,
+    previousEntryId?: string,
   ): Promise<GradeEntry> {
     if (!source.startsWith('system:') || !(this.options.systemGraders ?? []).includes(source)) {
       throw new SystemGraderNotAllowedError(source);
@@ -273,15 +242,7 @@ export class GradingService {
       }
     }
     this.validateNumbers(score, maxScore);
-
-    const entry = await this.grades.create({
-      submissionId,
-      userId,
-      score,
-      maxScore,
-      graderId: source,
-      gradedAt: new Date(),
-    });
+    const entry = await this.writeEntry(submissionId, userId, score, maxScore, source, previousEntryId);
     void this.events?.emit({
       type: 'grading.gradePosted',
       gradeEntryId: entry.id,
@@ -356,6 +317,54 @@ export class GradingService {
    * is compared against the caller's arguments, so an unauthorized caller
    * learns nothing (not even who submitted what) from a mismatch.
    */
+  /**
+   * Stores a new entry and, with `previousEntryId`, supersedes that entry, which must be the current
+   * entry of the same submission. Nothing is ever overwritten. Two regrades of one entry at once:
+   * with `supersedeIfCurrent` only one wins and the other gets a `GradeConflictError`.
+   */
+  private async writeEntry(
+    submissionId: string,
+    userId: string,
+    score: number,
+    maxScore: number,
+    graderId: string,
+    previousEntryId: string | undefined,
+  ): Promise<GradeEntry> {
+    if (previousEntryId !== undefined) {
+      const previous = await this.grades.findById(previousEntryId);
+      if (!previous) throw new Error(`Previous grade entry ${previousEntryId} not found`);
+      if (previous.submissionId !== submissionId) {
+        throw new Error('Previous grade entry belongs to a different submission');
+      }
+      if (previous.supersededBy !== undefined) {
+        throw new Error('Previous grade entry has already been superseded');
+      }
+    }
+
+    const entry = await this.grades.create({
+      submissionId,
+      userId,
+      score,
+      maxScore,
+      graderId,
+      gradedAt: new Date(),
+    });
+    if (previousEntryId) {
+      if (this.grades.supersedeIfCurrent) {
+        // An atomic compare-and-set: only one regrade of an entry can win.
+        if (!(await this.grades.supersedeIfCurrent(previousEntryId, entry.id))) {
+          const winnerId = (await this.grades.findById(previousEntryId))?.supersededBy;
+          // Keep the loser's entry as history, behind the winner, so exactly one stays current.
+          if (winnerId !== undefined) await this.grades.markSuperseded(entry.id, winnerId);
+          throw new GradeConflictError(entry.id, previousEntryId, winnerId);
+        }
+      } else {
+        await this.grades.markSuperseded(previousEntryId, entry.id);
+      }
+    }
+    return entry;
+  }
+
   private validateNumbers(score: number, maxScore: number): void {
     if (typeof maxScore !== 'number' || !Number.isFinite(maxScore) || maxScore <= 0) {
       throw new InvalidGradeError('maxScore must be a finite number above zero');

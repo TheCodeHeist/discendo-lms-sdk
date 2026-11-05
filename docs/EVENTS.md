@@ -125,7 +125,8 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version`, `orgId?` |
 | `content.unpublished` | `ContentService.unpublish` | content is unpublished (each call bumps `version` and sets `published: false`) | `contentId`, `sectionId`, `version`, `orgId?` |
 | `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber`, `orgId?` |
-| `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late`, `orgId?` |
+| `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late`, `pendingReview?`, `orgId?` |
+| `assessment.quizQuestionGraded` | `AssessmentService.gradeQuizQuestion` | staff scored one question of a submitted attempt by hand | `attemptId`, `quizId`, `questionId`, `userId`, `points`, `score`, `maxScore`, `pendingReview`, `graderId?`, `orgId?` |
 | `assessment.plagiarismCheckFailed` | `AssessmentService.submit` | background plagiarism hook threw an error | `submissionId`, `contentId`, `userId`, `error`, `orgId?` |
 | `scheduling.occurrenceCancelled` | `SchedulingService.cancelOccurrence` | one occurrence is cancelled | `occurrenceId`, `templateId`, `note?`, `orgId?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `previousStatus` |
 | `scheduling.occurrenceRescheduled` | `SchedulingService.rescheduleOccurrence` | one occurrence is moved | `occurrenceId`, `templateId`, `date`, `roomId?`, `startTime?`, `endTime?`, `orgId?`, and with enforcement on: `sectionId`, `actorId`, `actorRole?`, `from` |
@@ -197,7 +198,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Twenty-five event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
+- **Twenty-six event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
 - **Tenant `orgId` is optional.** It is present whenever known from context, but omitted on calls made without enforcement or organization metadata.
 - **No ordering between handlers and no priorities.** Handlers are started in
   registration order and run concurrently.
@@ -213,6 +214,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 | --- | --- |
 | `test/core-events.test.ts` | the bus: delivery, ordering (specific before wildcard), failure isolation, `onHandlerError`, unsubscribe, wildcard, `once` |
 | `test/assessment-quiz.test.ts` | `assessment.quizSubmitted`: payload, once per attempt, none for a repeat, late flag, not alongside `submissionReceived` |
+| `test/assessment-question-types.test.ts` | `assessment.quizSubmitted` with `pendingReview`, and `assessment.quizQuestionGraded` |
 | `test/grading-accommodations.test.ts` | `grading.extensionGranted` (with `replacedExtensionId`) and `grading.excused`: payloads, the actor named, none for a repeat or a refusal |
 | `test/enrollment-events.test.ts` | `enrollment.enrolled` (active and waitlisted), `enrollment.dropped`, working with no bus |
 | `test/enrollment-waitlist.test.ts` | `enrollment.promoted`: manual and automatic, its payload and actor |

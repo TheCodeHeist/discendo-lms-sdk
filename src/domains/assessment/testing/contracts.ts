@@ -165,6 +165,43 @@ export function quizRepositoryContract(
       },
     },
     {
+      name: 'saveAnswer stores every kind of answer as given: a list, a boolean, text, a number',
+      run: async () => {
+        const repo = await make(seed);
+        const a = await repo.createAttempt(attempt());
+        await repo.saveAnswer(a.id, 'mc', [0, 2]);
+        await repo.saveAnswer(a.id, 'tf', false);
+        await repo.saveAnswer(a.id, 'sa', 'Paris');
+        await repo.saveAnswer(a.id, 'num', 9.81);
+        checkEqual((await repo.findAttempt(a.id))?.answers, { mc: [0, 2], tf: false, sa: 'Paris', num: 9.81 }, 'answers round-trip');
+      },
+    },
+    {
+      name: 'updateAttempt merges a rescore (score, maxScore, pendingReview, manualScores) and keeps the rest',
+      run: async () => {
+        const repo = await make(seed);
+        const a = await repo.createAttempt(attempt());
+        await repo.closeAttempt(a.id, { ...close, pendingReview: true });
+        checkEqual((await repo.findAttempt(a.id))?.pendingReview, true, 'closeAttempt stores pendingReview');
+        const updated = await repo.updateAttempt(a.id, { score: 2, maxScore: 2, pendingReview: false, manualScores: { q1: 1 } });
+        checkEqual([updated.score, updated.pendingReview, updated.manualScores], [2, false, { q1: 1 }], 'rescore stored');
+        checkEqual(updated.submittedAt, close.submittedAt, 'submittedAt kept');
+      },
+    },
+    {
+      name: 'saveManualScore (if implemented) only scores a submitted attempt, and keeps the other hand scores',
+      run: async () => {
+        const repo = await make(seed);
+        if (!repo.saveManualScore) return;
+        const a = await repo.createAttempt(attempt());
+        checkEqual(await repo.saveManualScore(a.id, 'q1', 1), null, 'refused while open');
+        await repo.closeAttempt(a.id, close);
+        await Promise.all([repo.saveManualScore(a.id, 'q1', 1), repo.saveManualScore(a.id, 'q2', 0.5)]);
+        checkEqual((await repo.findAttempt(a.id))?.manualScores, { q1: 1, q2: 0.5 }, 'both hand scores kept');
+        checkEqual(await repo.saveManualScore('nope', 'q1', 1), null, 'unknown attempt');
+      },
+    },
+    {
       name: 'updateAttempt records the submission and grade ids',
       run: async () => {
         const repo = await make(seed);

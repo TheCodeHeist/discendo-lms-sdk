@@ -82,6 +82,8 @@ export const DEFAULT_RULES = {
   'assessment.answerQuiz': { ownRoles: ['student'] },
   'assessment.submitQuiz': { ownRoles: ['student'] },
   'assessment.viewAttempts': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'] },
+  // Scoring a quiz question by hand (an essay, or overriding the automatic result): the same staff who record grades.
+  'assessment.gradeQuiz': { roles: ['admin', 'instructor', 'ta'] },
   // staff record work a student did offline (a "none" submission) so it can be graded
   'assessment.recordOffline': { roles: ['admin', 'instructor'], delegable: true },
   'assessment.manageRubric': { roles: ['admin', 'instructor'] },

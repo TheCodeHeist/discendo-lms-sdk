@@ -9,6 +9,7 @@ import type {
   PeerReview,
   PeerReviewAssignment,
   PeerReviewRepository,
+  QuizAnswer,
   QuizAttempt,
   QuizAttemptClose,
   QuizQuestion,
@@ -86,10 +87,16 @@ export class InMemoryQuizRepository implements QuizRepository {
     return this.attempts.last((a) => a.quizId === quizId && a.userId === userId && a.submittedAt === undefined);
   }
 
-  async saveAnswer(attemptId: string, questionId: string, choiceIndex: number): Promise<QuizAttempt | null> {
+  async saveAnswer(attemptId: string, questionId: string, answer: QuizAnswer): Promise<QuizAttempt | null> {
     const attempt = this.attempts.get(attemptId);
     if (!attempt || attempt.submittedAt !== undefined) return null;
-    return this.attempts.update(attemptId, { answers: { ...(attempt.answers ?? {}), [questionId]: choiceIndex } });
+    return this.attempts.update(attemptId, { answers: { ...(attempt.answers ?? {}), [questionId]: answer } });
+  }
+
+  async saveManualScore(attemptId: string, questionId: string, points: number): Promise<QuizAttempt | null> {
+    const attempt = this.attempts.get(attemptId);
+    if (!attempt || attempt.submittedAt === undefined) return null;
+    return this.attempts.update(attemptId, { manualScores: { ...(attempt.manualScores ?? {}), [questionId]: points } });
   }
 
   async closeAttempt(attemptId: string, close: QuizAttemptClose): Promise<QuizAttempt | null> {
@@ -98,7 +105,10 @@ export class InMemoryQuizRepository implements QuizRepository {
     return this.attempts.update(attemptId, close);
   }
 
-  async updateAttempt(attemptId: string, patch: Partial<Pick<QuizAttempt, 'submissionId' | 'gradeEntryId'>>): Promise<QuizAttempt> {
+  async updateAttempt(
+    attemptId: string,
+    patch: Parameters<QuizRepository['updateAttempt']>[1],
+  ): Promise<QuizAttempt> {
     return this.attempts.update(attemptId, patch);
   }
 }

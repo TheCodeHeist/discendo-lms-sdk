@@ -198,6 +198,29 @@ export interface QuizSubmittedEvent {
   score: number;
   maxScore: number;
   late: boolean;
+  /** Present (true) when a question waits to be scored by hand: `score` counts it as 0 for now and no grade is recorded yet. */
+  pendingReview?: boolean;
+  orgId?: string;
+}
+
+/**
+ * A staff member scored one question of a submitted quiz attempt by hand
+ * (`AssessmentService.gradeQuizQuestion`). `score` is the attempt's new total; `pendingReview`
+ * says whether other questions still wait.
+ */
+export interface QuizQuestionGradedEvent {
+  type: "assessment.quizQuestionGraded";
+  attemptId: string;
+  quizId: string;
+  questionId: string;
+  userId: string;
+  /** The points given for this question. */
+  points: number;
+  score: number;
+  maxScore: number;
+  pendingReview: boolean;
+  /** Who scored it (with enforcement on). */
+  graderId?: string;
   orgId?: string;
 }
 
@@ -334,6 +357,7 @@ export type LmsEvent =
   | EnrollmentRequestedEvent
   | EnrollmentRequestDecidedEvent
   | QuizSubmittedEvent
+  | QuizQuestionGradedEvent
   | SubmissionReceivedEvent
   | PlagiarismCheckFailedEvent
   | GradePostedEvent
