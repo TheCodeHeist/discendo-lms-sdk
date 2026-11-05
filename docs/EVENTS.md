@@ -125,6 +125,7 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `grading.excused` | `AccommodationService.excuse` | a student is excused from a piece of work (not for a repeat) | `excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy`, `orgId?` |
 | `grading.unexcused` | `AccommodationService.unexcuse` | an active excusal is revoked and the work counts again | `excusalId`, `userId`, `contentId`, `sectionId`, `revokedBy`, `orgId?` |
 | `content.published` | `ContentService.publish` | content is published (each call bumps `version`) | `contentId`, `sectionId`, `version`, `orgId?` |
+| `content.updated` | `ContentService.updateNode`, `restoreRevision` | a node was edited; its version went up | `contentId`, `sectionId`, `version`, `changedFields`, `updatedBy?`, `orgId?` |
 | `content.unpublished` | `ContentService.unpublish` | content is unpublished (each call bumps `version` and sets `published: false`) | `contentId`, `sectionId`, `version`, `orgId?` |
 | `assessment.submissionReceived` | `AssessmentService.submit` | a submission is stored | `submissionId`, `contentId`, `userId`, `attemptNumber`, `orgId?` |
 | `assessment.quizSubmitted` | `AssessmentService.submitAttempt` | a quiz attempt is scored and its submission stored (once per attempt; not also `submissionReceived`) | `attemptId`, `quizId`, `submissionId`, `userId`, `score`, `maxScore`, `late`, `pendingReview?`, `orgId?` |
@@ -138,7 +139,7 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `guardians.linkCreated` | `GuardianService.createLink` | an admin links a guardian to a ward with specific scopes | `linkId`, `guardianId`, `studentId`, `scopes`, `createdBy`, `orgId?` |
 | `guardians.scopesUpdated` | `GuardianService.updateScopes` | an admin modifies permissions scopes on an active link | `linkId`, `guardianId`, `studentId`, `scopes`, `previousScopes`, `updatedBy`, `orgId?` |
 | `guardians.linkRevoked` | `GuardianService.revokeLink` | an admin revokes a guardian link | `linkId`, `guardianId`, `studentId`, `revokedBy`, `orgId?` |
-| `communication.deliveryFailed` | `CommunicationService.postAnnouncement`, `bridgeEventBusToNotificationSink` | asynchronous delivery to a notification sink failed | `channel`, `recipientId`, `error`, `announcementId?`, `orgId?` |
+| `communication.deliveryFailed` | `CommunicationService.postAnnouncement`, `sendDueDateReminders`, `bridgeEventBusToNotificationSink` | delivery to a notification sink failed | `channel` (`announcement`, `reminder` or `bridge`), `error`, `sectionId?`, `title?`, `orgId?` |
 
 Details that are easy to get wrong:
 
@@ -200,7 +201,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Twenty-eight event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
+- **Twenty-nine event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
 - **Tenant `orgId` is optional.** It is present whenever known from context, but omitted on calls made without enforcement or organization metadata.
 - **No ordering between handlers and no priorities.** Handlers are started in
   registration order and run concurrently.
@@ -222,6 +223,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 | `test/enrollment-waitlist.test.ts` | `enrollment.promoted`: manual and automatic, its payload and actor |
 | `test/enrollment-requests.test.ts` | `enrollment.requested`, `enrollment.requestDecided`: each decision's payload, and no event for an idempotent repeat |
 | `test/grading-events.test.ts` | `grading.gradePosted` |
+| `test/content-history.test.ts` | `content.updated` |
 | `test/grading-release.test.ts` | `grading.gradesReleased`, `grading.gradesHidden`, and `released` on `grading.gradePosted` |
 | `test/content-events.test.ts` | `content.published` |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |

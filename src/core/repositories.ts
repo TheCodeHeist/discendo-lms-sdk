@@ -74,11 +74,34 @@ export interface EnrollmentRepository {
   promoteIfSeatFree?(enrollmentId: Id, capacity: number): Promise<Enrollment | null>;
 }
 
+/**
+ * A change to a content node. A field that is absent is left alone; a field that is present with the
+ * value `undefined` must be CLEARED (that is how `ContentService.updateNode` removes a date or a
+ * parent). Some ORMs treat `undefined` as "leave it alone": map it to `NULL` in your update.
+ */
+export type ContentNodeUpdate = { [K in keyof ContentNode]?: ContentNode[K] | undefined };
+
+/**
+ * `node` with `patch` applied as `ContentRepository.update` must: present fields replace, fields
+ * given as `undefined` are removed, absent fields are kept. Returns a new object. For repositories
+ * that hold whole objects (a document store, a cache, an in-memory fake); a SQL repository maps
+ * `undefined` to `NULL` instead.
+ */
+export function applyContentUpdate(node: ContentNode, patch: ContentNodeUpdate): ContentNode {
+  const next: Record<string, unknown> = { ...node };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined) delete next[key];
+    else next[key] = value;
+  }
+  return next as unknown as ContentNode;
+}
+
 export interface ContentRepository {
   findById(id: Id): Promise<ContentNode | null>;
   listBySection(sectionId: Id): Promise<ContentNode[]>;
   create(node: Omit<ContentNode, 'id' | 'version'>): Promise<ContentNode>;
-  update(id: Id, patch: Partial<ContentNode>): Promise<ContentNode>;
+  /** Merges `patch` into the node and returns it. A key given as `undefined` clears that field (see `ContentNodeUpdate`). */
+  update(id: Id, patch: ContentNodeUpdate): Promise<ContentNode>;
   reorder(sectionId: Id, orderedIds: Id[]): Promise<void>;
 }
 

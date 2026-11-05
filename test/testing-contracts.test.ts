@@ -24,6 +24,7 @@ import {
   InMemorySchedulingRepository,
   InMemorySubmissionRepository,
   InMemoryTermRepository,
+  InMemoryReminderLog,
   InMemoryThreadRepository,
   InMemoryTimeExtensionRepository,
   InMemoryUserRepository,
@@ -31,7 +32,10 @@ import {
   attendanceRepositoryContract,
   auditRepositoryContract,
   communicationRepositoryContracts,
+  contentRepositoryContracts,
   coreRepositoryContracts,
+  InMemoryContentPrerequisiteRepository,
+  InMemoryContentRevisionRepository,
   gradingRepositoryContracts,
   schedulingRepositoryContract,
   schedulingSettingsRepositoryContract,
@@ -55,6 +59,13 @@ const all: Array<[string, ContractCase[]]> = [
       guardianLinks: () => new InMemoryGuardianLinkRepository(),
       groups: () => new InMemoryGroupRepository(),
       coursePrerequisites: () => new InMemoryCoursePrerequisiteRepository(),
+    }),
+  ],
+  [
+    'content',
+    contentRepositoryContracts({
+      revisions: () => new InMemoryContentRevisionRepository(),
+      prerequisites: () => new InMemoryContentPrerequisiteRepository(),
     }),
   ],
   [
@@ -99,6 +110,7 @@ const all: Array<[string, ContractCase[]]> = [
       ...communicationRepositoryContracts({
         announcements: () => new InMemoryAnnouncementRepository(),
         threads: () => new InMemoryThreadRepository(),
+        reminders: () => new InMemoryReminderLog(),
       }),
       ...attendanceRepositoryContract(() => new InMemoryAttendanceRepository()),
       ...auditRepositoryContract(() => new InMemoryAuditRepository()),
@@ -114,8 +126,8 @@ for (const [name, cases] of all) {
 
 describe('the testing barrel', () => {
   it('exports a contract suite for every repository interface the SDK defines', () => {
-    const suites = Object.keys(testing).filter((k) => k.endsWith('RepositoryContract'));
-    // one per interface: 12 core + 5 assessment + 4 grading + 2 scheduling + 2 communication + attendance + audit
-    if (suites.length !== 27) throw new Error(`expected 27 contract suites, found ${suites.length}: ${suites.join(', ')}`);
+    const suites = Object.keys(testing).filter((k) => k.endsWith('RepositoryContract') || k === 'reminderLogContract');
+    // one per interface: 12 core + 2 content + 5 assessment + 4 grading + 2 scheduling + 2 communication + reminder log + attendance + audit
+    if (suites.length !== 30) throw new Error(`expected 30 contract suites, found ${suites.length}: ${suites.join(', ')}`);
   });
 });

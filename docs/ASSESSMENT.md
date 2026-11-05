@@ -582,9 +582,11 @@ student. See [EVENTS.md](./EVENTS.md).
   breakdown carry the key (`correctAnswer`, `acceptedAnswers`, ...); only `getAttemptQuestions` is safe
   to show a student.
 - **The time limit is yours to pass on every call**, and uses the server's clock from `startedAt`.
-- **No prerequisite gating and no due dates** here. Use `ContentService.isUnlocked`
-  ([CONTENT.md](./CONTENT.md)) and the availability windows in
-  [CALENDAR.md](./CALENDAR.md).
+- **Dates are enforced, prerequisites are not.** With enforcement on, a student cannot submit, start a
+  quiz or save a quiz answer before the content's `availableFrom` or after its `availableUntil`
+  (`ContentNotAvailableError`); a started attempt can still be submitted after closing. A submission
+  after `dueAt` is accepted and not flagged. Prerequisites are not checked: use
+  `ContentService.checkAccess` ([CONTENT.md](./CONTENT.md)) before showing the work.
 - **The content kind is checked only for quiz attempts, and only with enforcement on.**
   `generateAttempt` refuses content that is not a `quiz`. Nothing stops `submit` being called on a
   page, and without enforcement the service cannot see the content at all.

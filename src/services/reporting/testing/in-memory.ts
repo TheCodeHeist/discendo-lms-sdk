@@ -17,6 +17,11 @@ export class InMemoryAttendanceRepository implements AttendanceRepository {
   async listForSession(sessionId: Id): Promise<AttendanceRecord[]> {
     return structuredClone(this.records.filter((r) => r.sessionId === sessionId));
   }
+
+  async listForSessions(sessionIds: Id[], userId?: Id): Promise<AttendanceRecord[]> {
+    const wanted = new Set(sessionIds);
+    return structuredClone(this.records.filter((r) => wanted.has(r.sessionId) && (userId === undefined || r.userId === userId)));
+  }
 }
 
 /** A `SessionLocator` over a fixed map of session to section, filled with `place()`. */

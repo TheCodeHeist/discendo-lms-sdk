@@ -28,7 +28,11 @@ import {
 } from '../core/testing/in-memory.js';
 import { EnrollmentRequestService, EnrollmentService, GroupService, PrerequisiteService } from '../domains/enrollment/index.js';
 import { ContentService, type PrerequisiteEdge } from '../domains/content/index.js';
-import { InMemoryCompletionTracker } from '../domains/content/testing/in-memory.js';
+import {
+  InMemoryCompletionTracker,
+  InMemoryContentPrerequisiteRepository,
+  InMemoryContentRevisionRepository,
+} from '../domains/content/testing/in-memory.js';
 import { AssessmentService, PeerReviewService, RubricService } from '../domains/assessment/index.js';
 import {
   InMemoryPeerReviewRepository,
@@ -51,6 +55,7 @@ import { InMemorySchedulingRepository } from '../domains/scheduling/testing/in-m
 import { CommunicationService } from '../services/communication/index.js';
 import {
   InMemoryAnnouncementRepository,
+  InMemoryReminderLog,
   InMemoryThreadRepository,
   RecordingNotificationSink,
 } from '../services/communication/testing/in-memory.js';
@@ -73,7 +78,7 @@ export interface InMemoryLmsOptions {
   policy?: PermissionPolicy & { delegableActions?: readonly string[] };
   /** The event bus every service emits to. Default: a new `EventBus`. */
   bus?: EventBus;
-  /** Content prerequisites for `ContentService.isUnlocked`. Default: none. */
+  /** Fixed content prerequisites for `ContentService.isUnlocked`, besides the ones staff add with `addPrerequisite`. Default: none. */
   contentPrerequisites?: PrerequisiteEdge[];
   /**
    * The grading-scheme category a piece of content's grades count towards. Default: its `kind`
@@ -109,6 +114,8 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
   const groups = new InMemoryGroupRepository();
   const coursePrerequisites = new InMemoryCoursePrerequisiteRepository();
 
+  const contentRevisions = new InMemoryContentRevisionRepository();
+  const contentPrerequisites = new InMemoryContentPrerequisiteRepository();
   const submissions = new InMemorySubmissionRepository();
   const quizzes = new InMemoryQuizRepository();
   const rubrics = new InMemoryRubricRepository();
@@ -133,6 +140,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
   const attendance = new InMemoryAttendanceRepository();
   const announcements = new InMemoryAnnouncementRepository();
   const threads = new InMemoryThreadRepository();
+  const reminderLog = new InMemoryReminderLog();
   const audit = new InMemoryAuditRepository();
 
   const repos = {
@@ -195,7 +203,11 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
     enrollmentRequests: new EnrollmentRequestService({ ...authRepos, enrollmentRequests }, enrollment, bus, { policy }),
     groups: new GroupService(repos, optionalPolicy),
     prerequisites: new PrerequisiteService(repos, optionalPolicy),
-    content: new ContentService(repos, completion, options.contentPrerequisites ?? [], bus, optionalPolicy),
+    content: new ContentService(repos, completion, options.contentPrerequisites ?? [], bus, {
+      ...optionalPolicy,
+      revisions: contentRevisions,
+      prerequisites: contentPrerequisites,
+    }),
     assessment: new AssessmentService(
       submissions,
       quizzes,
@@ -221,12 +233,19 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
       announcements,
       threads,
       notifications,
-      enforce ? { enforcement: { policy, repos: authRepos } } : {},
+      {
+        ...(enforce ? { enforcement: { policy, repos: { ...authRepos, content } } } : {}),
+        reminders: { content, enrollments, log: reminderLog },
+      },
       bus,
     ),
     reporting: new ReportingService(
       attendance,
-      { sessions: sessionLocator, ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}) },
+      {
+        sessions: sessionLocator,
+        roster: { enrollments, users },
+        ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}),
+      },
       bus,
     ),
     admin: new AdminService(audit, enforce ? { enforcement: { policy, repos: { users } } } : {}),
@@ -238,6 +257,8 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
     /** Every repository, by name. Seed users, courses, sections, rooms and the like through these. */
     repos: {
       ...repos,
+      contentRevisions,
+      contentPrerequisites,
       submissions,
       quizzes,
       rubrics,
@@ -251,6 +272,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
       attendance,
       announcements,
       threads,
+      reminderLog,
       audit,
     },
     services,

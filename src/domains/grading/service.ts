@@ -349,6 +349,51 @@ export class GradingService {
     return this.explainUnchecked(userId, sectionId, scheme, this.releasedOnly(staff, options));
   }
 
+  /**
+   * The section's gradebook as rows, ready for reporting's `toCsv`: one row per student (`userId`),
+   * a column per piece of content holding the current percentage (`EX` for excused work, empty
+   * when ungraded), then `final` and, with a `scale`, `letter`. Staff see every grade, held ones
+   * included. With enforcement on, staff of the section only (`grading.view`); the students are the
+   * section's active students. Without enforcement pass `userIds`. `columns` picks and orders the
+   * content columns and names them (default: every graded content id, in the order first met).
+   */
+  async exportGradebook(
+    sectionId: string,
+    scheme: GradingScheme,
+    actor?: ActorContext,
+    options: { userIds?: string[]; columns?: Array<{ contentId: string; label?: string }>; scale?: GradeScale } = {},
+  ): Promise<{ toRows(): Array<Record<string, string | number>> }> {
+    let userIds = options.userIds;
+    const e = this.enforcement;
+    if (e) {
+      const auth = await authorizeInSection(e.policy, e.repos, 'grading.view', actor, { sectionId });
+      if (!isStaff(auth.ctx)) throw new PermissionDeniedError('grading.view');
+      userIds ??= (await e.repos.enrollments.listBySection(sectionId, 'active')).filter((x) => x.role === 'student').map((x) => x.userId);
+    }
+    if (!userIds) throw new Error('exportGradebook needs userIds when enforcement is off');
+
+    const perStudent = [];
+    for (const userId of userIds) perStudent.push({ userId, ...(await this.explainUnchecked(userId, sectionId, scheme, false)) });
+
+    const columns: Array<{ contentId: string; label?: string }> =
+      options.columns ??
+      [...new Set(perStudent.flatMap((p) => p.grades.flatMap((g) => (g.contentId !== undefined ? [g.contentId] : []))))].map(
+        (contentId) => ({ contentId }),
+      );
+    const round = (n: number) => Math.round(n * 100) / 100;
+    const rows = perStudent.map(({ userId, grades, percent }) => {
+      const row: Record<string, string | number> = { userId };
+      for (const c of columns) {
+        const g = grades.find((x) => x.contentId === c.contentId);
+        row[c.label ?? c.contentId] = g === undefined ? '' : g.excused ? 'EX' : round(g.percent);
+      }
+      row.final = round(percent);
+      if (options.scale) row.letter = toLetterGrade(percent, options.scale);
+      return row;
+    });
+    return { toRows: () => rows };
+  }
+
   // ---------------------------------------------------------------------
   // Grade release
   // ---------------------------------------------------------------------

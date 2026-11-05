@@ -310,6 +310,22 @@ export function contentRepositoryContract(make: RepositoryFactory<ContentReposit
       },
     },
     {
+      name: 'stores the optional dates, and update clears a field it is given as undefined',
+      run: async () => {
+        const repo = await make();
+        const from = at('2026-09-01T00:00:00Z');
+        const created = await repo.create(node({ availableFrom: from, dueAt: at('2026-09-08T00:00:00Z') }));
+        check((await repo.findById(created.id))?.availableFrom instanceof Date, 'availableFrom comes back as a Date');
+        checkEqual((await repo.findById(created.id))?.availableFrom, from, 'availableFrom stored');
+        // ContentService clears a date by passing it as undefined. Some ORMs read undefined as
+        // "leave it alone": map it to NULL in your update.
+        await repo.update(created.id, { dueAt: undefined, version: 2 });
+        const after = await repo.findById(created.id);
+        checkEqual(after?.dueAt, undefined, 'dueAt cleared');
+        checkEqual(after?.availableFrom, from, 'availableFrom kept');
+      },
+    },
+    {
       name: "listBySection returns that section's nodes only",
       run: async () => {
         const repo = await make();

@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { applyContentUpdate } from '../src/core/index.js';
 import { ContentService } from '../src/domains/content/index.js';
 import type { PrerequisiteEdge } from '../src/domains/content/index.js';
 import { createRolePolicy, EventBus, PermissionDeniedError, ActorRequiredError } from '../src/core/index.js';
@@ -109,7 +110,7 @@ function buildWorld(opts: { policy?: PermissionPolicy; grants?: TaGrant[]; enfor
       },
       update: async (id, patch) => {
         calls.update++;
-        const updated = { ...nodes.get(id)!, ...patch };
+        const updated = applyContentUpdate(nodes.get(id)!, patch);
         nodes.set(id, updated);
         return updated;
       },

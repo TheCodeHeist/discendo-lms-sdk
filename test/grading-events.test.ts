@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { applyContentUpdate } from '../src/core/index.js';
 import { GradingService } from "../src/domains/grading/index.js";
 import type {
   GradeRepository,
@@ -118,16 +119,8 @@ describe("GradingService event emission", () => {
         findById: async () => null,
         listBySection: async () => [],
         create: async (x) => ({ ...x, id: "c", version: 1 }),
-        update: async (id, patch) => ({
-          id,
-          sectionId: "s",
-          kind: "page",
-          title: "",
-          orderIndex: 0,
-          published: false,
-          version: 1,
-          ...patch,
-        }),
+        update: async (id, patch) =>
+          applyContentUpdate({ id, sectionId: "s", kind: "page", title: "", orderIndex: 0, published: false, version: 1 }, patch),
         reorder: async () => {},
       },
       terms: { findById: async () => null },
