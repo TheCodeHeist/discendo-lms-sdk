@@ -25,7 +25,14 @@ your way around.
 scheduling/
   types.ts              Domain model: templates, occurrences, rooms, availability
   repositories.ts       SchedulingRepository: the interface YOUR database implements
-  service.ts            SchedulingService: the class most host apps call
+  service.ts            SchedulingService: the class most host apps call (a facade)
+  service/              Its implementation, one concern per file
+    access.ts             every permission and organization check
+    checks.ts             conflict / availability / room checks
+    occurrences.ts        materialize, cancel, reschedule, list, attendance
+    auto-schedule.ts      plan and apply an auto-schedule
+    settings.ts           availability, preferences, qualifications
+    validation.ts, context.ts   input validation; shared options and types
 
   rules/                Pure constraint checks (no I/O, no repository)
     recurrence.ts         "does this weekly rule fire on this date?"
@@ -58,12 +65,14 @@ tells you what you may depend on:
 2. **`solver/`** composes the rules into a search. It is also a pure
    function (`solveSchedule(problem)`) with no repository access, so it can
    be swapped for a different solver later without touching anything else.
-3. **`service.ts`** is the only place that talks to a repository. It loads
-   data, calls the rules and solver, and writes results back.
+3. **`service.ts` and `service/`** are the only place that talks to a repository. They load
+   data, call the rules and solver, and write results back. `service.ts` only delegates; each
+   concern lives in its own file under `service/`, and every permission check is in
+   `service/access.ts`.
 
 If you are adding a new constraint (say, "a teacher may teach at most 5
 hours a day"), it is a new file in `rules/`, plus a call site in either
-`service.ts` (as a check) or `solver/` (as something the search respects).
+`service/checks.ts` (as a check) or `solver/` (as something the search respects).
 
 ## Why is `calendar/` inside scheduling?
 
