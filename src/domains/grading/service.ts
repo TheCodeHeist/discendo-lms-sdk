@@ -2,10 +2,12 @@ import type { GradeEntry, GradingScheme, GradeScale } from './types.js';
 import type { EventBus } from '../../core/events.js';
 import type { ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { PermissionDeniedError, ActorRequiredError } from '../../core/permissions.js';
-import { authorizeInSection } from '../../core/authorization.js';
+import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
-import { computeFinalGrade, toLetterGrade } from './calculations.js';
+import { explainFinalGrade, toLetterGrade } from './calculations.js';
+import type { FinalGradeExplanation } from './calculations.js';
 import type { ExcusalRepository } from './accommodations.js';
+import type { GradeRelease, GradeReleaseRepository, GradeView } from './release.js';
 
 export interface GradeRepository {
   create(entry: Omit<GradeEntry, 'id'>): Promise<GradeEntry>;
@@ -80,6 +82,30 @@ export interface GradingServiceOptions {
    * An `AccommodationService`'s `excusals` repository fits.
    */
   excusals?: Pick<ExcusalRepository, 'listForUser'>;
+  /**
+   * Hold grades until staff release them. With it, a grade is hidden from the student (and their
+   * guardians) until the grades of its content are released for the section (`releaseGrades`).
+   * Staff always see every grade. Without it every grade is visible as soon as it is recorded. When
+   * set, `listForUserInSection` must return a `contentId` on each entry; an entry without one is
+   * never shown to a student.
+   */
+  releases?: GradeReleaseRepository;
+}
+
+/** What a grade view call may ask for. */
+export interface GradeViewOptions {
+  /**
+   * Without enforcement there is no viewer to tell staff from a student, so held grades are
+   * included unless you pass `releasedOnly: true` (do, when showing a student their grades). With
+   * enforcement it is decided for you: staff see everything, everyone else only what is released.
+   */
+  releasedOnly?: boolean;
+}
+
+/** `explainGradeForUser`: the final grade with its working, and the grades it was worked out from. */
+export interface GradeExplanation extends FinalGradeExplanation {
+  /** The current grades the viewer may see, excused ones included (marked). */
+  grades: GradeView[];
 }
 
 /** `recordSystemGrade` was called with a grader name the host has not allowed (or one that is not a `system:` name). */
@@ -170,6 +196,7 @@ export class GradingService {
       maxScore: entry.maxScore,
       graderId: entry.graderId,
       ...(authInfo?.contentId !== undefined ? { contentId: authInfo.contentId } : {}),
+      ...(await this.releasedField(authInfo?.sectionId, authInfo?.contentId)),
       ...(authInfo?.orgId !== undefined ? { orgId: authInfo.orgId } : {}),
     });
 
@@ -252,64 +279,231 @@ export class GradingService {
       maxScore: entry.maxScore,
       graderId: entry.graderId,
       ...(locatedInfo?.contentId !== undefined ? { contentId: locatedInfo.contentId } : {}),
+      ...(await this.releasedField(locatedInfo?.sectionId, locatedInfo?.contentId)),
       ...(orgId !== undefined ? { orgId } : {}),
     });
     return entry;
   }
 
-  /** With enforcement on, needs `grading.view` (students: their own grades only). */
+  /**
+   * The student's weighted final percentage in a section. With enforcement on, needs `grading.view`
+   * (students: their own grades only). With grades held (`releases`), a student or guardian gets the
+   * grade of the released work only; staff get the grade of everything recorded.
+   */
   async computeFinalGradeForUser(
     userId: string,
     sectionId: string,
     scheme: GradingScheme,
     actor?: ActorContext,
+    options: GradeViewOptions = {},
   ): Promise<number> {
-    await this.authorizeView(userId, sectionId, actor);
-    return this.computeFinalUnchecked(userId, sectionId, scheme);
+    const staff = await this.authorizeView(userId, sectionId, actor);
+    return (await this.explainUnchecked(userId, sectionId, scheme, this.releasedOnly(staff, options))).percent;
   }
 
-  /** With enforcement on, needs `grading.view` (students: their own grades only). */
+  /** The final grade as a label from `scale`; the same permission and visibility as `computeFinalGradeForUser`. */
   async computeLetterGradeForUser(
     userId: string,
     sectionId: string,
     scheme: GradingScheme,
     scale: GradeScale,
     actor?: ActorContext,
+    options: GradeViewOptions = {},
   ): Promise<string> {
-    await this.authorizeView(userId, sectionId, actor);
-    const percent = await this.computeFinalUnchecked(userId, sectionId, scheme);
+    const staff = await this.authorizeView(userId, sectionId, actor);
+    const { percent } = await this.explainUnchecked(userId, sectionId, scheme, this.releasedOnly(staff, options));
     return toLetterGrade(percent, scale);
+  }
+
+  /**
+   * The student's current grades in a section (superseded entries are history and left out), with
+   * category, content, percentage, and whether each is released and excused, oldest first. The same
+   * permission and visibility as `computeFinalGradeForUser`: a held grade is not listed for a student
+   * or guardian at all.
+   */
+  async listGradesForUser(
+    userId: string,
+    sectionId: string,
+    actor?: ActorContext,
+    options: GradeViewOptions = {},
+  ): Promise<GradeView[]> {
+    const staff = await this.authorizeView(userId, sectionId, actor);
+    return this.visibleGrades(userId, sectionId, this.releasedOnly(staff, options));
+  }
+
+  /**
+   * The final grade with its working shown: each category's average, weight and the entries it
+   * counted and dropped, the grades it came from, and the entries that could not be counted because
+   * their numbers are impossible (`skipped`) or their category is not in the scheme
+   * (`uncategorized`). Use it for a student's grade page, or to find bad rows in a gradebook. The same
+   * permission and visibility as `computeFinalGradeForUser`.
+   */
+  async explainGradeForUser(
+    userId: string,
+    sectionId: string,
+    scheme: GradingScheme,
+    actor?: ActorContext,
+    options: GradeViewOptions = {},
+  ): Promise<GradeExplanation> {
+    const staff = await this.authorizeView(userId, sectionId, actor);
+    return this.explainUnchecked(userId, sectionId, scheme, this.releasedOnly(staff, options));
+  }
+
+  // ---------------------------------------------------------------------
+  // Grade release
+  // ---------------------------------------------------------------------
+
+  /**
+   * Shows the held grades of one piece of content to the students of a section (and their
+   * guardians), now and for any grade recorded later. Needs the `releases` option. With enforcement
+   * on, needs `grading.release` in the section (admins and instructors; TAs when delegated).
+   * Releasing what is already released returns the existing release and emits nothing. Emits
+   * `grading.gradesReleased`.
+   */
+  async releaseGrades(sectionId: string, contentId: string, actor?: ActorContext): Promise<GradeRelease> {
+    const { releases, actorId, orgId } = await this.authorizeRelease(sectionId, actor);
+    const existing = await releases.findActive(sectionId, contentId);
+    if (existing) return existing;
+    const release = await releases.create({ sectionId, contentId, releasedAt: new Date(), releasedBy: actorId });
+    void this.events?.emit({
+      type: 'grading.gradesReleased',
+      sectionId,
+      contentId,
+      releaseId: release.id,
+      releasedBy: actorId,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+    return release;
+  }
+
+  /**
+   * Hides the grades of one piece of content from the students of a section again (the release is
+   * kept, marked hidden). Returns the hidden release, or null if they were not released. The same
+   * permission as `releaseGrades`. Emits `grading.gradesHidden`.
+   */
+  async hideGrades(sectionId: string, contentId: string, actor?: ActorContext): Promise<GradeRelease | null> {
+    const { releases, actorId, orgId } = await this.authorizeRelease(sectionId, actor);
+    const existing = await releases.findActive(sectionId, contentId);
+    if (!existing) return null;
+    const hidden = await releases.hide(existing.id, new Date(), actorId);
+    void this.events?.emit({
+      type: 'grading.gradesHidden',
+      sectionId,
+      contentId,
+      releaseId: hidden.id,
+      hiddenBy: actorId,
+      ...(orgId !== undefined ? { orgId } : {}),
+    });
+    return hidden;
+  }
+
+  /**
+   * The content whose grades are released in a section. With enforcement on, needs `content.view`
+   * in the section, which every member has: which work is released is not a secret, though the
+   * grades themselves are.
+   */
+  async listReleases(sectionId: string, actor?: ActorContext): Promise<GradeRelease[]> {
+    const e = this.enforcement;
+    if (e) await authorizeInSection(e.policy, e.repos, 'content.view', actor, { sectionId, afterCompletion: true });
+    return this.options.releases ? this.options.releases.listActive(sectionId) : [];
   }
 
   // ---------------------------------------------------------------------
   // Internals
   // ---------------------------------------------------------------------
 
-  private async computeFinalUnchecked(
-    userId: string,
-    sectionId: string,
-    scheme: GradingScheme,
-  ): Promise<number> {
+  /** Whether held grades must be left out for this viewer. */
+  private releasedOnly(staff: boolean | undefined, options: GradeViewOptions): boolean {
+    if (!this.options.releases) return false;
+    return staff === undefined ? options.releasedOnly === true : !staff;
+  }
+
+  /**
+   * The student's current grades, excused ones marked, held ones left out when `releasedOnly`.
+   * Without the `releases` option everything counts as released.
+   */
+  private async visibleGrades(userId: string, sectionId: string, releasedOnly: boolean): Promise<GradeView[]> {
     const entries = await this.grades.listForUserInSection(userId, sectionId);
     const excused = new Set(
       ((await this.options.excusals?.listForUser(userId, sectionId)) ?? [])
         .filter((x) => x.revokedAt === undefined)
         .map((x) => x.contentId),
     );
-    const byCategory = new Map<string, GradeEntry[]>();
+    const releases = this.options.releases;
+    const released = releases ? new Set((await releases.listActive(sectionId)).map((r) => r.contentId)) : undefined;
+
+    const views: GradeView[] = [];
     for (const e of entries) {
-      if (e.supersededBy) continue; // only count current entries
-      if (excused.size > 0) {
-        if (e.contentId === undefined) {
-          throw new Error('listForUserInSection must return a contentId on every entry when the student has excused work');
-        }
-        if (excused.has(e.contentId)) continue; // excused: left out, not counted as zero
+      if (e.supersededBy) continue; // only current entries count; superseded ones are history
+      if (excused.size > 0 && e.contentId === undefined) {
+        throw new Error('listForUserInSection must return a contentId on every entry when the student has excused work');
       }
-      const bucket = byCategory.get(e.category) ?? [];
-      bucket.push(e);
-      byCategory.set(e.category, bucket);
+      // Fail closed: with grades held, an entry whose content is unknown is never shown to a student.
+      const isReleased = released === undefined || (e.contentId !== undefined && released.has(e.contentId));
+      if (releasedOnly && !isReleased) continue;
+      views.push({
+        entryId: e.id,
+        submissionId: e.submissionId,
+        ...(e.contentId !== undefined ? { contentId: e.contentId } : {}),
+        category: e.category,
+        score: e.score,
+        maxScore: e.maxScore,
+        percent: e.maxScore > 0 ? (e.score / e.maxScore) * 100 : 0,
+        graderId: e.graderId,
+        gradedAt: e.gradedAt,
+        released: isReleased,
+        excused: e.contentId !== undefined && excused.has(e.contentId),
+      });
     }
-    return computeFinalGrade(byCategory, scheme);
+    return views;
+  }
+
+  private async explainUnchecked(
+    userId: string,
+    sectionId: string,
+    scheme: GradingScheme,
+    releasedOnly: boolean,
+  ): Promise<GradeExplanation> {
+    const grades = await this.visibleGrades(userId, sectionId, releasedOnly);
+    const byCategory = new Map<string, GradeEntry[]>();
+    for (const g of grades) {
+      if (g.excused) continue; // excused: left out, not counted as zero
+      const bucket = byCategory.get(g.category) ?? [];
+      bucket.push({
+        id: g.entryId,
+        submissionId: g.submissionId,
+        userId,
+        score: g.score,
+        maxScore: g.maxScore,
+        graderId: g.graderId,
+        gradedAt: g.gradedAt,
+      });
+      byCategory.set(g.category, bucket);
+    }
+    return { ...explainFinalGrade(byCategory, scheme), grades };
+  }
+
+  private async authorizeRelease(
+    sectionId: string,
+    actor: ActorContext | undefined,
+  ): Promise<{ releases: GradeReleaseRepository; actorId: string; orgId?: string }> {
+    const e = this.enforcement;
+    let orgId: string | undefined;
+    if (e) {
+      const auth = await authorizeInSection(e.policy, e.repos, 'grading.release', actor, { sectionId });
+      orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
+    }
+    const releases = this.options.releases;
+    if (!releases) throw new Error('Releasing grades needs a GradeReleaseRepository (options.releases)');
+    return { releases, actorId: actor?.actorId ?? 'system', ...(orgId !== undefined ? { orgId } : {}) };
+  }
+
+  /** In the `released` field of `grading.gradePosted`: absent unless grades are held. */
+  private async releasedField(sectionId: string | undefined, contentId: string | undefined): Promise<{ released?: boolean }> {
+    const releases = this.options.releases;
+    if (!releases) return {};
+    if (sectionId === undefined || contentId === undefined) return { released: false };
+    return { released: (await releases.findActive(sectionId, contentId)) !== null };
   }
 
   /**
@@ -407,17 +601,19 @@ export class GradingService {
     return { ...located, ...(orgId !== undefined ? { orgId } : {}) };
   }
 
+  /** Authorizes a view; returns whether the viewer is staff (undefined without enforcement). */
   private async authorizeView(
     userId: string,
     sectionId: string,
     actor: ActorContext | undefined,
-  ): Promise<void> {
+  ): Promise<boolean | undefined> {
     const enforcement = this.enforcement;
-    if (!enforcement) return;
-    await authorizeInSection(enforcement.policy, enforcement.repos, 'grading.view', actor, {
+    if (!enforcement) return undefined;
+    const auth = await authorizeInSection(enforcement.policy, enforcement.repos, 'grading.view', actor, {
       sectionId,
       ownerId: userId,
       afterCompletion: true, // a completed student keeps read-only access to their own grades
     });
+    return isStaff(auth.ctx);
   }
 }

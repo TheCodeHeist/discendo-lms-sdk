@@ -91,6 +91,8 @@ export const DEFAULT_RULES = {
   'assessment.submitPeerReview': { ownRoles: ['student'] },
   'grading.record': { roles: ['admin', 'instructor', 'ta'] },
   // Per-student exceptions. Delegable: an instructor may hand them to a TA, who then acts under their own name.
+  // Showing held grades to the students of a section, or hiding them again.
+  'grading.release': { roles: ['admin', 'instructor'], delegable: true },
   'grading.grantExtension': { roles: ['admin', 'instructor'], delegable: true },
   'grading.excuse': { roles: ['admin', 'instructor'], delegable: true },
   'grading.view': { roles: ['admin', 'instructor', 'ta'], ownRoles: ['student'], guardianScope: 'grades', afterCompletion: true },

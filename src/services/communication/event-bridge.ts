@@ -26,10 +26,12 @@ export interface EventBridgeOptions {
 
 /**
  * Subscribes to the shared EventBus and forwards the events that have a
- * `NotificationEvent` equivalent to a `NotificationSink`. Today that is
- * `grading.gradePosted` -> `gradePosted`. Other bus events (enrollment,
- * scheduling, ...) have no notification shape yet and are ignored; adding one
- * later means adding a `NotificationEvent` variant and a case here.
+ * `NotificationEvent` equivalent to a `NotificationSink`. Today those are
+ * `grading.gradePosted` -> `gradePosted` (except a grade that is held from the
+ * student, `released: false`), and `grading.gradesReleased` -> `gradesReleased`.
+ * Other bus events (enrollment, scheduling, ...) have no notification shape yet
+ * and are ignored; adding one later means adding a `NotificationEvent` variant
+ * and a case here.
  *
  * Returns an unsubscribe function that detaches the bridge from the bus.
  */
@@ -40,7 +42,30 @@ export function bridgeEventBusToNotificationSink(
 ): () => void {
   const { resolveContentId, onError } = options;
 
-  return bus.on("grading.gradePosted", async (event) => {
+  const deliver = async (
+    notification: Parameters<NotificationSink["dispatch"]>[0],
+    orgId: string | undefined,
+  ): Promise<void> => {
+    try {
+      await sink.dispatch(notification);
+    } catch (sinkError) {
+      onError?.(sinkError);
+      void bus.emit({
+        type: "communication.deliveryFailed",
+        channel: "bridge",
+        error: sinkError instanceof Error ? sinkError.message : String(sinkError),
+        ...(orgId !== undefined ? { orgId } : {}),
+      });
+    }
+  };
+
+  const offReleased = bus.on("grading.gradesReleased", (event) =>
+    deliver({ type: "gradesReleased", sectionId: event.sectionId, contentId: event.contentId }, event.orgId),
+  );
+
+  const offPosted = bus.on("grading.gradePosted", async (event) => {
+    // A held grade: the student cannot see it yet, so they are told when it is released instead.
+    if (event.released === false) return;
     try {
       const contentId =
         event.contentId ??
@@ -48,25 +73,14 @@ export function bridgeEventBusToNotificationSink(
           ? await resolveContentId(event.submissionId)
           : undefined);
       if (contentId === undefined) return;
-      try {
-        await sink.dispatch({
-          type: "gradePosted",
-          userId: event.userId,
-          contentId,
-          score: event.score,
-        });
-      } catch (sinkError) {
-        onError?.(sinkError);
-        void bus.emit({
-          type: "communication.deliveryFailed",
-          channel: "bridge",
-          error:
-            sinkError instanceof Error ? sinkError.message : String(sinkError),
-          ...(event.orgId !== undefined ? { orgId: event.orgId } : {}),
-        });
-      }
+      await deliver({ type: "gradePosted", userId: event.userId, contentId, score: event.score }, event.orgId);
     } catch (error) {
       onError?.(error);
     }
   });
+
+  return () => {
+    offPosted();
+    offReleased();
+  };
 }

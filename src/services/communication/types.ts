@@ -5,6 +5,8 @@
  */
 export type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
+  /** Held grades of one piece of content were released: tell the section's students who have one. */
+  | { type: 'gradesReleased'; sectionId: string; contentId: string }
   | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
   | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
 

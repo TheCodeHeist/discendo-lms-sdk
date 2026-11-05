@@ -12,6 +12,7 @@ import {
   InMemoryEnrollmentRepository,
   InMemoryEnrollmentRequestRepository,
   InMemoryExcusalRepository,
+  InMemoryGradeReleaseRepository,
   InMemoryGradeRepository,
   InMemoryGroupRepository,
   InMemoryGuardianLinkRepository,
@@ -76,6 +77,7 @@ const all: Array<[string, ContractCase[]]> = [
       },
       extensions: () => new InMemoryTimeExtensionRepository(),
       excusals: () => new InMemoryExcusalRepository(),
+      releases: () => new InMemoryGradeReleaseRepository(),
     }),
   ],
   [
@@ -113,7 +115,7 @@ for (const [name, cases] of all) {
 describe('the testing barrel', () => {
   it('exports a contract suite for every repository interface the SDK defines', () => {
     const suites = Object.keys(testing).filter((k) => k.endsWith('RepositoryContract'));
-    // one per interface: 12 core + 5 assessment + 3 grading + 2 scheduling + 2 communication + attendance + audit
-    if (suites.length !== 26) throw new Error(`expected 26 contract suites, found ${suites.length}: ${suites.join(', ')}`);
+    // one per interface: 12 core + 5 assessment + 4 grading + 2 scheduling + 2 communication + attendance + audit
+    if (suites.length !== 27) throw new Error(`expected 27 contract suites, found ${suites.length}: ${suites.join(', ')}`);
   });
 });

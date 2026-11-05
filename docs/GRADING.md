@@ -21,10 +21,10 @@ The module has four parts:
 
 | | |
 | --- | --- |
-| **You import** | `GradingService`, `AccommodationService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, `applyCurve`, `curveEntries`, `computeGpa`, `toGpaPoints`, `STANDARD_GPA_SCALE`, and the types in `types.ts` |
-| **You implement** | `GradeRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
-| **Emits events** | `grading.gradePosted`, `grading.extensionGranted`, `grading.excused` |
-| **Permission actions** | `grading.record`, `grading.view`, `grading.grantExtension`, `grading.excuse` (and `recordSystemGrade`, which takes no actor: see below) |
+| **You import** | `GradingService`, `AccommodationService`, `SystemGraderNotAllowedError`, `computeFinalGrade`, `explainFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, `applyCurve`, `curveEntries`, `computeGpa`, `toGpaPoints`, `STANDARD_GPA_SCALE`, and the types in `types.ts` |
+| **You implement** | `GradeRepository`; to hold grades until released, a `GradeReleaseRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
+| **Emits events** | `grading.gradePosted`, `grading.gradesReleased`, `grading.gradesHidden`, `grading.extensionGranted`, `grading.extensionRevoked`, `grading.excused`, `grading.unexcused` |
+| **Permission actions** | `grading.record`, `grading.view`, `grading.release`, `grading.grantExtension`, `grading.excuse` (and `recordSystemGrade`, which takes no actor: see below) |
 | **Enforcement** | opt-in: the third constructor argument, `{ policy, repos, submissions }` |
 
 ## Types (`types.ts`)
@@ -144,17 +144,42 @@ same submission, and it is superseded, never overwritten (with `supersedeIfCurre
 `GradeConflictError`). A quiz uses this when a question is scored by hand after the quiz was already
 graded.
 
-### `computeFinalGradeForUser(userId, sectionId, scheme, actor?): Promise<number>`
+### `computeFinalGradeForUser(userId, sectionId, scheme, actor?, { releasedOnly? }): Promise<number>`
 
 The weighted final percentage (0 to 100) of the student's current grades in a section.
 
-### `computeLetterGradeForUser(userId, sectionId, scheme, scale, actor?): Promise<string>`
+### `computeLetterGradeForUser(userId, sectionId, scheme, scale, actor?, { releasedOnly? }): Promise<string>`
 
 The same percentage turned into a label with `toLetterGrade`.
 
-Both ask `GradeRepository.listForUserInSection`, ignore superseded entries, group the
+### `listGradesForUser(userId, sectionId, actor?, { releasedOnly? }): Promise<GradeView[]>`
+
+The student's **current** grades in the section, oldest first: a "my grades" page. Superseded entries
+are history and are not listed. Each `GradeView` has `entryId`, `submissionId`, `contentId?`,
+`category`, `score`, `maxScore`, `percent`, `graderId`, `gradedAt`, and two flags:
+
+- `released`: whether the student can see it. It is always true when grades are not held.
+- `excused`: the work is listed but left out of the final grade.
+
+### `explainGradeForUser(userId, sectionId, scheme, actor?, { releasedOnly? }): Promise<GradeExplanation>`
+
+The final grade **with its working shown**, for a grade page that explains itself or for checking a
+gradebook. Besides `percent` (the same number `computeFinalGradeForUser` gives) and `grades` (as
+`listGradesForUser`) it has:
+
+- `categories`: one per category of the scheme, with its `weight`, the `effectiveWeight` it really
+  carried after renormalizing, its `percent` (null when nothing in it counts yet), and the entries
+  it `counted` and `dropped`.
+- `skipped`: entries that **could not be counted**, with the reason (`invalid-max-score` or
+  `invalid-score`). `recordGrade` never stores these; they come from data written another way.
+- `uncategorized`: entries whose category is not in the scheme, so they count for nothing.
+
+All four ask `GradeRepository.listForUserInSection`, ignore superseded entries, group the
 rest by **category** (which your repository supplies on each entry), and run
-`computeFinalGrade`.
+`explainFinalGrade`. They need `grading.view`: staff for anyone in the section, a student for
+themselves, a guardian with the `grades` scope for their ward. They all show the same grades: see
+"Holding grades until they are released" below for what a student and a guardian see while grades
+are held.
 
 **Excused work.** With the `excusals` option (an `ExcusalRepository`, such as the one behind
 `AccommodationService`), an entry whose content is excused for that student is **left out**, as if it did
@@ -163,6 +188,62 @@ chosen among the work that still counts. A revoked excusal counts for nothing. I
 content each entry belongs to, so **`listForUserInSection` must return a `contentId` on each entry**; if the
 student has an excusal and an entry has none, the calculation throws instead of guessing. Without the
 option, or for a student with no excusals, nothing changes and `contentId` is not needed.
+
+## Holding grades until they are released
+
+By default a grade is visible to the student the moment it is recorded. To hold grades back until the
+whole class is marked, give `GradingService` a `GradeReleaseRepository` as the `releases` option:
+
+```ts
+const grading = new GradingService(grades, bus, enforcement, { releases: gradeReleaseRepository });
+
+await grading.recordGrade(sub.id, 'sam', 18, 20, 'ms-lee', undefined, as('ms-lee'));  // held
+await grading.releaseGrades('bio-a', essayId, as('ms-lee'));   // now Sam sees it, and every later grade for it
+await grading.hideGrades('bio-a', essayId, as('ms-lee'));      // hidden again
+```
+
+- **Grades are released per piece of content and per section.** Releasing an essay shows every grade
+  for it in that section, including grades recorded later. Other work stays held.
+- **Staff always see everything.** A student, and a guardian with the `grades` scope, see only
+  released work, in every view: `listGradesForUser`, `computeFinalGradeForUser`,
+  `computeLetterGradeForUser` and `explainGradeForUser`. A held grade is not listed at all, and does
+  not count towards their final grade. Without enforcement there is no viewer, so the views include
+  held grades unless you pass `{ releasedOnly: true }`. Do that when you show a student their grades.
+- **`listForUserInSection` must return a `contentId`** on each entry. An entry without one is
+  never shown to a student while grades are held (it fails closed).
+- **Who may release:** `grading.release` in the section, which by default means admins and
+  instructors; it can be delegated to a TA.
+- **Nothing is deleted.** Hiding sets `hiddenAt` and `hiddenBy` on the release, and releasing again
+  creates a new one, so you can tell who showed and hid what, and when. Releasing something already
+  released returns the existing release and emits nothing.
+- **Notifications follow the release.** While grades are held, `grading.gradePosted` carries
+  `released: false`, and the notification bridge does not tell the student. `releaseGrades` emits
+  `grading.gradesReleased`, which the bridge turns into a `gradesReleased` notification for the
+  section (see [COMMUNICATION.md](./COMMUNICATION.md)).
+
+| Method | Does |
+| --- | --- |
+| `releaseGrades(sectionId, contentId, actor?)` | shows the content's grades to the section; emits `grading.gradesReleased` |
+| `hideGrades(sectionId, contentId, actor?)` | hides them again; returns the hidden release, or null if they were not released; emits `grading.gradesHidden` |
+| `listReleases(sectionId, actor?)` | the content whose grades are released in the section. Any member may ask (`content.view`): which work is released is no secret, though the grades are |
+
+```ts
+interface GradeRelease {
+  id: string; sectionId: string; contentId: string;
+  releasedAt: Date; releasedBy: string;
+  hiddenAt?: Date; hiddenBy?: string;   // set when hidden again; the record is kept
+}
+
+interface GradeReleaseRepository {
+  create(release: Omit<GradeRelease, 'id'>): Promise<GradeRelease>;
+  findActive(sectionId: string, contentId: string): Promise<GradeRelease | null>;  // not hidden
+  listActive(sectionId: string): Promise<GradeRelease[]>;                          // not hidden
+  hide(id: string, at: Date, by: string): Promise<GradeRelease>;
+}
+```
+
+`gradeReleaseRepositoryContract` and `InMemoryGradeReleaseRepository` are in `discendo-sdk/testing`
+(see [TESTING.md](./TESTING.md)).
 
 ## `AccommodationService`
 
@@ -318,6 +399,13 @@ own final grade. See [PERMISSIONS.md](./PERMISSIONS.md) and
 
 ## The pure functions (`calculations.ts`)
 
+### `explainFinalGrade(entriesByCategory, scheme): FinalGradeExplanation`
+
+The calculation below, with its working shown: `percent`, one `CategoryBreakdown` per category
+(`weight`, `effectiveWeight`, `percent`, `counted`, `dropped`), the entries it `skipped` with the
+reason, and the `uncategorized` ones. `computeFinalGrade` returns its `percent`, so the two can
+never disagree.
+
 ### `computeFinalGrade(entriesByCategory, scheme): number`
 
 A weighted average, 0 to 100.
@@ -463,18 +551,22 @@ none does (for example a negative percentage, or a scale with no 0 band).
 
 `grading.extensionGranted` (`extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`,
 `replacedExtensionId?`) and `grading.excused` (`excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy`),
-once per new record, each naming who did it. Ending an extension or an excusal emits nothing yet.
+once per new record, each naming who did it. Ending one emits `grading.extensionRevoked` or `grading.unexcused`.
+
+`grading.gradesReleased` (`sectionId`, `contentId`, `releaseId`, `releasedBy`) and `grading.gradesHidden`
+(`sectionId`, `contentId`, `releaseId`, `hiddenBy`) when held grades are shown to a section or hidden again.
 
 `grading.gradePosted` (`gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`,
-`graderId`), once per `recordGrade`, including a regrade. It identifies the work by
+`graderId`, `contentId?`, and `released` when grades are held), once per `recordGrade`, including a regrade. It identifies the work by
 `submissionId`, not `contentId`; see [EVENTS.md](./EVENTS.md) and the notification
 bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 
 ## Known limitations
 
-- **Bad rows already in your gradebook are skipped, not reported.** The calculation ignores an
-  entry with an impossible maximum or score instead of failing, so a corrupt row quietly stops
-  counting.
+- **Bad rows in your gradebook are skipped by the calculation, and reported only if you ask.** An entry
+  with an impossible maximum or score does not count, and the final grade does not fail because of it.
+  `explainGradeForUser` (and `explainFinalGrade`) list such entries in `skipped`. Nothing alerts you
+  on its own.
 - **`applyLatePolicy` does not validate its inputs.** A non-finite score or maximum gives a
   non-finite result.
 - **Without `supersedeIfCurrent`, regrading is not atomic.** The check of `previousEntryId`,
@@ -484,12 +576,18 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 - **Two simultaneous *first* grades of one submission are not guarded** even with it: neither
   supersedes anything. A unique constraint on the current grade per submission in your database
   prevents that.
-- **No grade release.** A grade is visible to the student, through `grading.view`, as
-  soon as it is recorded. There is no "hold until released" state.
+- **Grades are held per piece of content, not per student.** You cannot release one student's grade
+  ahead of the class, or release only some categories.
+- **Without enforcement, `grading.gradePosted` always says `released: false` while grades are held**,
+  because the service cannot find the grade's content without the `SubmissionLocator`.
+- **Releasing is not atomic.** Two staff releasing the same content at the same moment can create two
+  releases. Both are active and either one shows the grades. Hiding hides only one of them unless
+  your store enforces a single active release per section and content.
 - **A completed student can still read their own grades** (final and letter grade), and so
   can their guardians, but nothing else, and never anyone else's. Dropped and waitlisted
   students cannot. See [PERMISSIONS.md](./PERMISSIONS.md).
-- **Not built yet:** rubrics (types only) and peer review.
+- **Rubrics and peer review live in assessment**, not here (see [ASSESSMENT.md](./ASSESSMENT.md)). A rubric
+  evaluation is not turned into a grade automatically.
 - **Curving and GPA are calculations, not records.** Nothing remembers that a curve was applied or what a GPA was; recording a
   curve is a regrade you do, and a GPA you keep is yours to store. There is no per-course credit value, repeat/retake policy,
   or class rank in the SDK.
@@ -498,7 +596,6 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
   deadline or time limit; it simply does nothing.
 - **Excused work is matched by content.** An excusal does nothing for a grade whose entries carry no `contentId`
   (and the calculation throws if it cannot tell), and it is only as current as your repository's data.
-- **Ending an extension or excusal emits no event**, so a host cannot be told of a revocation yet.
 - **Two simultaneous grants can both create a record** unless your store enforces one active record per student and content.
 - **Late penalties are manual** (see above).
 
@@ -514,3 +611,4 @@ bridge in [COMMUNICATION.md](./COMMUNICATION.md).
 | `test/grading-validation.test.ts` | the number checks in `recordGrade` (each bad case, the boundaries, extra credit on and off, a refused regrade leaving the current grade alone, the permission check coming first) and `computeFinalGrade` skipping entries that cannot be a grade |
 | `test/grading-permissions.test.ts` | enforcement (who may record and view, grader identity, own-work rule, the locator, guardians, completed students and their guardians, the tenant wall, check ordering) and the supersede integrity checks on `previousEntryId` |
 | `test/grading-events.test.ts` | `grading.gradePosted`, including once per regrade |
+| `test/grading-release.test.ts` | `explainFinalGrade` (categories, dropped and counted entries, renormalizing, skipped bad rows and why, uncategorized entries, agreeing with `computeFinalGrade`); holding grades from a student and guardian until released, per content; staff seeing everything; hiding again with the history kept; idempotent release; who may release (delegation included); `released` on `gradePosted`; notifications only on release; the default immediate mode; `listGradesForUser` (current only, excused marked) and `explainGradeForUser` (a bad row found, permissions); `releasedOnly` without enforcement |

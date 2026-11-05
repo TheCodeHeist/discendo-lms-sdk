@@ -106,6 +106,32 @@ export interface GradePostedEvent {
   maxScore: number;
   graderId: string;
   contentId?: string;
+  /**
+   * Present only when grades are held until released (`GradingService`'s `releases` option): false
+   * while the student cannot see this grade yet. Do not tell the student about a grade with
+   * `released: false`; `grading.gradesReleased` says when they can see it.
+   */
+  released?: boolean;
+  orgId?: string;
+}
+
+/** Staff released the held grades of one piece of content to the students of a section. */
+export interface GradesReleasedEvent {
+  type: "grading.gradesReleased";
+  sectionId: string;
+  contentId: string;
+  releaseId: string;
+  releasedBy: string;
+  orgId?: string;
+}
+
+/** Staff hid the grades of one piece of content from the students of a section again. */
+export interface GradesHiddenEvent {
+  type: "grading.gradesHidden";
+  sectionId: string;
+  contentId: string;
+  releaseId: string;
+  hiddenBy: string;
   orgId?: string;
 }
 
@@ -361,6 +387,8 @@ export type LmsEvent =
   | SubmissionReceivedEvent
   | PlagiarismCheckFailedEvent
   | GradePostedEvent
+  | GradesReleasedEvent
+  | GradesHiddenEvent
   | ExtensionGrantedEvent
   | ExtensionRevokedEvent
   | ExcusedEvent

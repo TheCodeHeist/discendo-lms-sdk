@@ -117,7 +117,9 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `enrollment.requestDecided` | `EnrollmentRequestService.withdraw`, `accept`, `modify`, `reject` | a request is settled | `requestId`, `userId`, `sectionId`, `decision` (`'accepted'`, `'rejected'` or `'withdrawn'`), `reviewerId?` (accepted and rejected), `enrollmentId?`, `enrollmentStatus?`, `grantedSectionId?` (accepted), `orgId?` |
 | `enrollment.promoted` | `EnrollmentService.promoteFromWaitlist`, and `drop` with `promoteOnDrop` | a waitlisted person is made active | `enrollmentId`, `userId`, `sectionId`, `previousStatus` (`'waitlisted'`), `trigger` (`'manual'` or `'auto'`), `actorId?` (only a manual promotion with permissions enforced), `orgId?` |
 | `enrollment.promotionFailed` | `EnrollmentService.drop` with `promoteOnDrop` | background auto-promotion fails after an active student drops | `sectionId`, `droppedEnrollmentId`, `error`, `orgId?` |
-| `grading.gradePosted` | `GradingService.recordGrade`, `recordSystemGrade` | a grade is recorded, including a regrade that supersedes an earlier one, or a system grade such as a quiz's automatic score (`graderId` is then `system:...`) | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId`, `contentId?`, `orgId?` |
+| `grading.gradePosted` | `GradingService.recordGrade`, `recordSystemGrade` | a grade is recorded, including a regrade that supersedes an earlier one, or a system grade such as a quiz's automatic score (`graderId` is then `system:...`) | `gradeEntryId`, `submissionId`, `userId`, `score`, `maxScore`, `graderId`, `contentId?`, `released?` (only when grades are held: false means the student cannot see it yet), `orgId?` |
+| `grading.gradesReleased` | `GradingService.releaseGrades` | held grades of one piece of content are shown to a section | `sectionId`, `contentId`, `releaseId`, `releasedBy`, `orgId?` |
+| `grading.gradesHidden` | `GradingService.hideGrades` | released grades of one piece of content are hidden from a section again | `sectionId`, `contentId`, `releaseId`, `hiddenBy`, `orgId?` |
 | `grading.extensionGranted` | `AccommodationService.grantExtension` | a student is given extra time (not for a repeat of the same amount) | `extensionId`, `userId`, `contentId`, `sectionId`, `extraSeconds`, `grantedBy`, `replacedExtensionId?`, `orgId?` |
 | `grading.extensionRevoked` | `AccommodationService.revokeExtension` | an active time extension is revoked | `extensionId`, `userId`, `contentId`, `sectionId`, `revokedBy`, `orgId?` |
 | `grading.excused` | `AccommodationService.excuse` | a student is excused from a piece of work (not for a repeat) | `excusalId`, `userId`, `contentId`, `sectionId`, `excusedBy`, `orgId?` |
@@ -198,7 +200,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 ## Known limitations
 
 - **At-most-once and in-memory.** No persistence, retry or replay (see "Fire and forget").
-- **Twenty-six event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
+- **Twenty-eight event types.** Covers enrollment, grading, accommodations, content, assessment, scheduling, reporting, delegation, guardians, and asynchronous delivery failures.
 - **Tenant `orgId` is optional.** It is present whenever known from context, but omitted on calls made without enforcement or organization metadata.
 - **No ordering between handlers and no priorities.** Handlers are started in
   registration order and run concurrently.
@@ -220,6 +222,7 @@ look up what it needs, and ids stay stable when entity shapes change.
 | `test/enrollment-waitlist.test.ts` | `enrollment.promoted`: manual and automatic, its payload and actor |
 | `test/enrollment-requests.test.ts` | `enrollment.requested`, `enrollment.requestDecided`: each decision's payload, and no event for an idempotent repeat |
 | `test/grading-events.test.ts` | `grading.gradePosted` |
+| `test/grading-release.test.ts` | `grading.gradesReleased`, `grading.gradesHidden`, and `released` on `grading.gradePosted` |
 | `test/content-events.test.ts` | `content.published` |
 | `test/assessment-events.test.ts` | `assessment.submissionReceived`, attempt numbers, no event when `maxAttempts` rejects, a throwing listener, working with no bus |
 | `test/scheduling-service-events.test.ts` | the two scheduling events |

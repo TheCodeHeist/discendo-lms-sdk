@@ -61,7 +61,7 @@ await grading.computeFinalGradeForUser("sam", "bio-a", { categories: [{ name: "a
 | Field | What it is |
 | --- | --- |
 | `services` | `enrollment`, `enrollmentRequests`, `groups`, `prerequisites`, `content`, `assessment`, `rubrics`, `peerReviews`, `grading`, `accommodations`, `delegation`, `guardians`, `scheduling`, `communication`, `reporting`, `admin` |
-| `repos` | every repository, by name: the twelve core ones (`users`, `courses`, `enrollments`, `content`, ...) plus `submissions`, `quizzes`, `rubrics`, `rubricEvaluations`, `peerReviews`, `grades`, `extensions`, `excusals`, `scheduling`, `attendance`, `announcements`, `threads`, `audit` |
+| `repos` | every repository, by name: the twelve core ones (`users`, `courses`, `enrollments`, `content`, ...) plus `submissions`, `quizzes`, `rubrics`, `rubricEvaluations`, `peerReviews`, `grades`, `extensions`, `excusals`, `gradeReleases`, `scheduling`, `attendance`, `announcements`, `threads`, `audit` |
 | `bus` | the `EventBus` every service emits to |
 | `policy` | the permission policy in force |
 | `notifications` | a `RecordingNotificationSink`: its `sent` array is what `CommunicationService` would have delivered |
@@ -75,6 +75,7 @@ await grading.computeFinalGradeForUser("sam", "bio-a", { categories: [{ name: "a
 | `bus` | `new EventBus()` | The bus every service emits to |
 | `contentPrerequisites` | `[]` | The `PrerequisiteEdge`s `ContentService.isUnlocked` checks |
 | `categoryOf` | the content's `kind` | Which grading-scheme category a piece of content's grades count towards |
+| `gradeRelease` | `'immediate'` | `'manual'` holds every grade from students until staff release it (`grading.releaseGrades`); see [GRADING.md](./GRADING.md) |
 
 **How the parts are joined.** Some links the SDK leaves to the host, because each module may only
 import `core`. This is how `createInMemoryLms` makes them:
@@ -103,7 +104,7 @@ single process.
 | core | `InMemoryUserRepository`, `InMemoryCourseRepository`, `InMemoryTermRepository`, `InMemoryOrganizationRepository`, `InMemoryDepartmentRepository` (these only read in the SDK, so they add `seed`/`seedCourse`/`seedSection`), `InMemoryEnrollmentRepository`, `InMemoryContentRepository`, `InMemoryEnrollmentRequestRepository`, `InMemoryDelegationRepository`, `InMemoryGuardianLinkRepository`, `InMemoryGroupRepository`, `InMemoryCoursePrerequisiteRepository` |
 | content | `InMemoryCompletionTracker` (a `CompletionChecker`) |
 | assessment | `InMemorySubmissionRepository` (adds `findById`, `listByContent`), `InMemoryQuizRepository` (`seedQuestions`), `InMemoryRubricRepository`, `InMemoryRubricEvaluationRepository`, `InMemoryPeerReviewRepository` |
-| grading | `InMemoryGradeRepository` (`place(submissionId, { sectionId, category, contentId })`, or a `locate` function), `InMemoryTimeExtensionRepository`, `InMemoryExcusalRepository` |
+| grading | `InMemoryGradeRepository` (`place(submissionId, { sectionId, category, contentId })`, or a `locate` function; `listForSubmission`), `InMemoryTimeExtensionRepository`, `InMemoryExcusalRepository`, `InMemoryGradeReleaseRepository` (`history`) |
 | scheduling | `InMemorySchedulingRepository` (both `SchedulingRepository` and `SchedulingSettingsRepository`; `seedTemplate`, `seedRoom`, `seedGroup`, ...) |
 | communication | `InMemoryAnnouncementRepository`, `InMemoryThreadRepository`, `RecordingNotificationSink` |
 | reporting | `InMemoryAttendanceRepository`, `InMemorySessionLocator` |
@@ -146,7 +147,7 @@ There is one suite per interface:
 | --- | --- |
 | core | `userRepositoryContract`, `courseRepositoryContract`, `termRepositoryContract`, `organizationRepositoryContract`, `departmentRepositoryContract`, `enrollmentRepositoryContract`, `contentRepositoryContract`, `enrollmentRequestRepositoryContract`, `delegationRepositoryContract`, `guardianLinkRepositoryContract`, `groupRepositoryContract`, `coursePrerequisiteRepositoryContract`; all at once with `coreRepositoryContracts({ ... })` |
 | assessment | `submissionRepositoryContract`, `quizRepositoryContract`, `rubricRepositoryContract`, `rubricEvaluationRepositoryContract`, `peerReviewRepositoryContract`; all at once with `assessmentRepositoryContracts({ ... })` |
-| grading | `gradeRepositoryContract`, `timeExtensionRepositoryContract`, `excusalRepositoryContract`; all at once with `gradingRepositoryContracts({ ... })` |
+| grading | `gradeRepositoryContract`, `timeExtensionRepositoryContract`, `excusalRepositoryContract`, `gradeReleaseRepositoryContract`; all at once with `gradingRepositoryContracts({ ... })` |
 | scheduling | `schedulingRepositoryContract`, `schedulingSettingsRepositoryContract` |
 | communication | `announcementRepositoryContract`, `threadRepositoryContract`; both with `communicationRepositoryContracts({ ... })` |
 | reporting | `attendanceRepositoryContract` |

@@ -6,6 +6,7 @@ import { InMemoryTable } from '../../../core/testing/table.js';
 import type { ExcusalRepository, TimeExtensionRepository } from '../accommodations.js';
 import type { GradeRepository } from '../service.js';
 import type { Excusal, GradeEntry, TimeExtension } from '../types.js';
+import type { GradeRelease, GradeReleaseRepository } from '../release.js';
 
 /** Where a graded submission belongs: what `listForUserInSection` needs and `GradeEntry` lacks. */
 export interface GradePlacement {
@@ -130,5 +131,31 @@ export class InMemoryExcusalRepository implements ExcusalRepository {
 
   async revoke(id: string, at: Date, by: string): Promise<Excusal> {
     return this.excusals.update(id, { revokedAt: at, revokedBy: by });
+  }
+}
+
+/** Releases are never deleted: hiding one sets `hiddenAt`, and releasing again creates a new record. */
+export class InMemoryGradeReleaseRepository implements GradeReleaseRepository {
+  private readonly releases = new InMemoryTable<GradeRelease>('release', 'Grade release');
+
+  async create(release: Omit<GradeRelease, 'id'>): Promise<GradeRelease> {
+    return this.releases.insert(release);
+  }
+
+  async findActive(sectionId: string, contentId: string): Promise<GradeRelease | null> {
+    return this.releases.last((r) => r.sectionId === sectionId && r.contentId === contentId && r.hiddenAt === undefined);
+  }
+
+  async listActive(sectionId: string): Promise<GradeRelease[]> {
+    return this.releases.where((r) => r.sectionId === sectionId && r.hiddenAt === undefined);
+  }
+
+  async hide(id: string, at: Date, by: string): Promise<GradeRelease> {
+    return this.releases.update(id, { hiddenAt: at, hiddenBy: by });
+  }
+
+  /** Every release of the section, hidden ones included, oldest first. Not needed by the SDK. */
+  async history(sectionId: string): Promise<GradeRelease[]> {
+    return this.releases.where((r) => r.sectionId === sectionId);
   }
 }

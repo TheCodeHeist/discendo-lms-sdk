@@ -24,6 +24,7 @@ delivery mechanism.
 ```ts
 type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
+  | { type: 'gradesReleased'; sectionId: string; contentId: string }   // held grades were released
   | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
   | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
 
@@ -139,8 +140,13 @@ code's job.
 ## The event bridge
 
 `bridgeEventBusToNotificationSink` subscribes to the shared [event bus](./EVENTS.md) and
-forwards events that have a notification equivalent to your sink. Today there is one:
-`grading.gradePosted` becomes `gradePosted`.
+forwards events that have a notification equivalent to your sink. Today there are two:
+
+- `grading.gradePosted` becomes `gradePosted`, **except a grade that is held** from the student
+  (`released: false`, when grading holds grades until they are released; see
+  [GRADING.md](./GRADING.md)). The student is not told about a grade they cannot see.
+- `grading.gradesReleased` becomes `gradesReleased` (`sectionId`, `contentId`). Your sink tells the
+  section's students who have a grade for that content.
 
 ```ts
 import { bridgeEventBusToNotificationSink } from 'discendo-sdk/communication';
@@ -169,6 +175,8 @@ const sink: NotificationSink = {
     switch (event.type) {
       case 'gradePosted':
         return push.send(event.userId, `A grade was posted`);
+      case 'gradesReleased':
+        return push.sendMany(await gradedStudentsOf(event.sectionId, event.contentId), `Grades are out`);
       case 'announcementCreated': {
         // two separate channels: never send one to the other's readers
         const people = event.audience === 'guardians'

@@ -6,6 +6,7 @@ import { check, checkEqual, idsOf, suite, type ContractCase, type RepositoryFact
 import type { ExcusalRepository, TimeExtensionRepository } from '../accommodations.js';
 import type { GradeRepository } from '../service.js';
 import type { Excusal, GradeEntry, TimeExtension } from '../types.js';
+import type { GradeReleaseRepository } from '../release.js';
 import type { GradePlacement } from './in-memory.js';
 
 const at = (iso: string) => new Date(iso);
@@ -178,10 +179,44 @@ export function excusalRepositoryContract(make: RepositoryFactory<ExcusalReposit
   ]);
 }
 
+export function gradeReleaseRepositoryContract(make: RepositoryFactory<GradeReleaseRepository>): ContractCase[] {
+  const release = (contentId: string, sectionId = 's1') => ({ sectionId, contentId, releasedAt: at('2026-10-01T00:00:00Z'), releasedBy: 'teacher' });
+  return suite('GradeReleaseRepository', [
+    {
+      name: 'create and findActive round-trip, per section and content',
+      run: async () => {
+        const repo = await make();
+        const r = await repo.create(release('hw1'));
+        check(typeof r.id === 'string' && r.id !== '', 'create returns a non-empty id');
+        checkEqual(await repo.findActive('s1', 'hw1'), r, 'findActive');
+        checkEqual(await repo.findActive('s2', 'hw1'), null, 'the same content in another section is not released');
+        checkEqual(await repo.findActive('s1', 'hw2'), null, 'other content is not released');
+      },
+    },
+    {
+      name: 'hide keeps the record, and findActive and listActive stop returning it',
+      run: async () => {
+        const repo = await make();
+        const a = await repo.create(release('hw1'));
+        const b = await repo.create(release('hw2'));
+        await repo.create(release('hw1', 's2'));
+        const when = at('2026-10-02T00:00:00Z');
+        const hidden = await repo.hide(a.id, when, 'teacher');
+        checkEqual([hidden.hiddenAt, hidden.hiddenBy, hidden.releasedBy], [when, 'teacher', 'teacher'], 'hidden, not deleted');
+        checkEqual(await repo.findActive('s1', 'hw1'), null, 'no longer active');
+        checkEqual(idsOf(await repo.listActive('s1')), [b.id], 'only hw2 is released in s1');
+        const again = await repo.create(release('hw1'));
+        checkEqual((await repo.findActive('s1', 'hw1'))?.id, again.id, 'releasing again makes a new record');
+      },
+    },
+  ]);
+}
+
 export interface GradingRepositoryFactories {
   grades?: Parameters<typeof gradeRepositoryContract>[0];
   extensions?: RepositoryFactory<TimeExtensionRepository>;
   excusals?: RepositoryFactory<ExcusalRepository>;
+  releases?: RepositoryFactory<GradeReleaseRepository>;
 }
 
 /** The contracts for whichever grading repositories you pass a factory for. */
@@ -190,5 +225,6 @@ export function gradingRepositoryContracts(f: GradingRepositoryFactories): Contr
     ...(f.grades ? gradeRepositoryContract(f.grades) : []),
     ...(f.extensions ? timeExtensionRepositoryContract(f.extensions) : []),
     ...(f.excusals ? excusalRepositoryContract(f.excusals) : []),
+    ...(f.releases ? gradeReleaseRepositoryContract(f.releases) : []),
   ];
 }

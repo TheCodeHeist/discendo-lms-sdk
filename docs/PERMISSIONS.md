@@ -125,6 +125,7 @@ policy.
 | `grading.view` | admin, instructor, ta | student | grades | — |
 | `grading.grantExtension` | admin, instructor | — | — | yes |
 | `grading.excuse` | admin, instructor | — | — | yes |
+| `grading.release` | admin, instructor | — | — | yes |
 | `communication.postAnnouncement` | admin, instructor | — | — | yes |
 | `communication.postGuardianAnnouncement` | admin, instructor | — | — | — |
 | `communication.viewAnnouncements` | admin, instructor, ta, student | — | — | — |

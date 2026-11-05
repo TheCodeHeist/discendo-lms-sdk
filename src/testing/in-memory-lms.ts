@@ -40,6 +40,7 @@ import {
 import { AccommodationService, GradingService } from '../domains/grading/index.js';
 import {
   InMemoryExcusalRepository,
+  InMemoryGradeReleaseRepository,
   InMemoryGradeRepository,
   InMemoryTimeExtensionRepository,
 } from '../domains/grading/testing/in-memory.js';
@@ -79,6 +80,11 @@ export interface InMemoryLmsOptions {
    * (`assignment`, `quiz`, ...), so a `GradingScheme` with those category names works as is.
    */
   categoryOf?: (content: ContentNode) => string;
+  /**
+   * `'immediate'` (default): a grade is visible to the student as soon as it is recorded.
+   * `'manual'`: grades are held until staff release them (`grading.releaseGrades`).
+   */
+  gradeRelease?: 'immediate' | 'manual';
 }
 
 export type InMemoryLms = ReturnType<typeof createInMemoryLms>;
@@ -121,6 +127,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
   const grades = new InMemoryGradeRepository({ locate: async (id) => (await placementOf(id))?.placement ?? null });
   const extensions = new InMemoryTimeExtensionRepository();
   const excusals = new InMemoryExcusalRepository();
+  const gradeReleases = new InMemoryGradeReleaseRepository();
 
   const scheduling = new InMemorySchedulingRepository();
   const attendance = new InMemoryAttendanceRepository();
@@ -177,7 +184,11 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
     grades,
     bus,
     enforce ? { policy, repos: authRepos, submissions: submissionLocator } : undefined,
-    { systemGraders: [IN_MEMORY_QUIZ_GRADER], excusals },
+    {
+      systemGraders: [IN_MEMORY_QUIZ_GRADER],
+      excusals,
+      ...(options.gradeRelease === 'manual' ? { releases: gradeReleases } : {}),
+    },
   );
   const services = {
     enrollment,
@@ -235,6 +246,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
       grades,
       extensions,
       excusals,
+      gradeReleases,
       scheduling,
       attendance,
       announcements,
