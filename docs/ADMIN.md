@@ -14,7 +14,7 @@ service, you wrap the call you want recorded in a function, and the record is wr
 | **You implement** | `AuditRepository` |
 | **Emits events** | none |
 | **Permission actions** | `admin.viewAuditLog` (admin only, never delegable) |
-| **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the second constructor argument |
+| **Enforcement** | opt-in: a `policy` in the constructor's config (`repos.users` then required) |
 
 ## Types
 
@@ -81,8 +81,9 @@ try {
 ## `AdminService`
 
 ```ts
-new AdminService(audit: AuditRepository, options?: {
-  enforcement?: { policy: PermissionPolicy; repos: { users: UserRepository } };
+new AdminService({
+  repos: { audit: AuditRepository; users?: UserRepository };   // users: required with a policy
+  policy?: PermissionPolicy;                                    // turns enforcement and organizations on
 })
 ```
 

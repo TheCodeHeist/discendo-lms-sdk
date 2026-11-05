@@ -5,3 +5,4 @@ export * from './tenancy.js';
 export * from './permissions.js';
 export * from './authorization.js';
 export * from './content-availability.js';
+export * from './service-config.js';

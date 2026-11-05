@@ -18,6 +18,7 @@ import type { RepositoryContext } from "discendo-sdk/core";
 import { EnrollmentService } from "discendo-sdk/enrollment";
 import { ContentService } from "discendo-sdk/content";
 import { GradingService } from "discendo-sdk/grading";
+import { InMemoryGradeRepository } from "discendo-sdk/testing";
 
 import { DrizzleUserRepository } from "../db/repositories/users";
 import { DrizzleCourseRepository } from "../db/repositories/courses";
@@ -53,25 +54,29 @@ bus.on("*", (event) => {
 export const policy = createRolePolicy();
 
 // 4. Instantiate domain services
-export const enrollmentService = new EnrollmentService(repos, bus, {
+export const enrollmentService = new EnrollmentService({
+  repos,
+  events: bus,
   policy,
   promoteOnDrop: true, // Automatically promotes longest-waiting student when a seat frees
 });
 
-export const contentService = new ContentService(repos, undefined, [], bus, {
+export const contentService = new ContentService({
+  repos,
+  completion: { isComplete: async () => false }, // Real completion tracking comes later
+  events: bus,
   policy,
 });
 
-export const gradingService = new GradingService(
-  // In a later chapter, we wire GradeRepository here
-  undefined as any,
-  bus,
-  {
-    policy,
-    repos,
-    submissions: async () => null,
-  },
-);
+// An in-memory grade store for now; chapter 12 replaces it with a Drizzle repository.
+const gradeRepository = new InMemoryGradeRepository();
+
+export const gradingService = new GradingService({
+  repos: { ...repos, grades: gradeRepository },
+  events: bus,
+  policy,
+  submissions: { locate: async () => null },
+});
 ```
 
 ---

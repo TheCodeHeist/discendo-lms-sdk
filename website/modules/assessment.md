@@ -75,18 +75,18 @@ interface QuizAttempt {
 ## `AssessmentService`
 
 ```ts
-new AssessmentService(
-  submissions: SubmissionRepository,
-  quizzes: QuizRepository,
-  plagiarismHook?: PlagiarismCheckHook,
-  events?: EventBus,
-  options?: {
-    policy?: PermissionPolicy
-    repos?: RepositoryContext
-    autoGrade?: QuizGradeSink       // Auto-posts quiz score to GradingService
-    extensions?: ExtensionSource    // Extra time accommodations
+new AssessmentService({
+  repos: {
+    submissions: SubmissionRepository
+    quizzes: QuizRepository
+    // with a policy also: users, courses, enrollments, content (and groups)
   }
-)
+  policy?: PermissionPolicy
+  events?: EventBus
+  plagiarismHook?: PlagiarismCheckHook
+  autoGrade?: { grading: QuizGradeSink; source?: string } // Auto-posts quiz score to GradingService
+  extensions?: ExtensionSource    // Extra time accommodations
+})
 ```
 
 ### Assignment Submissions
@@ -140,7 +140,7 @@ console.log(`Score: ${result.score} / ${result.maxScore}`);
 `RubricService` manages grading criteria:
 
 ```ts
-const rubricService = new RubricService(rubricRepo, { policy });
+const rubricService = new RubricService({ repos: rubricRepos, policy });
 
 // Define rubric
 await rubricService.saveRubric(
@@ -181,7 +181,7 @@ console.log(`Total Score: ${evaluation.totalScore} / ${evaluation.maxScore}`); /
 `PeerReviewService` orchestrates student evaluations of classmate submissions:
 
 ```ts
-const peerReviews = new PeerReviewService(peerReviewRepo, { policy });
+const peerReviews = new PeerReviewService({ repos: peerReviewRepos, policy });
 
 // Assign 2 peer reviews per student using cyclic distribution
 await peerReviews.assignPeerReviews(

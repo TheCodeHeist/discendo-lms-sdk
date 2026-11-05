@@ -6,6 +6,8 @@ import { authorize } from '../../core/permissions.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { authorizeInSection } from '../../core/authorization.js';
 import type { Authorized } from '../../core/authorization.js';
+import { isServiceConfig } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import { EnrollmentNotDroppableError, SectionNotOpenError, PrerequisiteNotMetError } from './types.js';
 import { PrerequisiteService } from './prerequisites.js';
 import type { EnrollOptions, BatchEnrollRow, BatchReport, BulkEnrollOptions, PromoteOptions } from './types.js';
@@ -29,12 +31,30 @@ export interface EnrollmentServiceOptions {
   gradeSource?: { getCourseGrade(userId: string, courseId: string): Promise<number | null> };
 }
 
+/** `new EnrollmentService({ repos, policy?, events?, promoteOnDrop?, enforcePrerequisites?, gradeSource? })`. */
+export type EnrollmentServiceConfig = ServiceConfig<RepositoryContext> & Omit<EnrollmentServiceOptions, 'policy'>;
+
 export class EnrollmentService {
-  constructor(
-    private readonly repos: RepositoryContext,
-    private readonly events?: EventBus,
-    private readonly options: EnrollmentServiceOptions = {},
-  ) {}
+  private readonly repos: RepositoryContext;
+  private readonly events?: EventBus | undefined;
+  private readonly options: EnrollmentServiceOptions;
+
+  constructor(config: EnrollmentServiceConfig);
+  /** @deprecated Pass one config object: `new EnrollmentService({ repos, policy, events })`. See docs/MIGRATION.md. */
+  constructor(repos: RepositoryContext, events?: EventBus, options?: EnrollmentServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const { repos, events, policy, ...rest } = args[0] as EnrollmentServiceConfig;
+      this.repos = repos;
+      this.events = events;
+      this.options = { ...rest, ...(policy ? { policy } : {}) };
+    } else {
+      const [repos, events, options] = args as [RepositoryContext, EventBus?, EnrollmentServiceOptions?];
+      this.repos = repos;
+      this.events = events;
+      this.options = options ?? {};
+    }
+  }
 
   /**
    * Enrolls `opts.userId`. With a policy this needs `enrollment.enroll` in the

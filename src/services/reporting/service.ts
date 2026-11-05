@@ -7,6 +7,8 @@ import {
 } from "../../core/permissions.js";
 import { authorizeInSection, isStaff } from "../../core/authorization.js";
 import type { AuthorizationRepos } from "../../core/authorization.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import type { EnrollmentRepository, UserRepository } from "../../core/repositories.js";
 import type { Enrollment } from "../../core/types.js";
 import { attendanceSheet, effectiveMarks, rosterRows, type Exportable } from "./export.js";
@@ -66,6 +68,15 @@ export interface ReportingServiceOptions {
 }
 
 /**
+ * `new ReportingService({ repos: { attendance, ... }, sessions?, policy?, events? })`. With a `policy`,
+ * `repos` must also hold `users`, `courses` and `enrollments`, and `sessions` is required. The exports
+ * read the roster from `repos.enrollments` (and `repos.users` for external references).
+ */
+export interface ReportingServiceConfig extends ServiceConfig<{ attendance: AttendanceRepository } & Partial<AuthorizationRepos>> {
+  sessions?: SessionLocator;
+}
+
+/**
  * One student's attendance in a section. `records` holds the mark that counts for each session,
  * oldest first: when a session was marked more than once (a correction), the latest mark wins.
  * `history` holds every mark, corrections included. `summary` counts `records`.
@@ -92,11 +103,33 @@ const STATUSES: readonly AttendanceStatus[] = [
 export class ReportingService {
   private readonly events?: EventBus | undefined;
 
-  constructor(
-    private readonly attendance: AttendanceRepository,
-    private readonly options: ReportingServiceOptions = {},
-    events?: EventBus,
-  ) {
+  private readonly attendance: AttendanceRepository;
+  private readonly options: ReportingServiceOptions;
+
+  constructor(config: ReportingServiceConfig);
+  /** @deprecated Pass one config object: `new ReportingService({ repos: { attendance, ... }, sessions, policy, events })`. See docs/MIGRATION.md. */
+  constructor(attendance: AttendanceRepository, options?: ReportingServiceOptions, events?: EventBus);
+  constructor(...args: unknown[]) {
+    let options: ReportingServiceOptions;
+    let events: EventBus | undefined;
+    if (isServiceConfig(args)) {
+      const c = args[0] as ReportingServiceConfig;
+      if (c.policy) requireRepos("ReportingService", c.repos, AUTHORIZATION_REPOS);
+      this.attendance = c.repos.attendance;
+      events = c.events;
+      options = {
+        ...(c.sessions ? { sessions: c.sessions } : {}),
+        ...(c.policy ? { enforcement: { policy: c.policy, repos: c.repos as AuthorizationRepos } } : {}),
+        // The exports read the roster from the same repos.
+        ...(c.repos.enrollments ? { roster: { enrollments: c.repos.enrollments, ...(c.repos.users ? { users: c.repos.users } : {}) } } : {}),
+      };
+    } else {
+      const [attendance, legacyOptions, legacyEvents] = args as [AttendanceRepository, ReportingServiceOptions | undefined, EventBus | undefined];
+      this.attendance = attendance;
+      options = legacyOptions ?? {};
+      events = legacyEvents;
+    }
+    this.options = options;
     if (options.enforcement && !options.sessions) {
       throw new Error(
         "ReportingService enforcement needs a SessionLocator (options.sessions)",
@@ -104,6 +137,7 @@ export class ReportingService {
     }
     this.events = events ?? options.events;
   }
+
 
   /**
    * Records an attendance mark. **Without enforcement** it is a pass-through: it hands the record to

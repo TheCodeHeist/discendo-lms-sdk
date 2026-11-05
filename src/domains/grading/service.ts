@@ -4,6 +4,8 @@ import type { ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { PermissionDeniedError, ActorRequiredError } from '../../core/permissions.js';
 import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import { explainFinalGrade, toLetterGrade } from './calculations.js';
 import type { FinalGradeExplanation } from './calculations.js';
 import type { ExcusalRepository } from './accommodations.js';
@@ -92,6 +94,24 @@ export interface GradingServiceOptions {
   releases?: GradeReleaseRepository;
 }
 
+/**
+ * `new GradingService({ repos: { grades, excusals?, releases?, ... }, policy?, events?, submissions?,
+ * allowExtraCredit?, systemGraders? })`. With a `policy`, `repos` must also hold `users`, `courses`
+ * and `enrollments`, and `submissions` (the `SubmissionLocator`) is required.
+ */
+export interface GradingServiceConfig
+  extends ServiceConfig<
+    {
+      grades: GradeRepository;
+      excusals?: Pick<ExcusalRepository, 'listForUser'>;
+      releases?: GradeReleaseRepository;
+    } & Partial<AuthorizationRepos>
+  > {
+  submissions?: SubmissionLocator;
+  allowExtraCredit?: boolean;
+  systemGraders?: string[];
+}
+
 /** What a grade view call may ask for. */
 export interface GradeViewOptions {
   /**
@@ -137,18 +157,43 @@ export class GradeConflictError extends Error {
 }
 
 export class GradingService {
-  constructor(
-    private readonly grades: GradeRepository,
-    private readonly events?: EventBus,
-    /**
-     * Turns on permission enforcement. Once set, every public method requires
-     * an `{ actorId }` argument and refuses to run without one. Leave it unset
-     * and the service behaves as it always has: no actor, no permission checks
-     * (the integrity checks on `previousEntryId` apply either way).
-     */
-    private readonly enforcement?: GradingEnforcement,
-    private readonly options: GradingServiceOptions = {},
-  ) {}
+  private readonly grades: GradeRepository;
+  private readonly events?: EventBus | undefined;
+  private readonly enforcement?: GradingEnforcement | undefined;
+  private readonly options: GradingServiceOptions;
+
+  constructor(config: GradingServiceConfig);
+  /** @deprecated Pass one config object: `new GradingService({ repos, ... })`. See docs/MIGRATION.md. */
+  constructor(grades: GradeRepository, events?: EventBus, enforcement?: GradingEnforcement, options?: GradingServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const { repos, policy, events, submissions, allowExtraCredit, systemGraders } = args[0] as GradingServiceConfig;
+      this.grades = repos.grades;
+      this.events = events;
+      if (policy) {
+        requireRepos('GradingService', repos, AUTHORIZATION_REPOS);
+        if (!submissions) throw new ServiceConfigError('GradingService needs a SubmissionLocator (submissions) to enforce permissions');
+        this.enforcement = { policy, repos: repos as AuthorizationRepos, submissions };
+      }
+      this.options = {
+        ...(allowExtraCredit !== undefined ? { allowExtraCredit } : {}),
+        ...(systemGraders ? { systemGraders } : {}),
+        ...(repos.excusals ? { excusals: repos.excusals } : {}),
+        ...(repos.releases ? { releases: repos.releases } : {}),
+      };
+    } else {
+      const [grades, events, enforcement, options] = args as [
+        GradeRepository,
+        EventBus | undefined,
+        GradingEnforcement | undefined,
+        GradingServiceOptions | undefined,
+      ];
+      this.grades = grades;
+      this.events = events;
+      this.enforcement = enforcement;
+      this.options = options ?? {};
+    }
+  }
 
   /**
    * Records a grade. Never overwrites — if the submission was already

@@ -68,14 +68,12 @@ Actions like `enrollment.bulkEnroll`, `enrollment.promoteWaitlist`, `enrollment.
 ## `DelegationService`
 
 ```ts
-new DelegationService(
-  repos: RepositoryContext,
-  options: {
-    policy: PermissionPolicy
-    delegableActions?: string[]
-    events?: EventBus
-  }
-)
+new DelegationService({
+  repos: RepositoryContext // users, courses, enrollments + delegations
+  policy: PermissionPolicy // required
+  delegableActions?: string[]
+  events?: EventBus
+})
 ```
 
 ### `grant(sectionId, taUserId, action, actor): Promise<TaGrant>`

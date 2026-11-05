@@ -9,6 +9,8 @@ import {
 } from '../../core/permissions.js';
 import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import type { RepositoryContext } from '../../core/repositories.js';
+import { isServiceConfig } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type {
   GroupMember,
   SectionGroup,
@@ -46,6 +48,9 @@ export interface GroupServiceOptions {
   policy?: PermissionPolicy;
 }
 
+/** `new GroupService({ repos, policy? })`. `repos.groups` is the group repository. */
+export type GroupServiceConfig = Omit<ServiceConfig<RepositoryContext>, 'events'>;
+
 export interface CreateGroupOptions {
   maxMembers?: number;
   allowSelfSignup?: boolean;
@@ -53,10 +58,23 @@ export interface CreateGroupOptions {
 }
 
 export class GroupService {
-  constructor(
-    private readonly repos: RepositoryContext,
-    private readonly options: GroupServiceOptions = {},
-  ) {}
+  private readonly repos: RepositoryContext;
+  private readonly options: GroupServiceOptions;
+
+  constructor(config: GroupServiceConfig);
+  /** @deprecated Pass one config object: `new GroupService({ repos, policy })`. See docs/MIGRATION.md. */
+  constructor(repos: RepositoryContext, options?: GroupServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as GroupServiceConfig;
+      this.repos = c.repos;
+      this.options = c.policy ? { policy: c.policy } : {};
+    } else {
+      const [repos, options] = args as [RepositoryContext, GroupServiceOptions?];
+      this.repos = repos;
+      this.options = options ?? {};
+    }
+  }
 
   private get groupRepo() {
     if (!this.repos.groups) {

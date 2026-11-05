@@ -49,7 +49,7 @@ Explore each part of the scheduling module:
 
 ## Integration with Other Modules
 
-- **Permissions:** Opt-in via `{ enforcement: { policy, repos } }`. Enforces `scheduling.view`, `scheduling.manage`, and `scheduling.manageOccurrence`.
+- **Permissions:** Opt-in via a `policy` in the constructor config. Enforces `scheduling.view`, `scheduling.manage`, and `scheduling.manageOccurrence`.
 - **Tenancy:** Enforces strict organization isolation: rooms (`Room.orgId`), teachers, groups, and course sections must belong to the same organization.
 - **Attendance:** Shares structural types with `discendo-sdk/reporting`, allowing a single attendance table to serve both live sessions and analytics.
 - **Events:** Emits `scheduling.occurrenceCancelled` and `scheduling.occurrenceRescheduled`.

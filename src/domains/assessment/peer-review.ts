@@ -8,6 +8,8 @@ import {
 } from '../../core/permissions.js';
 import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type { ContentRepository } from '../../core/repositories.js';
 import type {
   PeerReview,
@@ -52,11 +54,26 @@ export interface ListSubmissionReviewsOptions {
   anonymous?: boolean;
 }
 
+/** `new PeerReviewService({ repos, policy? })`. */
+export type PeerReviewServiceConfig = Omit<ServiceConfig<PeerReviewServiceRepos>, 'events'>;
+
 export class PeerReviewService {
-  constructor(
-    private readonly repos: PeerReviewServiceRepos,
-    private readonly options?: PeerReviewServiceOptions,
-  ) {}
+  private readonly repos: PeerReviewServiceRepos;
+  private readonly options?: PeerReviewServiceOptions | undefined;
+
+  constructor(config: PeerReviewServiceConfig);
+  /** @deprecated Pass one config object: `new PeerReviewService({ repos, policy })`. See docs/MIGRATION.md. */
+  constructor(repos: PeerReviewServiceRepos, options?: PeerReviewServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as PeerReviewServiceConfig;
+      this.repos = c.repos;
+      this.options = c.policy ? { policy: c.policy } : {};
+    } else {
+      this.repos = args[0] as PeerReviewServiceRepos;
+      this.options = args[1] as PeerReviewServiceOptions | undefined;
+    }
+  }
 
   async assignPeerReviews(
     contentId: string,

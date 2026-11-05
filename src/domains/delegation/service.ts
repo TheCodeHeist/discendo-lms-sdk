@@ -5,12 +5,20 @@ import { authorize, activeSectionRole } from "../../core/permissions.js";
 import type { ActorContext, PermissionPolicy } from "../../core/permissions.js";
 import { authorizeInSection } from "../../core/authorization.js";
 import type { AuthorizationRepos } from "../../core/authorization.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import { ActionNotDelegableError, NotAnActiveTaError } from "./types.js";
 
 /** What the service needs: the authorization repositories plus a delegation repository. */
 export type DelegationRepos = AuthorizationRepos & {
   delegations: DelegationRepository;
 };
+
+/** `new DelegationService({ repos, policy, events?, delegableActions? })`. `policy` is required. */
+export interface DelegationServiceConfig extends ServiceConfig<DelegationRepos> {
+  policy: PermissionPolicy & { delegableActions?: readonly string[] };
+  delegableActions?: readonly string[];
+}
 
 export interface DelegationServiceOptions {
   /**
@@ -35,15 +43,27 @@ export class DelegationService {
   private readonly delegable: ReadonlySet<string>;
   private readonly events?: EventBus | undefined;
 
-  constructor(
-    private readonly repos: DelegationRepos,
-    private readonly options: DelegationServiceOptions,
-    events?: EventBus,
-  ) {
-    this.delegable = new Set(
-      options.delegableActions ?? options.policy.delegableActions ?? [],
-    );
-    this.events = events ?? options.events;
+  private readonly repos: DelegationRepos;
+  private readonly options: DelegationServiceOptions;
+
+  constructor(config: DelegationServiceConfig);
+  /** @deprecated Pass one config object: `new DelegationService({ repos, policy, events })`. See docs/MIGRATION.md. */
+  constructor(repos: DelegationRepos, options: DelegationServiceOptions, events?: EventBus);
+  constructor(...args: unknown[]) {
+    let events: EventBus | undefined;
+    if (isServiceConfig(args)) {
+      const c = args[0] as DelegationServiceConfig;
+      this.repos = c.repos;
+      this.options = { policy: c.policy, ...(c.delegableActions ? { delegableActions: c.delegableActions } : {}) };
+      events = c.events;
+    } else {
+      const [repos, options, legacyEvents] = args as [DelegationRepos, DelegationServiceOptions, EventBus | undefined];
+      this.repos = repos;
+      this.options = options;
+      events = legacyEvents ?? options.events;
+    }
+    this.delegable = new Set(this.options.delegableActions ?? this.options.policy.delegableActions ?? []);
+    this.events = events;
   }
 
   /** Gives `taUserId` the right to do `action` in `sectionId`. Granting the same action twice returns the first grant. */

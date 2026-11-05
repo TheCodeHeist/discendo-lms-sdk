@@ -17,7 +17,7 @@ description: Learn how discendo-sdk/reporting tracks student attendance, calcula
 | **Locators**     | `SessionLocator`                                                                             |
 | **Events**       | `reporting.attendanceRecorded`                                                               |
 | **Permissions**  | `reporting.recordAttendance` (delegable), `reporting.view`                                   |
-| **Enforcement**  | Opt-in via constructor options `{ sessions, enforcement: { policy, repos } }`                |
+| **Enforcement**  | Opt-in: a `policy` in the constructor config (needs `sessions`)                          |
 
 ---
 
@@ -63,9 +63,10 @@ const sessionLocator: SessionLocator = {
 ### `ReportingService` Operations
 
 ```ts
-const reporting = new ReportingService(attendanceRepo, {
+const reporting = new ReportingService({
+  repos: { ...repos, attendance: attendanceRepo },
   sessions: sessionLocator,
-  enforcement: { policy, repos },
+  policy,
 });
 
 // 1. Record attendance marks

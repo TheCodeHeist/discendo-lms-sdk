@@ -61,7 +61,7 @@ describe('documentation: coverage', () => {
   });
 
   it('gives every module page a "Known limitations" section', () => {
-    const modulePages = pages.filter((p) => !['INDEX.md', 'GETTING_STARTED.md', ...REDIRECT_PAGES].includes(p));
+    const modulePages = pages.filter((p) => !['INDEX.md', 'GETTING_STARTED.md', 'MIGRATION.md', ...REDIRECT_PAGES].includes(p));
     const missing = modulePages.filter((p) => !/^## Known limitations/m.test(text(p)));
     expect(missing).toEqual([]);
   });

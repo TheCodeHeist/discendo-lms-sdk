@@ -17,7 +17,7 @@ everywhere else begins here.
 | **You implement** | the `core` repositories: `users`, `courses`, `enrollments`, and `enrollmentRequests` if you use requests (the others in `RepositoryContext` are unused here) |
 | **Emits events** | `enrollment.enrolled`, `enrollment.dropped`, `enrollment.promoted`, `enrollment.requested`, `enrollment.requestDecided` |
 | **Permission actions** | `enrollment.enroll`, `enrollment.bulkEnroll`, `enrollment.drop`, `enrollment.viewRoster`, `enrollment.promoteWaitlist`, `enrollment.reviewRequest`, `enrollment.grantRole.<role>` |
-| **Enforcement** | `EnrollmentService`: opt-in, `new EnrollmentService(repos, bus, { policy })`. `EnrollmentRequestService`: always on, a policy is required |
+| **Enforcement** | `EnrollmentService`: opt-in, `new EnrollmentService({ repos, events, policy })`. `EnrollmentRequestService`: always on, a policy is required |
 
 ## Types (`types.ts`)
 
@@ -78,7 +78,7 @@ interface BatchReport {
 ## `EnrollmentService`
 
 ```ts
-new EnrollmentService(repos: RepositoryContext, events?: EventBus, options?: { policy?: PermissionPolicy; promoteOnDrop?: boolean })
+new EnrollmentService({ repos: RepositoryContext, events?: EventBus, policy?: PermissionPolicy, promoteOnDrop?: boolean, enforcePrerequisites?: boolean, gradeSource? })
 ```
 
 `promoteOnDrop` turns on automatic promotion (see `drop` below). It is off by default.
@@ -227,12 +227,12 @@ another section of the same course) or **rejects** it. The student's own methods
 not roles, and the reviewer's methods are the `enrollment.reviewRequest` action.
 
 ```ts
-new EnrollmentRequestService(
+new EnrollmentRequestService({
   repos,        // authorization repositories + enrollmentRequests
   enrollment,   // an EnrollmentService: accepting goes through its enroll()
-  bus?,
-  { policy },   // required: every method needs an { actorId }
-)
+  policy,       // required: every method needs an { actorId }
+  events?,
+})
 ```
 
 ```ts
@@ -299,7 +299,7 @@ await requests.modify(asked.id, 'sec-2', { actorId: admin.id }, { note: 'Moved t
 Manages student study and project groups within a section. Groups can support self-signup or staff assignment, and optional capacity limits. Exported from `discendo-sdk/enrollment`.
 
 ```ts
-const groupService = new GroupService(repos, bus, { policy });
+const groupService = new GroupService({ repos, policy });   // repos.groups: a GroupRepository
 ```
 
 ### Methods
@@ -316,7 +316,7 @@ const groupService = new GroupService(repos, bus, { policy });
 Manages course prerequisites, dependency graph validation, and sequential progression checks. Exported from `discendo-sdk/enrollment`.
 
 ```ts
-const prereqService = new PrerequisiteService(repos, { gradeSource });
+const prereqService = new PrerequisiteService({ repos, gradeSource });   // repos.coursePrerequisites
 ```
 
 ### Methods

@@ -16,7 +16,7 @@ description: Learn how discendo-sdk/admin tracks immutable audit logs, handles a
 | **Repositories** | `AuditRepository` (append-only)                                                                    |
 | **Events**       | None                                                                                               |
 | **Permissions**  | `admin.viewAuditLog` (account-wide admin only, non-delegable)                                      |
-| **Enforcement**  | Opt-in on `AdminService` via `{ enforcement: { policy, repos } }`                                  |
+| **Enforcement**  | Opt-in on `AdminService` via a `policy` (with `repos.users`)                                     |
 
 ---
 
@@ -71,8 +71,9 @@ const result = await withAudit(
 In multi-tenant deployments, use `AdminService` instead of plain `withAudit`. It ensures audit logs are stamped with the actor's verified organization and queries are tenant-scoped:
 
 ```ts
-const adminService = new AdminService(auditRepo, {
-  enforcement: { policy, repos },
+const adminService = new AdminService({
+  repos: { audit: auditRepo, users: repos.users },
+  policy,
 });
 
 // 1. Execute audited action

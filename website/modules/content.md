@@ -47,13 +47,13 @@ interface ContentNode {
 ## `ContentService`
 
 ```ts
-new ContentService(
-  repos: RepositoryContext,
-  completion?: CompletionChecker,
-  prerequisites: PrerequisiteEdge[] = [],
-  events?: EventBus,
-  options?: { policy?: PermissionPolicy }
-)
+new ContentService({
+  repos: RepositoryContext
+  completion: CompletionChecker
+  fixedPrerequisites?: PrerequisiteEdge[]
+  events?: EventBus
+  policy?: PermissionPolicy
+})
 ```
 
 ### `createNode(node, actor?): Promise<ContentNode>`
@@ -141,13 +141,13 @@ const prerequisites: PrerequisiteEdge[] = [
   { sourceId: "node-week1", targetId: "node-week2" }, // Must finish Week 1 before Week 2 unlocks
 ];
 
-const contentService = new ContentService(
+const contentService = new ContentService({
   repos,
-  completionChecker,
-  prerequisites,
-  bus,
-  { policy },
-);
+  completion: completionChecker,
+  fixedPrerequisites: prerequisites,
+  events: bus,
+  policy,
+});
 
 // Check if a student can access Week 2:
 const unlocked = await contentService.isUnlocked("node-week2", "u-student");

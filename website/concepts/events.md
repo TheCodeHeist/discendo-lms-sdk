@@ -22,8 +22,8 @@ const bus = new EventBus({
 });
 
 // Pass the same bus to all services that emit events
-const enrollment = new EnrollmentService(repos, bus);
-const grading = new GradingService(gradeRepo, bus);
+const enrollment = new EnrollmentService({ repos, events: bus });
+const grading = new GradingService({ repos: { grades: gradeRepo }, events: bus });
 
 // Subscribe to a specific event (type-safe payload)
 bus.on("enrollment.enrolled", async (event) => {

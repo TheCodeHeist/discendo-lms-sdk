@@ -25,7 +25,7 @@ The module has four parts:
 | **You implement** | `GradeRepository`; to hold grades until released, a `GradeReleaseRepository`; to enforce permissions also a `SubmissionLocator` and the `core` repositories `users`, `courses`, `enrollments` |
 | **Emits events** | `grading.gradePosted`, `grading.gradesReleased`, `grading.gradesHidden`, `grading.extensionGranted`, `grading.extensionRevoked`, `grading.excused`, `grading.unexcused` |
 | **Permission actions** | `grading.record`, `grading.view`, `grading.release`, `grading.grantExtension`, `grading.excuse` (and `recordSystemGrade`, which takes no actor: see below) |
-| **Enforcement** | opt-in: the third constructor argument, `{ policy, repos, submissions }` |
+| **Enforcement** | opt-in: a `policy` in the constructor's config (`repos` then also needs `users`, `courses`, `enrollments`, and a `submissions` locator is required) |
 
 ## Types (`types.ts`)
 
@@ -72,12 +72,19 @@ entry-2  (90/100, graded by teacher-1)             ← current
 ## `GradingService`
 
 ```ts
-new GradingService(
-  grades: GradeRepository,
-  events?: EventBus,
-  enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos; submissions: SubmissionLocator },
-  options?: { allowExtraCredit?: boolean; systemGraders?: string[] },
-)
+new GradingService({
+  repos: {
+    grades: GradeRepository;
+    excusals?: ExcusalRepository;          // leave excused work out of final grades
+    releases?: GradeReleaseRepository;     // hold grades until released
+    // with a policy also: users, courses, enrollments
+  };
+  policy?: PermissionPolicy;               // turns enforcement on
+  submissions?: SubmissionLocator;         // required with a policy
+  events?: EventBus;
+  allowExtraCredit?: boolean;
+  systemGraders?: string[];
+})
 ```
 
 `allowExtraCredit` (off by default) lets a score exceed the maximum; see `recordGrade` below.
@@ -216,7 +223,7 @@ By default a grade is visible to the student the moment it is recorded. To hold 
 whole class is marked, give `GradingService` a `GradeReleaseRepository` as the `releases` option:
 
 ```ts
-const grading = new GradingService(grades, bus, enforcement, { releases: gradeReleaseRepository });
+const grading = new GradingService({ repos: { grades, releases: gradeReleaseRepository, ...repos }, policy, submissions });
 
 await grading.recordGrade(sub.id, 'sam', 18, 20, 'ms-lee', undefined, as('ms-lee'));  // held
 await grading.releaseGrades('bio-a', essayId, as('ms-lee'));   // now Sam sees it, and every later grade for it
@@ -274,11 +281,11 @@ scope. **Nothing is deleted**: ending one sets `revokedAt` and `revokedBy`, and 
 old one as history.
 
 ```ts
-new AccommodationService(
+new AccommodationService({
   repos,        // the authorization repositories, `content`, plus `extensions` and `excusals` (below)
-  bus?,
-  { policy },   // required: every method needs an { actorId }, because each record says who made it
-)
+  policy,       // required: every method needs an { actorId }, because each record says who made it
+  events?,
+})
 ```
 
 ```ts

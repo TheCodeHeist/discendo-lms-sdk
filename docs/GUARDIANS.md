@@ -104,7 +104,7 @@ const guardianLinks: GuardianLinkRepository = {
 
 const repos = { users, courses, enrollments, content, terms, guardianLinks };
 
-const grading = new GradingService(gradeRepo, bus, { policy, repos, submissions });
+const grading = new GradingService({ repos: { grades: gradeRepo, ...repos }, policy, submissions });
 
 // The parent asks for their child's final grade:
 const percent = await grading.computeFinalGradeForUser(
@@ -134,7 +134,7 @@ const guardianLinks: GuardianLinkManagementRepository = {
   listByGuardian: (guardianId) => db.guardianLink.findMany({ where: { guardianId } }),
 };
 
-const guardians = new GuardianService({ users, courses, enrollments, guardianLinks }, { policy });
+const guardians = new GuardianService({ repos: { users, courses, enrollments, guardianLinks }, policy });
 
 const link = await guardians.createLink(parent.id, child.id, ['grades', 'announcements'], { actorId: admin.id });
 ```

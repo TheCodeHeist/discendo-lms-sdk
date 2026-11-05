@@ -23,8 +23,8 @@ const bus = new EventBus({
 });
 
 // One bus, shared by every service that should emit.
-const enrollment = new EnrollmentService(repos, bus);
-const grading = new GradingService(gradeRepo, bus);
+const enrollment = new EnrollmentService({ repos, events: bus });
+const grading = new GradingService({ repos: { grades: gradeRepo }, events: bus });
 
 bus.on('enrollment.enrolled', async (e) => {
   await mailer.sendWelcome(e.userId, e.sectionId); // e is fully typed

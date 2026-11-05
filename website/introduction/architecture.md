@@ -129,12 +129,16 @@ When one service needs to look up data that conceptually belongs to another doma
 For example, `GradingService` needs to know which course section a submission belongs to in order to check permissions, but it cannot import `AssessmentRepository`. It takes an optional `SubmissionLocator`:
 
 ```ts
-const grading = new GradingService(gradeRepo, {
-  submissionLocator: async (submissionId) => {
-    const sub = await myDb.submissions.findUnique({
-      where: { id: submissionId },
-    });
-    return sub ? { sectionId: sub.sectionId, userId: sub.userId } : null;
+const grading = new GradingService({
+  repos: { ...repos, grades: gradeRepo },
+  policy,
+  submissions: {
+    locate: async (submissionId) => {
+      const sub = await myDb.submissions.findUnique({
+        where: { id: submissionId },
+      });
+      return sub ? { sectionId: sub.sectionId, userId: sub.userId } : null;
+    },
   },
 });
 ```
@@ -190,7 +194,7 @@ sequenceDiagram
 
 ## Dependency injection without magic
 
-There are no decorators, no reflection, and no global containers in Discendo SDK. Every service takes its dependencies as **plain constructor arguments**:
+There are no decorators, no reflection, and no global containers in Discendo SDK. Every service takes its dependencies as **one plain config object** (`{ repos, policy?, events?, ... }`):
 
 ```ts
 // 1. Repositories (you implement)
@@ -209,11 +213,19 @@ const bus = new EventBus();
 const policy = createRolePolicy();
 
 // 4. Construct services once at application startup
-export const enrollmentService = new EnrollmentService(repos, bus, { policy });
-export const contentService = new ContentService(repos.content, bus, {
+export const enrollmentService = new EnrollmentService({ repos, events: bus, policy });
+export const contentService = new ContentService({
+  repos,
+  completion,
+  events: bus,
   policy,
 });
-export const gradingService = new GradingService(gradeRepo, bus, { policy });
+export const gradingService = new GradingService({
+  repos: { ...repos, grades: gradeRepo },
+  events: bus,
+  policy,
+  submissions: submissionLocator,
+});
 ```
 
 In your HTTP handlers, you import these pre-configured service instances directly.

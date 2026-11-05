@@ -12,6 +12,8 @@ import {
   assertInActorOrg,
 } from "../../core/authorization.js";
 import type { Authorized } from "../../core/authorization.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import { sameOrg } from "../../core/tenancy.js";
 import {
   GuardianLinkExistsError,
@@ -35,6 +37,11 @@ export interface GuardianServiceOptions {
   events?: EventBus | undefined;
 }
 
+/** `new GuardianService({ repos, policy, events? })`. `policy` is required; `repos.guardianLinks` manages links. */
+export interface GuardianServiceConfig extends ServiceConfig<GuardianServiceRepos> {
+  policy: PermissionPolicy;
+}
+
 const SCOPES: readonly GuardianScope[] = [
   "grades",
   "attendance",
@@ -45,12 +52,24 @@ const SCOPES: readonly GuardianScope[] = [
 export class GuardianService {
   private readonly events?: EventBus | undefined;
 
-  constructor(
-    private readonly repos: GuardianServiceRepos,
-    private readonly options: GuardianServiceOptions,
-    events?: EventBus,
-  ) {
-    this.events = events ?? options.events;
+  private readonly repos: GuardianServiceRepos;
+  private readonly options: GuardianServiceOptions;
+
+  constructor(config: GuardianServiceConfig);
+  /** @deprecated Pass one config object: `new GuardianService({ repos, policy, events })`. See docs/MIGRATION.md. */
+  constructor(repos: GuardianServiceRepos, options: GuardianServiceOptions, events?: EventBus);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as GuardianServiceConfig;
+      this.repos = c.repos;
+      this.options = { policy: c.policy };
+      this.events = c.events;
+    } else {
+      const [repos, options, events] = args as [GuardianServiceRepos, GuardianServiceOptions, EventBus | undefined];
+      this.repos = repos;
+      this.options = options;
+      this.events = events ?? options.events;
+    }
   }
 
   /**

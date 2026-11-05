@@ -17,7 +17,7 @@ in which order, from when to when, and after what.
 | **You implement** | `ContentRepository` (in `core`) and a `CompletionChecker`; optionally a `ContentRevisionRepository` (history) and a `ContentPrerequisiteRepository` (prerequisites staff can change) |
 | **Emits events** | `content.published`, `content.unpublished`, `content.updated` |
 | **Permission actions** | `content.view`, `content.manage` (delegable to a TA) |
-| **Enforcement** | opt-in: the fifth constructor argument, `{ policy }` |
+| **Enforcement** | opt-in: a `policy` in the constructor's config |
 
 ## The data (`core`)
 
@@ -47,13 +47,16 @@ and its organization is the organization of that section's course.
 ## `ContentService`
 
 ```ts
-new ContentService(
-  repos: RepositoryContext,
-  completion: CompletionChecker,
-  prerequisites: PrerequisiteEdge[] = [],
-  events?: EventBus,
-  options: ContentServiceOptions = {},     // { policy?, revisions?, prerequisites? }
-)
+new ContentService({
+  repos: RepositoryContext & {
+    contentRevisions?: ContentRevisionRepository;       // turns the version history on
+    contentPrerequisites?: ContentPrerequisiteRepository;   // prerequisites staff can change
+  };
+  completion: CompletionChecker;
+  fixedPrerequisites?: PrerequisiteEdge[];   // prerequisites that never change while running
+  policy?: PermissionPolicy;
+  events?: EventBus;
+})
 ```
 
 | Option | Turns on |
@@ -63,7 +66,7 @@ new ContentService(
 | `prerequisites` | a `ContentPrerequisiteRepository`: prerequisites staff add and remove while running (`addPrerequisite`, `removePrerequisite`). Edges passed to the constructor count as well |
 
 Every method except `isUnlocked` and `checkAccess` takes a trailing `actor?: { actorId }`. It is
-required when `options.policy` is set and ignored otherwise.
+required when a `policy` is set and ignored otherwise.
 
 ### `createNode(node, actor?): Promise<ContentNode>`
 
@@ -216,7 +219,7 @@ const prerequisites = [
   { contentId: 'quiz-2', requiresContentId: 'lesson-2' },
   { contentId: 'quiz-2', requiresContentId: 'quiz-1' },
 ];
-const service = new ContentService(repos, completion, prerequisites);
+const service = new ContentService({ repos, completion, fixedPrerequisites: prerequisites });
 
 await service.isUnlocked('stu-1', 'quiz-2');   // true only if BOTH are complete
 ```
@@ -262,10 +265,10 @@ successful `publish` and `unpublish`, and `content.updated` (`contentId`, `secti
 
 ## Permissions
 
-Turn enforcement on with `{ policy }` as the fifth constructor argument:
+Turn enforcement on with a `policy`:
 
 ```ts
-const content = new ContentService(repos, completion, edges, bus, { policy });
+const content = new ContentService({ repos, completion, events: bus, policy });
 
 await content.createNode({ sectionId: 'sec-1', kind: 'page', title: 'Week 1', orderIndex: 1, published: false }, { actorId: teacher.id });
 await content.publish(node.id, { actorId: teacher.id });

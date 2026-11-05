@@ -19,7 +19,7 @@ attaches a score to a submission this module created.
 | **Optional seams** | a `PlagiarismCheckHook`; an `EventBus`; `autoGrade`, a `QuizGradeSink` (a `GradingService` fits); `extensions`, an `ExtensionSource` (extra quiz time) |
 | **Emits events** | `assessment.submissionReceived`, `assessment.quizSubmitted` |
 | **Permission actions** | `assessment.submit`, `assessment.startAttempt`, `assessment.answerQuiz`, `assessment.submitQuiz`, `assessment.viewAttempts`, `assessment.recordOffline` |
-| **Enforcement** | opt-in: the fifth constructor argument, `{ policy, repos }` |
+| **Enforcement** | opt-in: a `policy` in the constructor's config (`repos` then also needs `users`, `courses`, `enrollments`, `content`) |
 
 ## Types (`types.ts`)
 
@@ -106,7 +106,7 @@ type PlagiarismCheckHook = (submission: Submission) => Promise<PlagiarismCheckRe
 `RubricService` manages rubrics associated with content and handles rubric evaluations:
 
 ```ts
-const rubrics = new RubricService(repos, { policy });
+const rubrics = new RubricService({ repos, policy });
 await rubrics.saveRubric('assign-1', [
   { id: 'crit-thesis', description: 'Thesis clarity', maxPoints: 10 },
   { id: 'crit-evidence', description: 'Supporting evidence', maxPoints: 20 },
@@ -126,7 +126,7 @@ const rubric = await rubrics.getRubric('assign-1', { actorId: student.id });
 `PeerReviewService` manages peer review assignments and evaluations:
 
 ```ts
-const peerReviews = new PeerReviewService(repos, { policy });
+const peerReviews = new PeerReviewService({ repos, policy });
 // Assign reviews (cyclic shift distribution among submitters):
 await peerReviews.assignPeerReviews('assign-1', { reviewsPerStudent: 2 }, { actorId: teacher.id });
 
@@ -215,13 +215,18 @@ before, with the race described in the limitations.
 ## `AssessmentService`
 
 ```ts
-new AssessmentService(
-  submissions: SubmissionRepository,
-  quizzes: QuizRepository,
-  plagiarismHook?: PlagiarismCheckHook,
-  events?: EventBus,
-  enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos & Pick<RepositoryContext, 'content'> },
-)
+new AssessmentService({
+  repos: {
+    submissions: SubmissionRepository;
+    quizzes: QuizRepository;
+    // with a policy also: users, courses, enrollments, content (and groups for group work)
+  };
+  policy?: PermissionPolicy;
+  events?: EventBus;
+  plagiarismHook?: PlagiarismCheckHook;
+  extensions?: ExtensionSource;                          // see "Extra time"
+  autoGrade?: { grading: QuizGradeSink; source?: string };   // see "Automatic grading"
+})
 ```
 
 Every method takes a trailing `actor?: { actorId }`. It is required when `enforcement`
@@ -433,7 +438,9 @@ A pure function you can also call yourself, for example to preview a score. It w
 ### Extra time: the `extensions` option
 
 ```ts
-const assessment = new AssessmentService(subs, quizzes, hook, bus, enforcement, {
+const assessment = new AssessmentService({
+  repos,
+  policy,
   extensions: accommodationExtensions,   // anything with findActive(userId, contentId): { extraSeconds } | null
 });
 ```
@@ -447,8 +454,10 @@ not a finite number above zero is ignored.
 ### Automatic grading: the `autoGrade` option
 
 ```ts
-const grading = new GradingService(grades, bus, undefined, { systemGraders: ['system:quiz'] });
-const assessment = new AssessmentService(subs, quizzes, hook, bus, enforcement, {
+const grading = new GradingService({ repos: { grades }, systemGraders: ['system:quiz'] });
+const assessment = new AssessmentService({
+  repos,
+  policy,
   autoGrade: { grading, source: 'system:quiz' },   // source is optional, default 'system:quiz'
 });
 ```
@@ -464,14 +473,14 @@ superseded rather than overwritten. Without
 ## The plagiarism hook (read this)
 
 ```ts
-const assessment = new AssessmentService(subs, quizzes, async (submission) => {
+const assessment = new AssessmentService({ repos, plagiarismHook: async (submission) => {
   try {
     await checker.check(submission);
   } catch (error) {
     logger.error(error);          // never let it throw
   }
   return { flagged: false };
-});
+} });
 ```
 
 The hook is **fire-and-forget by design**: a slow external check must not block a
@@ -487,12 +496,12 @@ submission. Two consequences you must know:
 
 ## Permissions
 
-Turn enforcement on with the fifth constructor argument:
+Turn enforcement on with a `policy`:
 
 ```ts
-const assessment = new AssessmentService(subs, quizzes, hook, bus, {
+const assessment = new AssessmentService({
+  repos,        // submissions, quizzes, and users, courses, enrollments, content (optionally guardianLinks, delegations)
   policy: createRolePolicy(),
-  repos,        // users, courses, enrollments and content (and optionally guardianLinks, delegations)
 });
 ```
 

@@ -5,6 +5,8 @@ import { PermissionDeniedError, activeSectionRole } from '../../core/permissions
 import { authorizeInSection, isStaff } from '../../core/authorization.js';
 import { ContentNotAvailableError, contentAvailability } from '../../core/content-availability.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type {
   Submission,
   SubmissionPayload,
@@ -101,20 +103,67 @@ export interface AssessmentEnforcement {
   repos: AuthorizationRepos & Pick<RepositoryContext, 'content' | 'groups'>;
 }
 
+/**
+ * `new AssessmentService({ repos: { submissions, quizzes, ... }, policy?, events?, plagiarismHook?,
+ * extensions?, autoGrade? })`. With a `policy`, `repos` must also hold `users`, `courses`,
+ * `enrollments` and `content` (and `groups` for group work).
+ */
+export interface AssessmentServiceConfig
+  extends ServiceConfig<
+    { submissions: SubmissionRepository; quizzes: QuizRepository } & Partial<AuthorizationRepos> &
+      Partial<Pick<RepositoryContext, 'content' | 'groups'>>
+  >,
+    AssessmentOptions {
+  plagiarismHook?: PlagiarismCheckHook;
+}
+
 export class AssessmentService {
+  private readonly submissions: SubmissionRepository;
+  private readonly quizzes: QuizRepository;
+  private readonly plagiarismHook?: PlagiarismCheckHook | undefined;
+  private readonly events?: EventBus | undefined;
+  private readonly enforcement?: AssessmentEnforcement | undefined;
+  private readonly options: AssessmentOptions;
+
+  constructor(config: AssessmentServiceConfig);
+  /** @deprecated Pass one config object: `new AssessmentService({ repos, ... })`. See docs/MIGRATION.md. */
   constructor(
-    private readonly submissions: SubmissionRepository,
-    private readonly quizzes: QuizRepository,
-    private readonly plagiarismHook?: PlagiarismCheckHook,
-    private readonly events?: EventBus,
-    /**
-     * Turns on permission enforcement. Once set, every public method requires an `{ actorId }`
-     * argument and refuses to run without one. Leave it unset and the service behaves as it
-     * always has: no actor, no permission checks.
-     */
-    private readonly enforcement?: AssessmentEnforcement,
-    private readonly options: AssessmentOptions = {},
-  ) {}
+    submissions: SubmissionRepository,
+    quizzes: QuizRepository,
+    plagiarismHook?: PlagiarismCheckHook,
+    events?: EventBus,
+    enforcement?: AssessmentEnforcement,
+    options?: AssessmentOptions,
+  );
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const { repos, policy, events, plagiarismHook, extensions, autoGrade } = args[0] as AssessmentServiceConfig;
+      this.submissions = repos.submissions;
+      this.quizzes = repos.quizzes;
+      this.plagiarismHook = plagiarismHook;
+      this.events = events;
+      if (policy) {
+        requireRepos('AssessmentService', repos, [...AUTHORIZATION_REPOS, 'content']);
+        this.enforcement = { policy, repos: repos as AssessmentEnforcement['repos'] };
+      }
+      this.options = { ...(extensions ? { extensions } : {}), ...(autoGrade ? { autoGrade } : {}) };
+    } else {
+      const [submissions, quizzes, plagiarismHook, events, enforcement, options] = args as [
+        SubmissionRepository,
+        QuizRepository,
+        PlagiarismCheckHook | undefined,
+        EventBus | undefined,
+        AssessmentEnforcement | undefined,
+        AssessmentOptions | undefined,
+      ];
+      this.submissions = submissions;
+      this.quizzes = quizzes;
+      this.plagiarismHook = plagiarismHook;
+      this.events = events;
+      this.enforcement = enforcement;
+      this.options = options ?? {};
+    }
+  }
 
   /**
    * Records a submission. With enforcement on (`actor` required), only the student themselves

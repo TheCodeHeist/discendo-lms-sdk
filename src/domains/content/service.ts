@@ -8,6 +8,8 @@ import type {
 } from "../../core/permissions.js";
 import { authorizeInSection, isStaff } from "../../core/authorization.js";
 import type { Authorized } from "../../core/authorization.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import { PermissionDeniedError } from "../../core/permissions.js";
 import { ContentNotAvailableError, contentAvailability } from "../../core/content-availability.js";
 import { InvalidContentChangeError, InvalidPrerequisiteError } from "./types.js";
@@ -50,14 +52,63 @@ export interface ContentServiceOptions {
 /** The fields a revision of kind `updated` can name. */
 const EDITABLE = ["title", "kind", "parentId", "availableFrom", "availableUntil", "dueAt"] as const;
 
+/**
+ * `new ContentService({ repos, completion, policy?, events?, fixedPrerequisites? })`. Besides the core
+ * repositories, `repos.contentRevisions` turns on the version history and `repos.contentPrerequisites`
+ * stored prerequisites.
+ */
+export interface ContentServiceConfig
+  extends ServiceConfig<
+    RepositoryContext & { contentRevisions?: ContentRevisionRepository; contentPrerequisites?: ContentPrerequisiteRepository }
+  > {
+  completion: CompletionChecker;
+  /** Prerequisites that never change while the service runs. They count alongside the stored ones. */
+  fixedPrerequisites?: PrerequisiteEdge[];
+}
+
 export class ContentService {
+  private readonly repos: RepositoryContext;
+  private readonly completion: CompletionChecker;
+  private readonly fixedPrerequisites: PrerequisiteEdge[];
+  private readonly events?: EventBus | undefined;
+  private readonly options: ContentServiceOptions;
+
+  constructor(config: ContentServiceConfig);
+  /** @deprecated Pass one config object: `new ContentService({ repos, ... })`. See docs/MIGRATION.md. */
   constructor(
-    private readonly repos: RepositoryContext,
-    private readonly completion: CompletionChecker,
-    private readonly fixedPrerequisites: PrerequisiteEdge[] = [],
-    private readonly events?: EventBus,
-    private readonly options: ContentServiceOptions = {},
-  ) {}
+    repos: RepositoryContext,
+    completion: CompletionChecker,
+    prerequisites?: PrerequisiteEdge[],
+    events?: EventBus,
+    options?: ContentServiceOptions,
+  );
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as ContentServiceConfig;
+      this.repos = c.repos;
+      this.completion = c.completion;
+      this.fixedPrerequisites = c.fixedPrerequisites ?? [];
+      this.events = c.events;
+      this.options = {
+        ...(c.policy ? { policy: c.policy } : {}),
+        ...(c.repos.contentRevisions ? { revisions: c.repos.contentRevisions } : {}),
+        ...(c.repos.contentPrerequisites ? { prerequisites: c.repos.contentPrerequisites } : {}),
+      };
+    } else {
+      const [repos, completion, prerequisites, events, options] = args as [
+        RepositoryContext,
+        CompletionChecker,
+        PrerequisiteEdge[] | undefined,
+        EventBus | undefined,
+        ContentServiceOptions | undefined,
+      ];
+      this.repos = repos;
+      this.completion = completion;
+      this.fixedPrerequisites = prerequisites ?? [];
+      this.events = events;
+      this.options = options ?? {};
+    }
+  }
 
   /**
    * Stores a new node (version 1). With enforcement on (`actor` required) the actor needs

@@ -25,7 +25,7 @@ import { EnrollmentService } from 'discendo-sdk/enrollment';
 
 const policy = createRolePolicy();            // the default rules, see below
 
-const enrollment = new EnrollmentService(repos, bus, { policy });
+const enrollment = new EnrollmentService({ repos, events: bus, policy });
 
 // Every call now says who is acting.
 await enrollment.enroll(
@@ -54,15 +54,15 @@ permitted: grading.record") deliberately says nothing about *why*.
 
 | Module | Enforces | How you turn it on |
 | --- | --- | --- |
-| [enrollment](./ENROLLMENT.md) | yes, every method | `new EnrollmentService(repos, bus, { policy })` |
-| [grading](./GRADING.md) | yes, `recordGrade` and both final-grade methods | `new GradingService(grades, bus, { policy, repos, submissions })` |
-| [assessment](./ASSESSMENT.md) | yes, all three methods | `new AssessmentService(subs, quizzes, hook, bus, { policy, repos })` |
-| [delegation](./DELEGATION.md) | always (it has no unenforced mode) | `new DelegationService(repos, { policy })` |
-| [content](./CONTENT.md) | yes, `createNode`, `publish`, `reorder`, `getNode`, `listNodes` (`isUnlocked` is a pure check) | `new ContentService(repos, completion, edges, bus, { policy })` |
-| [communication](./COMMUNICATION.md) | yes, `postAnnouncement`, `listAnnouncements`, `reply`, `getThread` | `new CommunicationService(announcements, threads, sink, { enforcement: { policy, repos } })` |
-| [scheduling](./SCHEDULING.md) | yes, every method of `SchedulingService` | `new SchedulingService(repo, recorder, bus, { enforcement: { policy, repos }, settings })` |
-| [reporting](./REPORTING.md) | yes, `recordAttendance`, `listAttendanceForSession`, `attendanceForStudent` (`computeCompletionPercent` and `toCsv` are pure) | `new ReportingService(attendance, { sessions, enforcement: { policy, repos } })` |
-| [admin](./ADMIN.md) | yes, `AdminService.history` and `audited` | `new AdminService(audit, { enforcement: { policy, repos } })` |
+| [enrollment](./ENROLLMENT.md) | yes, every method | `new EnrollmentService({ repos, policy })` |
+| [grading](./GRADING.md) | yes, `recordGrade` and every view | `new GradingService({ repos: { grades, ...repos }, policy, submissions })` |
+| [assessment](./ASSESSMENT.md) | yes, every method | `new AssessmentService({ repos: { submissions, quizzes, content, ...repos }, policy })` |
+| [delegation](./DELEGATION.md) | always (it has no unenforced mode) | `new DelegationService({ repos, policy })` |
+| [content](./CONTENT.md) | yes, `createNode`, `publish`, `reorder`, `getNode`, `listNodes` (`isUnlocked` is a pure check) | `new ContentService({ repos, completion, policy })` |
+| [communication](./COMMUNICATION.md) | yes, `postAnnouncement`, `listAnnouncements`, `reply`, `getThread` | `new CommunicationService({ repos: { announcements, threads, ...repos }, sink, policy })` |
+| [scheduling](./SCHEDULING.md) | yes, every method of `SchedulingService` | `new SchedulingService({ repos: { scheduling, settings, attendance, ...repos }, policy })` |
+| [reporting](./REPORTING.md) | yes, `recordAttendance`, `listAttendanceForSession`, `attendanceForStudent` (`computeCompletionPercent` and `toCsv` are pure) | `new ReportingService({ repos: { attendance, ...repos }, sessions, policy })` |
+| [admin](./ADMIN.md) | yes, `AdminService.history` and `audited` | `new AdminService({ repos: { audit, users }, policy })` |
 
 **Every module can now enforce.** Anything you build yourself, or an old route that bypasses these
 services, still needs the policy called at your API boundary (see "Using the policy directly").

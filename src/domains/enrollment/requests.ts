@@ -6,6 +6,8 @@ import { ActorRequiredError, PermissionDeniedError } from '../../core/permission
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { authorizeInSection } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
+import { isServiceConfig } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type { EnrollmentService } from './service.js';
 import {
   AlreadyEnrolledError,
@@ -28,18 +30,50 @@ export interface EnrollmentRequestServiceOptions {
 }
 
 /**
+ * `new EnrollmentRequestService({ repos, enrollment, policy, events? })`. `policy` is required: requests
+ * always know who is asking and who decides. `enrollment` is the `EnrollmentService` that accepting
+ * enrolls through.
+ */
+export interface EnrollmentRequestServiceConfig extends ServiceConfig<EnrollmentRequestRepos> {
+  enrollment: Pick<EnrollmentService, 'enroll'>;
+  policy: PermissionPolicy;
+}
+
+/**
  * Lets a student ask for a seat and an administrator decide. Asking is always for yourself and
  * always as a `student`; deciding is `accept` (enroll them), `modify` (enroll them in another
  * section of the same course) or `reject`. Accepting goes through `EnrollmentService.enroll`, so
  * capacity, the waitlist queue, tenancy and the section's status apply exactly as for any enrollment.
  */
 export class EnrollmentRequestService {
+  private readonly repos: EnrollmentRequestRepos;
+  private readonly enrollment: Pick<EnrollmentService, 'enroll'>;
+  private readonly events: EventBus | undefined;
+  private readonly options: EnrollmentRequestServiceOptions;
+
+  constructor(config: EnrollmentRequestServiceConfig);
+  /** @deprecated Pass one config object: `new EnrollmentRequestService({ repos, enrollment, policy, events })`. See docs/MIGRATION.md. */
   constructor(
-    private readonly repos: EnrollmentRequestRepos,
-    private readonly enrollment: Pick<EnrollmentService, 'enroll'>,
-    private readonly events: EventBus | undefined,
-    private readonly options: EnrollmentRequestServiceOptions,
-  ) {}
+    repos: EnrollmentRequestRepos,
+    enrollment: Pick<EnrollmentService, 'enroll'>,
+    events: EventBus | undefined,
+    options: EnrollmentRequestServiceOptions,
+  );
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as EnrollmentRequestServiceConfig;
+      this.repos = c.repos;
+      this.enrollment = c.enrollment;
+      this.events = c.events;
+      this.options = { policy: c.policy };
+    } else {
+      const [repos, enrollment, events, options] = args as [EnrollmentRequestRepos, Pick<EnrollmentService, 'enroll'>, EventBus | undefined, EnrollmentRequestServiceOptions];
+      this.repos = repos;
+      this.enrollment = enrollment;
+      this.events = events;
+      this.options = options;
+    }
+  }
 
   /**
    * The actor asks for a seat in `sectionId`, for themself. This is not a permission action: a

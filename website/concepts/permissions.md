@@ -33,7 +33,7 @@ import { EnrollmentService } from "discendo-sdk/enrollment";
 const policy = createRolePolicy();
 
 // Enable enforcement on the service
-const enrollment = new EnrollmentService(repos, bus, { policy });
+const enrollment = new EnrollmentService({ repos, events: bus, policy });
 
 // Every call now requires an actor context
 await enrollment.enroll(

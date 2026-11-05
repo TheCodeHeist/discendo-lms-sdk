@@ -158,7 +158,7 @@ Instructors evaluate qualitative submissions (such as research papers or essays)
 ```ts
 import { RubricService } from "discendo-sdk/assessment";
 
-const rubricService = new RubricService(rubricRepo, { policy });
+const rubricService = new RubricService({ repos: rubricRepos, policy });
 
 // Evaluate an essay against thesis, evidence, and structure criteria
 const evaluation = await rubricService.evaluateSubmission(

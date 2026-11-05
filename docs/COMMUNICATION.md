@@ -17,7 +17,7 @@ delivery mechanism.
 | **You implement** | `AnnouncementRepository`, `ThreadRepository`, and a `NotificationSink` |
 | **Emits events** | `communication.deliveryFailed` (when sink dispatch fails) |
 | **Permission actions** | `communication.postAnnouncement` (delegable), `communication.postGuardianAnnouncement`, `communication.viewAnnouncements`, `communication.viewGuardianAnnouncements`, `communication.participate` |
-| **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the fourth constructor argument |
+| **Enforcement** | opt-in: a `policy` in the constructor's config (`repos` then also needs `users`, `courses`, `enrollments`) |
 
 ## Types (`types.ts`)
 
@@ -160,8 +160,10 @@ later. For each student and piece of content it dispatches a `dueDateApproaching
 sink, and returns what it sent.
 
 ```ts
-const communication = new CommunicationService(announcements, threads, sink, {
-  reminders: { content: repos.content, enrollments: repos.enrollments, log: reminderLog },
+const communication = new CommunicationService({
+  // content and enrollments turn reminders on; reminderLog sends each one once
+  repos: { announcements, threads, content: repos.content, enrollments: repos.enrollments, reminderLog },
+  sink,
 });
 
 // run hourly from your scheduler: everything due in the next 24 hours
@@ -239,11 +241,13 @@ const sink: NotificationSink = {
 
 ## Permissions
 
-Turn enforcement on with `enforcement` in the fourth constructor argument:
+Turn enforcement on with a `policy`:
 
 ```ts
-const communication = new CommunicationService(announcements, threads, sink, {
-  enforcement: { policy, repos },
+const communication = new CommunicationService({
+  repos: { announcements, threads, ...repos },   // repos: users, courses, enrollments (+ content)
+  sink,
+  policy,
   onDeliveryError: (error, announcement) => logger.error({ error, id: announcement.id }),
 });
 
