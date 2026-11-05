@@ -17,7 +17,7 @@ events, not kept as mutable state.
 | **You implement** | `AttendanceRepository`, `SessionLocator` (to read reports or enforce permissions), and `Exportable` for whatever you want to export |
 | **Emits events** | `reporting.attendanceRecorded` |
 | **Permission actions** | `reporting.recordAttendance` (delegable), `reporting.view` (a guardian can hold it via the `attendance` scope) |
-| **Enforcement** | opt-in: `{ enforcement: { policy, repos } }` in the second constructor argument, which also needs `sessions` |
+| **Enforcement** | opt-in: a `policy` in the constructor's config, which then also needs `sessions` and `repos.users`, `courses`, `enrollments` |
 
 ## Attendance
 
@@ -67,10 +67,11 @@ session it does not know is refused like a forbidden one.
 ### `ReportingService`
 
 ```ts
-new ReportingService(attendance: AttendanceRepository, options?: {
-  sessions?: SessionLocator;
-  enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos };
-  roster?: { enrollments; users? };   // for the exports; defaults to the enforcement repos
+new ReportingService({
+  repos: { attendance: AttendanceRepository; users?; courses?; enrollments? };   // enrollments (and users) feed the exports
+  sessions?: SessionLocator;     // required with a policy
+  policy?: PermissionPolicy;
+  events?: EventBus;
 })
 ```
 

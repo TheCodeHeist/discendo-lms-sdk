@@ -10,6 +10,8 @@ import type {
   AuthorizationRepos,
 } from "../../core/authorization.js";
 import type { EventBus } from "../../core/events.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import type { ContentRepository, EnrollmentRepository } from "../../core/repositories.js";
 import type {
   Announcement,
@@ -71,19 +73,74 @@ export interface CommunicationServiceOptions {
   reminders?: DueDateReminderOptions;
 }
 
+/**
+ * `new CommunicationService({ repos: { announcements, threads, ... }, sink?, policy?, events?,
+ * onDeliveryError? })`. With a `policy`, `repos` must also hold `users`, `courses` and `enrollments`;
+ * with `repos.content` threads on unpublished content are kept from students; with `repos.content`
+ * and `repos.enrollments`, `sendDueDateReminders` works (`repos.reminderLog` sends each once).
+ */
+export interface CommunicationServiceConfig
+  extends ServiceConfig<
+    {
+      announcements: AnnouncementRepository;
+      threads: ThreadRepository;
+      content?: Pick<ContentRepository, "findById" | "listBySection">;
+      reminderLog?: ReminderLog;
+    } & Partial<AuthorizationRepos>
+  > {
+  sink?: NotificationSink;
+  onDeliveryError?: (error: unknown, announcement: Announcement) => void;
+}
+
 const AUDIENCES: readonly AnnouncementAudience[] = ["students", "guardians"];
 
 export class CommunicationService {
   private readonly events?: EventBus | undefined;
 
+  private readonly announcements: AnnouncementRepository;
+  private readonly threads: ThreadRepository;
+  private readonly sink?: NotificationSink | undefined;
+  private readonly options: CommunicationServiceOptions;
+
+  constructor(config: CommunicationServiceConfig);
+  /** @deprecated Pass one config object: `new CommunicationService({ repos, sink, policy, events })`. See docs/MIGRATION.md. */
   constructor(
-    private readonly announcements: AnnouncementRepository,
-    private readonly threads: ThreadRepository,
-    private readonly sink?: NotificationSink,
-    private readonly options: CommunicationServiceOptions = {},
+    announcements: AnnouncementRepository,
+    threads: ThreadRepository,
+    sink?: NotificationSink,
+    options?: CommunicationServiceOptions,
     events?: EventBus,
-  ) {
-    this.events = events ?? options.events;
+  );
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const { repos, policy, events, sink, onDeliveryError } = args[0] as CommunicationServiceConfig;
+      if (policy) requireRepos("CommunicationService", repos, AUTHORIZATION_REPOS);
+      this.announcements = repos.announcements;
+      this.threads = repos.threads;
+      this.sink = sink;
+      this.events = events;
+      this.options = {
+        ...(policy ? { enforcement: { policy, repos: repos as CommunicationEnforcement["repos"] } } : {}),
+        ...(onDeliveryError ? { onDeliveryError } : {}),
+        // Reminders read the content and the roster from the same repos; the log is optional.
+        ...(repos.content && repos.enrollments
+          ? { reminders: { content: repos.content, enrollments: repos.enrollments, ...(repos.reminderLog ? { log: repos.reminderLog } : {}) } }
+          : {}),
+      };
+    } else {
+      const [announcements, threads, sink, options, events] = args as [
+        AnnouncementRepository,
+        ThreadRepository,
+        NotificationSink | undefined,
+        CommunicationServiceOptions | undefined,
+        EventBus | undefined,
+      ];
+      this.announcements = announcements;
+      this.threads = threads;
+      this.sink = sink;
+      this.options = options ?? {};
+      this.events = events ?? this.options.events;
+    }
   }
 
   /**

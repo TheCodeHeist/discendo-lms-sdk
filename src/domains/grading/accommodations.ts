@@ -12,6 +12,8 @@ import {
 import { authorizeInSection } from "../../core/authorization.js";
 import type { AuthorizationRepos } from "../../core/authorization.js";
 import type { RepositoryContext } from "../../core/repositories.js";
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from "../../core/service-config.js";
+import type { ServiceConfig } from "../../core/service-config.js";
 import type { Excusal, TimeExtension } from "./types.js";
 
 export interface TimeExtensionRepository {
@@ -48,16 +50,36 @@ export interface AccommodationServiceOptions {
   policy: PermissionPolicy;
 }
 
+/** `new AccommodationService({ repos, policy, events? })`. `policy` is required: every record says who made it. */
+export interface AccommodationServiceConfig extends ServiceConfig<AccommodationRepos> {
+  policy: PermissionPolicy;
+}
+
 export interface ListOptions {
   includeRevoked?: boolean;
 }
 
 export class AccommodationService {
-  constructor(
-    private readonly repos: AccommodationRepos,
-    private readonly events: EventBus | undefined,
-    private readonly options: AccommodationServiceOptions,
-  ) {}
+  private readonly repos: AccommodationRepos;
+  private readonly events: EventBus | undefined;
+  private readonly options: AccommodationServiceOptions;
+
+  constructor(config: AccommodationServiceConfig);
+  /** @deprecated Pass one config object: `new AccommodationService({ repos, policy, events })`. See docs/MIGRATION.md. */
+  constructor(repos: AccommodationRepos, events: EventBus | undefined, options: AccommodationServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as AccommodationServiceConfig;
+      this.repos = c.repos;
+      this.events = c.events;
+      this.options = { policy: c.policy };
+    } else {
+      const [repos, events, options] = args as [AccommodationRepos, EventBus | undefined, AccommodationServiceOptions];
+      this.repos = repos;
+      this.events = events;
+      this.options = options;
+    }
+  }
 
   /**
    * Grants the student extra time on a piece of content: added to deadlines and quiz time limits.

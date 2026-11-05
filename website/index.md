@@ -75,7 +75,7 @@ import { createRolePolicy, EventBus } from 'discendo-sdk/core'
 import { EnrollmentService } from 'discendo-sdk/enrollment'
 
 const bus = new EventBus()
-const enrollment = new EnrollmentService(repos, bus, { policy: createRolePolicy() })
+const enrollment = new EnrollmentService({ repos, events: bus, policy: createRolePolicy() })
 
 await enrollment.enroll(
   { userId: 'stu-1', sectionId: 'sec-1', role: 'student' },

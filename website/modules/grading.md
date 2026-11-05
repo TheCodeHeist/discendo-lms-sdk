@@ -17,7 +17,7 @@ description: Comprehensive documentation for discendo-sdk/grading — immutable 
 | **Pure Functions** | `computeFinalGrade`, `applyLatePolicy`, `effectiveDueAt`, `daysLate`, `toLetterGrade`, `applyCurve`, `curveEntries`, `computeGpa`, `toGpaPoints`         |
 | **Events**         | `grading.gradePosted`, `grading.extensionGranted`, `grading.excused`                                                                                     |
 | **Permissions**    | `grading.record`, `grading.viewGrades`, `grading.computeFinal`, `grading.manageExtensions`, `grading.manageExcusals`, `grading.manageCurve`              |
-| **Enforcement**    | Opt-in via constructor options `{ policy, repos, submissions }`                                                                                          |
+| **Enforcement**    | Opt-in: a `policy` in the constructor config, with `submissions`                                                                                          |
 
 ---
 
@@ -81,19 +81,19 @@ type GradeScale = GradeScaleBand[];
 ## `GradingService`
 
 ```ts
-new GradingService(
-  grades: GradeRepository,
-  events?: EventBus,
-  enforcement?: {
-    policy: PermissionPolicy
-    repos: RepositoryContext
-    submissions: SubmissionLocator
-  },
-  options?: {
-    allowExtraCredit?: boolean // Allow score > maxScore (default: false)
-    systemGraders?: string[]    // Allow system: graders without actor context
+new GradingService({
+  repos: {
+    grades: GradeRepository
+    excusals?: ExcusalRepository      // Leave excused work out of final grades
+    releases?: GradeReleaseRepository // Hold grades until released
+    // with a policy also: users, courses, enrollments
   }
-)
+  policy?: PermissionPolicy           // Turns enforcement on
+  submissions?: SubmissionLocator     // Required with a policy
+  events?: EventBus
+  allowExtraCredit?: boolean // Allow score > maxScore (default: false)
+  systemGraders?: string[]    // Allow system: graders without actor context
+})
 ```
 
 ### `recordGrade(...)`
@@ -232,7 +232,7 @@ console.log(`GPA: ${gpa.toFixed(2)}`); // 3.57
 Manages individual student deadline extensions and excused assignments:
 
 ```ts
-const accommodations = new AccommodationService(accommodationRepo, { policy });
+const accommodations = new AccommodationService({ repos: accommodationRepos, policy, events: bus });
 
 // Give Alice 48 hours extra time on Lab 1
 await accommodations.grantExtension(

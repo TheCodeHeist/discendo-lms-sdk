@@ -1,7 +1,10 @@
 import type { Id } from '../../core/types.js';
 import type { EventBus } from '../../core/events.js';
 import type { ActorContext } from '../../core/permissions.js';
-import type { SchedulingRepository } from './repositories.js';
+import type { SchedulingRepository, SchedulingSettingsRepository } from './repositories.js';
+import type { AuthorizationRepos } from '../../core/authorization.js';
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type {
   AvailabilityRule,
   ClassOccurrence,
@@ -36,6 +39,21 @@ export type {
 } from './service/context.js';
 
 /**
+ * `new SchedulingService({ repos: { scheduling, settings?, attendance?, ... }, policy?, events? })`.
+ * `repos.settings` (a `SchedulingSettingsRepository`) enables the settings methods; `repos.attendance`
+ * (an `AttendanceRecorder`, which reporting's `AttendanceRepository` fits) enables attendance. With a
+ * `policy`, `repos` must also hold `users`, `courses` and `enrollments`.
+ */
+export interface SchedulingServiceConfig
+  extends ServiceConfig<
+    {
+      scheduling: SchedulingRepository;
+      settings?: SchedulingSettingsRepository;
+      attendance?: AttendanceRecorder;
+    } & Partial<AuthorizationRepos>
+  > {}
+
+/**
  * The scheduling module's one entry point. It is a thin facade: each group of methods is
  * implemented in its own file under `service/` (checks, occurrences, auto-scheduling, settings),
  * all sharing one set of permission and organization checks (`service/access.ts`).
@@ -46,13 +64,37 @@ export class SchedulingService {
   private readonly autoScheduler: SchedulingAutoScheduler;
   private readonly settings: SchedulingSettings;
 
+  constructor(config: SchedulingServiceConfig);
+  /** @deprecated Pass one config object: `new SchedulingService({ repos: { scheduling, ... }, policy, events })`. See docs/MIGRATION.md. */
   constructor(
     scheduling: SchedulingRepository,
     attendanceRecorder?: AttendanceRecorder,
     events?: EventBus,
-    options: SchedulingServiceOptions = {},
-  ) {
-    const deps = { scheduling, attendanceRecorder, events, options };
+    options?: SchedulingServiceOptions,
+  );
+  constructor(...args: unknown[]) {
+    let deps: { scheduling: SchedulingRepository; attendanceRecorder: AttendanceRecorder | undefined; events: EventBus | undefined; options: SchedulingServiceOptions };
+    if (isServiceConfig(args)) {
+      const { repos, policy, events } = args[0] as SchedulingServiceConfig;
+      if (policy) requireRepos('SchedulingService', repos, AUTHORIZATION_REPOS);
+      deps = {
+        scheduling: repos.scheduling,
+        attendanceRecorder: repos.attendance,
+        events,
+        options: {
+          ...(policy ? { enforcement: { policy, repos: repos as AuthorizationRepos } } : {}),
+          ...(repos.settings ? { settings: repos.settings } : {}),
+        },
+      };
+    } else {
+      const [scheduling, attendanceRecorder, events, options] = args as [
+        SchedulingRepository,
+        AttendanceRecorder | undefined,
+        EventBus | undefined,
+        SchedulingServiceOptions | undefined,
+      ];
+      deps = { scheduling, attendanceRecorder, events, options: options ?? {} };
+    }
     const access = new SchedulingAccess(deps);
     this.checks = new SchedulingChecks(deps, access);
     this.occurrences = new SchedulingOccurrences(deps, access);

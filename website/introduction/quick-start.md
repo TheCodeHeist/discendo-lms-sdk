@@ -209,7 +209,7 @@ const bus = new EventBus();
 bus.on("*", (event) => console.log("📡", event.type, JSON.stringify(event)));
 
 // 3. A service, constructed once
-const enrollment = new EnrollmentService(repos, bus, { promoteOnDrop: true });
+const enrollment = new EnrollmentService({ repos, events: bus, promoteOnDrop: true });
 
 // 4. Use it
 const first = await enrollment.enroll({
@@ -229,7 +229,9 @@ await enrollment.drop(first.id); // the seat frees up, stu-2 is promoted automat
 console.log((await repos.enrollments.findById(second.id))?.status); // active
 
 // 5. Turn permissions on
-const guarded = new EnrollmentService(repos, bus, {
+const guarded = new EnrollmentService({
+  repos,
+  events: bus,
   policy: createRolePolicy(),
 });
 try {

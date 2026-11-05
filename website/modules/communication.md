@@ -21,7 +21,7 @@ description: Learn how discendo-sdk/communication handles section announcements,
 | **Seams**        | `NotificationSink`                                                                                                                                                                    |
 | **Events**       | `communication.deliveryFailed`                                                                                                                                                        |
 | **Permissions**  | `communication.postAnnouncement`, `communication.postGuardianAnnouncement`, `communication.viewAnnouncements`, `communication.viewGuardianAnnouncements`, `communication.participate` |
-| **Enforcement**  | Opt-in via constructor options `{ enforcement: { policy, repos } }`                                                                                                                   |
+| **Enforcement**  | Opt-in: a `policy` in the constructor config                                                                                                                                        |
 
 ---
 
@@ -60,15 +60,17 @@ interface Thread {
 ## `CommunicationService`
 
 ```ts
-new CommunicationService(
-  announcements: AnnouncementRepository,
-  threads: ThreadRepository,
-  sink?: NotificationSink,
-  options?: {
-    enforcement?: { policy: PermissionPolicy; repos: RepositoryContext }
-    onDeliveryError?: (err: unknown, announcement: Announcement) => void
+new CommunicationService({
+  repos: {
+    announcements: AnnouncementRepository
+    threads: ThreadRepository
+    // with a policy also: users, courses, enrollments (+ content)
   }
-)
+  sink?: NotificationSink
+  policy?: PermissionPolicy
+  events?: EventBus
+  onDeliveryError?: (err: unknown, announcement: Announcement) => void
+})
 ```
 
 ### Announcements

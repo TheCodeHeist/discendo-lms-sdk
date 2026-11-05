@@ -18,6 +18,7 @@ under "Known limitations".
 | If you want to… | Read |
 | --- | --- |
 | wire the SDK into an application | [GETTING_STARTED.md](./GETTING_STARTED.md) |
+| upgrade from an earlier version | [MIGRATION.md](./MIGRATION.md) |
 | try the SDK with no database, or test your own repositories | [TESTING.md](./TESTING.md) |
 | understand the shared types and the repositories you implement | [CORE.md](./CORE.md) |
 | decide who may do what, and turn enforcement on | [PERMISSIONS.md](./PERMISSIONS.md) |

@@ -1,4 +1,6 @@
 import type { RepositoryContext } from '../../core/repositories.js';
+import { isServiceConfig } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import type { CoursePrerequisite, Id } from '../../core/types.js';
 import type { ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { PermissionDeniedError } from '../../core/permissions.js';
@@ -10,6 +12,9 @@ export interface PrerequisiteServiceOptions {
   policy?: PermissionPolicy;
   gradeSource?: { getCourseGrade(userId: string, courseId: string): Promise<number | null> };
 }
+
+/** `new PrerequisiteService({ repos, policy?, gradeSource? })`. `repos.coursePrerequisites` is required. */
+export type PrerequisiteServiceConfig = Omit<ServiceConfig<RepositoryContext>, 'events'> & Omit<PrerequisiteServiceOptions, 'policy'>;
 
 export interface AddPrerequisiteOptions {
   courseId: Id;
@@ -33,10 +38,23 @@ export interface SequenceOptions {
 }
 
 export class PrerequisiteService {
-  constructor(
-    private readonly repos: RepositoryContext,
-    private readonly options: PrerequisiteServiceOptions = {},
-  ) {}
+  private readonly repos: RepositoryContext;
+  private readonly options: PrerequisiteServiceOptions;
+
+  constructor(config: PrerequisiteServiceConfig);
+  /** @deprecated Pass one config object: `new PrerequisiteService({ repos, policy, gradeSource })`. See docs/MIGRATION.md. */
+  constructor(repos: RepositoryContext, options?: PrerequisiteServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const { repos, policy, gradeSource } = args[0] as PrerequisiteServiceConfig;
+      this.repos = repos;
+      this.options = { ...(policy ? { policy } : {}), ...(gradeSource ? { gradeSource } : {}) };
+    } else {
+      const [repos, options] = args as [RepositoryContext, PrerequisiteServiceOptions?];
+      this.repos = repos;
+      this.options = options ?? {};
+    }
+  }
 
   private get prereqRepo() {
     if (!this.repos.coursePrerequisites) {

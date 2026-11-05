@@ -248,6 +248,15 @@ it. A repository that stores whole objects (a document store, a cache, a test fa
 runtime. Under `exactOptionalPropertyTypes` it no longer typechecks, because a patch field may now be
 `undefined`. Write `applyContentUpdate(node, patch)` instead.
 
+## Building services (`service-config.ts`)
+
+Every service takes one config object, `{ repos, policy?, events?, ...its own settings }` (see
+[MIGRATION.md](./MIGRATION.md) for each one). The helpers behind it are exported for services of your
+own: `isServiceConfig(args)` tells the new form from an old positional call, `requireRepos(name,
+repos, keys)` throws a `ServiceConfigError` naming every missing repository, and
+`AUTHORIZATION_REPOS` lists the ones every permission check reads (`users`, `courses`,
+`enrollments`).
+
 ## Known limitations
 
 - **The roles are fixed.** `Role` is a closed union of four. You can add *actions* and

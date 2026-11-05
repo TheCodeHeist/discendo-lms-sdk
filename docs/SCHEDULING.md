@@ -23,7 +23,7 @@ need" table, see `src/domains/scheduling/README.md`.
 
 **How scheduling fits with the rest of the SDK.**
 
-- **Permissions.** Opt-in enforcement: pass `{ enforcement: { policy, repos } }` and every
+- **Permissions.** Opt-in enforcement: pass a `policy` (with `users`, `courses` and `enrollments` in `repos`) and every
   method needs an actor (see "Enforcement and organizations" below). Without it the service
   behaves as it always has. See [PERMISSIONS.md](./PERMISSIONS.md) and
   [GUARDIANS.md](./GUARDIANS.md).
@@ -318,7 +318,7 @@ scheduling (a dedicated query, a term-planning UI selection, etc.).
 ### `SchedulingSettingsRepository` (`repositories.ts`)
 
 What the settings methods of `SchedulingService` write, kept apart from `SchedulingRepository` so a
-host that only reads schedules does not have to implement it. Pass it as `options.settings`.
+host that only reads schedules does not have to implement it. Pass it as `repos.settings`.
 
 ```ts
 interface SchedulingSettingsRepository {
@@ -351,17 +351,23 @@ The class most host apps interact with directly. Constructed with a
 `SchedulingRepository`, and optionally an `AttendanceRecorder` and an `EventBus`:
 
 ```ts
-const service = new SchedulingService(myRepository, attendanceRepo, bus);
+const service = new SchedulingService({ repos: { scheduling: myRepository, attendance: attendanceRepo }, events: bus });
 ```
 
-Only the repository is required. Without a recorder, the attendance methods throw; without a bus,
-nothing is emitted. A fourth argument, `options`, turns on enforcement and supplies the settings
-repository:
+Only `repos.scheduling` is required. Without `repos.attendance`, the attendance methods throw;
+without `events`, nothing is emitted. A `policy` turns on enforcement, and `repos.settings` supplies
+the settings repository:
 
 ```ts
-new SchedulingService(repo, attendanceRepo, bus, {
-  enforcement: { policy, repos },   // repos: users, courses, enrollments (+ guardianLinks, delegations)
-  settings: repo,                   // a SchedulingSettingsRepository, only for the settings methods
+new SchedulingService({
+  repos: {
+    scheduling: repo,
+    settings: repo,              // a SchedulingSettingsRepository, only for the settings methods
+    attendance: attendanceRepo,
+    ...repos,                    // with a policy: users, courses, enrollments (+ guardianLinks, delegations)
+  },
+  policy,
+  events: bus,
 });
 ```
 
@@ -550,7 +556,7 @@ The end-to-end entry point for auto-scheduling:
 Details added since the steps above: step 3 also loads each teacher's
 `TeacherQualification` (when one is on file) and passes it to the solver, so an unqualified
 template comes back in `unplaced` with its reason; and `solverOptions` is where you pass
-`softConstraints` and `maxBacktrackSteps`. **If `options.settings` was given**, each teacher's saved
+`softConstraints` and `maxBacktrackSteps`. **If `repos.settings` was given**, each teacher's saved
 preferences (`setTeacherPreferences`) are added as `teacherTimePreference` soft constraints with
 weight 1 for everyone, after yours, so no one outweighs anyone. With enforcement on, the plan stays
 inside the actor's organization (see above).
@@ -580,7 +586,7 @@ everything.
 ### Settings
 
 Settings are what the people running a timetable keep about themselves and their resources. They
-need `options.settings` (a `SchedulingSettingsRepository`), or they throw. With enforcement each
+need `repos.settings` (a `SchedulingSettingsRepository`), or they throw. With enforcement each
 checks permission first, then that the person or resource is in the actor's organization, then
 validates.
 

@@ -88,12 +88,11 @@ If any check fails, access is refused with `PermissionDeniedError`.
 The administration service for managing parent-student relationships:
 
 ```ts
-new GuardianService(
-  repos: RepositoryContext,
-  managementRepo: GuardianLinkManagementRepository,
-  events?: EventBus,
-  options?: { policy?: PermissionPolicy }
-)
+new GuardianService({
+  repos: RepositoryContext // users, courses, enrollments + guardianLinks (a GuardianLinkManagementRepository)
+  policy: PermissionPolicy // required
+  events?: EventBus
+})
 ```
 
 ### `createLink(opts, actor): Promise<GuardianLink>`

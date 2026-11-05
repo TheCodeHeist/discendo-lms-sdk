@@ -74,33 +74,38 @@ export const bus = new EventBus({
 export const policy = createRolePolicy();
 
 // 4. Instantiate domain services
-export const enrollmentService = new EnrollmentService(repos, bus, {
+export const enrollmentService = new EnrollmentService({
+  repos,
+  events: bus,
   policy,
   promoteOnDrop: true, // Automatically promote from waitlist when seat frees
 });
 
-export const contentService = new ContentService(repos.content, bus, {
-  policy,
-});
-
-export const gradingService = new GradingService(gradeRepo, bus, {
-  policy,
+export const contentService = new ContentService({
   repos,
-  // Optional locator to resolve section and student from submission ID
-  submissionLocator: async (submissionId) => {
-    const sub = await submissionRepo.findById(submissionId);
-    return sub ? { sectionId: sub.sectionId, userId: sub.userId } : null;
+  completion,
+  events: bus,
+  policy,
+});
+
+export const gradingService = new GradingService({
+  repos: { ...repos, grades: gradeRepo },
+  events: bus,
+  policy,
+  // Locator to resolve section and student from submission ID (required with a policy)
+  submissions: {
+    locate: async (submissionId) => {
+      const sub = await submissionRepo.findById(submissionId);
+      return sub ? { sectionId: sub.sectionId, userId: sub.userId } : null;
+    },
   },
 });
 
-export const schedulingService = new SchedulingService(
-  schedulingRepo,
-  undefined,
-  bus,
-  {
-    enforcement: { policy, repos },
-  },
-);
+export const schedulingService = new SchedulingService({
+  repos: { ...repos, scheduling: schedulingRepo },
+  events: bus,
+  policy,
+});
 ```
 
 ---

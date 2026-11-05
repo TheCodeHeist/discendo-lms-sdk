@@ -47,16 +47,14 @@ stateDiagram-v2
 ## `EnrollmentService`
 
 ```ts
-new EnrollmentService(
-  repos: RepositoryContext,
-  events?: EventBus,
-  options?: {
-    policy?: PermissionPolicy
-    promoteOnDrop?: boolean
-    enforcePrerequisites?: boolean
-    gradeSource?: { getCourseGrade(userId: string, courseId: string): Promise<number | null> }
-  }
-)
+new EnrollmentService({
+  repos: RepositoryContext
+  events?: EventBus
+  policy?: PermissionPolicy
+  promoteOnDrop?: boolean
+  enforcePrerequisites?: boolean
+  gradeSource?: { getCourseGrade(userId: string, courseId: string): Promise<number | null> }
+})
 ```
 
 ### `enroll(opts, actor?): Promise<Enrollment>`
@@ -133,7 +131,7 @@ console.log(`Success: ${report.succeeded}, Failed: ${report.failed.length}`);
 Enables self-service student enrollment workflows with administrative approval:
 
 ```ts
-const requestService = new EnrollmentRequestService(repos, policy, bus);
+const requestService = new EnrollmentRequestService({ repos, enrollment: enrollmentService, policy, events: bus });
 
 // 1. Student requests a seat
 const req = await requestService.request(
@@ -172,7 +170,7 @@ await requestService.reject(
 Manages student study and lab groups within a course section:
 
 ```ts
-const groups = new GroupService(repos, { policy });
+const groups = new GroupService({ repos, policy });
 
 // Create a study group
 const group = await groups.createGroup(
@@ -196,7 +194,7 @@ await groups.addMember(group.id, "u-student", { actorId: "u-instructor" });
 Manages and verifies course prerequisites:
 
 ```ts
-const prereqs = new PrerequisiteService(repos);
+const prereqs = new PrerequisiteService({ repos });
 
 // Add prerequisite: must complete CS101 before CS201
 await prereqs.addPrerequisite({

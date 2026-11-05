@@ -106,9 +106,10 @@ const repos: RepositoryContext = {
   terms: new MyTermRepository(db),
 };
 
-const enrollmentService = new EnrollmentService(repos);
-const gradingService = new GradingService(new MyGradeRepository(db));
-const schedulingService = new SchedulingService(new MySchedulingRepository(db));
+// Every service takes one object: its repositories, and optionally a policy and an event bus.
+const enrollmentService = new EnrollmentService({ repos });
+const gradingService = new GradingService({ repos: { grades: new MyGradeRepository(db) } });
+const schedulingService = new SchedulingService({ repos: { scheduling: new MySchedulingRepository(db) } });
 ```
 
 Construct these once and reuse them — there's no per-request setup cost
@@ -121,20 +122,20 @@ doesn't implement:
 
 ```ts
 // AssessmentService's optional plagiarism check
-const assessmentService = new AssessmentService(
-  submissionRepo,
-  quizRepo,
-  async (submission) => myPlagiarismApi.check(submission),
-);
+const assessmentService = new AssessmentService({
+  repos: { submissions: submissionRepo, quizzes: quizRepo },
+  plagiarismHook: async (submission) => myPlagiarismApi.check(submission),
+});
 
 // CommunicationService's optional notification dispatch
-const commsService = new CommunicationService(announcementRepo, threadRepo, {
-  dispatch: async (event) => myPushService.send(event),
+const commsService = new CommunicationService({
+  repos: { announcements: announcementRepo, threads: threadRepo },
+  sink: { dispatch: async (event) => myPushService.send(event) },
 });
 ```
 
-Events work the same way: build one `EventBus`, pass it as the optional
-last constructor argument to the services that emit, and subscribe with
+Events work the same way: build one `EventBus`, pass it as `events` to the
+services that emit, and subscribe with
 `bus.on(...)`. To turn grade events into notifications, use
 `bridgeEventBusToNotificationSink(bus, sink, { resolveContentId })` from
 `discendo-sdk/communication`.
@@ -153,7 +154,7 @@ import { createRolePolicy } from "discendo-sdk/core";
 
 const policy = createRolePolicy();   // the default rules; override any of them
 
-const enrollmentService = new EnrollmentService(repos, bus, { policy });
+const enrollmentService = new EnrollmentService({ repos, events: bus, policy });
 
 await enrollmentService.enroll(
   { userId: "stu-1", sectionId: "sec-1", role: "student" },
@@ -259,7 +260,7 @@ await repo.seedAvailability({
 ### Step 4 — plan an auto-schedule
 
 ```ts
-const service = new SchedulingService(repo);
+const service = new SchedulingService({ repos: { scheduling: repo } });
 
 const { result, skippedAvailability } = await service.planAutoSchedule(
   [template.id],

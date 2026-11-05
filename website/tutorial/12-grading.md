@@ -105,11 +105,7 @@ Create `src/routes/grades.ts`:
 ```ts
 import { Hono } from "hono";
 import { gradingService } from "../lib/services";
-import {
-  computeFinalGrade,
-  applyLatePolicy,
-  toLetterGrade,
-} from "discendo-sdk/grading";
+import { applyLatePolicy, toLetterGrade } from "discendo-sdk/grading";
 import { requireAuth } from "../lib/middleware";
 import { handleDomainError } from "../lib/errors";
 
@@ -144,12 +140,7 @@ gradeRoutes.get("/sections/:sectionId/grades/me", requireAuth, async (c) => {
   const sectionId = c.req.param("sectionId");
 
   try {
-    // 1. Fetch active grades for student
-    const entries = await (gradingService as any).grades.listActiveForUser(
-      actorId,
-    );
-
-    // 2. Define the section's weighted grading scheme
+    // 1. The section's weighted grading scheme
     const scheme = {
       categories: [
         { name: "homework", weight: 0.4, dropLowestN: 1 }, // 40% weight, drop lowest score
@@ -157,13 +148,11 @@ gradeRoutes.get("/sections/:sectionId/grades/me", requireAuth, async (c) => {
       ],
     };
 
-    // 3. Compute final percentage using pure function
-    const categorizedEntries = new Map([
-      ["homework", entries.filter((e: any) => e.category === "homework")],
-      ["exams", entries.filter((e: any) => e.category === "exams")],
-    ]);
-
-    const finalPercent = computeFinalGrade(categorizedEntries, scheme);
+    // 2. The student's current grades and the final percentage, with the working shown.
+    //    Checks the permission, leaves out held and excused work, and applies the scheme.
+    const explained = await gradingService.explainGradeForUser(actorId, sectionId, scheme, { actorId });
+    const entries = explained.grades;
+    const finalPercent = explained.percent;
 
     // 4. Convert percentage to letter grade
     const letter = toLetterGrade(finalPercent, [

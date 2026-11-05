@@ -28,11 +28,16 @@ The host application implements these interfaces against its actual database.
 
 ## 2. Constructor-Injected Services
 
-There are no singletons, service locators, dependency injection containers, decorators, or metadata reflection. Every service takes its dependencies directly in its constructor:
+There are no singletons, service locators, dependency injection containers, decorators, or metadata reflection. Every service takes its dependencies directly in its constructor, as one config object:
 
 ```ts
-const enrollmentService = new EnrollmentService(repos, bus, { policy });
-const gradingService = new GradingService(gradeRepo, bus, { policy });
+const enrollmentService = new EnrollmentService({ repos, events: bus, policy });
+const gradingService = new GradingService({
+  repos: { ...repos, grades: gradeRepo },
+  events: bus,
+  policy,
+  submissions: submissionLocator,
+});
 ```
 
 - **Benefit:** Predictable initialization with zero hidden state. Instantiating services in unit tests requires no mock containers or environment bootstrapping.

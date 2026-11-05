@@ -2,6 +2,8 @@ import type { ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { PermissionDeniedError, ActorRequiredError } from '../../core/permissions.js';
 import { authorizeWithinOwnOrg } from '../../core/authorization.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
+import { AUTHORIZATION_REPOS, isServiceConfig, requireRepos, ServiceConfigError } from '../../core/service-config.js';
+import type { ServiceConfig } from '../../core/service-config.js';
 import { sameOrg } from '../../core/tenancy.js';
 
 export interface AuditEntry {
@@ -125,6 +127,9 @@ export interface AdminServiceOptions {
   enforcement?: { policy: PermissionPolicy; repos: Pick<AuthorizationRepos, 'users'> };
 }
 
+/** `new AdminService({ repos: { audit, users? }, policy? })`. With a `policy`, `repos.users` is required. */
+export type AdminServiceConfig = Omit<ServiceConfig<{ audit: AuditRepository } & Partial<Pick<AuthorizationRepos, 'users'>>>, 'events'>;
+
 export interface AuditedOptions {
   /** What changed, e.g. from `diffObjects(before, after)`. Stored as given; it is never computed for you. */
   diff?: Record<string, { before: unknown; after: unknown }>;
@@ -138,10 +143,23 @@ export interface AuditedOptions {
 }
 
 export class AdminService {
-  constructor(
-    private readonly audit: AuditRepository,
-    private readonly options: AdminServiceOptions = {},
-  ) {}
+  private readonly audit: AuditRepository;
+  private readonly options: AdminServiceOptions;
+
+  constructor(config: AdminServiceConfig);
+  /** @deprecated Pass one config object: `new AdminService({ repos: { audit, users }, policy })`. See docs/MIGRATION.md. */
+  constructor(audit: AuditRepository, options?: AdminServiceOptions);
+  constructor(...args: unknown[]) {
+    if (isServiceConfig(args)) {
+      const c = args[0] as AdminServiceConfig;
+      if (c.policy) requireRepos('AdminService', c.repos, ['users']);
+      this.audit = c.repos.audit;
+      this.options = c.policy ? { enforcement: { policy: c.policy, repos: { users: c.repos.users! } } } : {};
+    } else {
+      this.audit = args[0] as AuditRepository;
+      this.options = (args[1] as AdminServiceOptions | undefined) ?? {};
+    }
+  }
 
   /**
    * The audit entries for one target, as the repository returns them. With enforcement

@@ -185,70 +185,54 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
     },
   };
 
-  // ---- services ----
-  const optionalPolicy = enforce ? { policy } : {};
-  const enrollment = new EnrollmentService(repos, bus, optionalPolicy);
-  const grading = new GradingService(
-    grades,
-    bus,
-    enforce ? { policy, repos: authRepos, submissions: submissionLocator } : undefined,
-    {
-      systemGraders: [IN_MEMORY_QUIZ_GRADER],
-      excusals,
-      ...(options.gradeRelease === 'manual' ? { releases: gradeReleases } : {}),
-    },
-  );
+  // ---- services: every one built the same way, `new XService({ repos, policy?, events, ... })` ----
+  const policyIf = enforce ? { policy } : {};
+  const events = bus;
+  const enrollment = new EnrollmentService({ repos, events, ...policyIf });
+  const grading = new GradingService({
+    repos: { ...authRepos, grades, excusals, ...(options.gradeRelease === 'manual' ? { releases: gradeReleases } : {}) },
+    events,
+    ...policyIf,
+    submissions: submissionLocator,
+    systemGraders: [IN_MEMORY_QUIZ_GRADER],
+  });
   const services = {
     enrollment,
-    enrollmentRequests: new EnrollmentRequestService({ ...authRepos, enrollmentRequests }, enrollment, bus, { policy }),
-    groups: new GroupService(repos, optionalPolicy),
-    prerequisites: new PrerequisiteService(repos, optionalPolicy),
-    content: new ContentService(repos, completion, options.contentPrerequisites ?? [], bus, {
-      ...optionalPolicy,
-      revisions: contentRevisions,
-      prerequisites: contentPrerequisites,
+    enrollmentRequests: new EnrollmentRequestService({ repos: { ...authRepos, enrollmentRequests }, enrollment, policy, events }),
+    groups: new GroupService({ repos, ...policyIf }),
+    prerequisites: new PrerequisiteService({ repos, ...policyIf }),
+    content: new ContentService({
+      repos: { ...repos, contentRevisions, contentPrerequisites },
+      completion,
+      fixedPrerequisites: options.contentPrerequisites ?? [],
+      events,
+      ...policyIf,
     }),
-    assessment: new AssessmentService(
-      submissions,
-      quizzes,
-      undefined,
-      bus,
-      enforce ? { policy, repos: { ...authRepos, content, groups } } : undefined,
-      { extensions, autoGrade: { grading, source: IN_MEMORY_QUIZ_GRADER } },
-    ),
-    rubrics: new RubricService({ ...authRepos, rubrics, evaluations: rubricEvaluations, content, submissions }, optionalPolicy),
-    peerReviews: new PeerReviewService(
-      { ...authRepos, peerReviews, submissions, content, rubrics, evaluations: rubricEvaluations },
-      optionalPolicy,
-    ),
+    assessment: new AssessmentService({
+      repos: { ...authRepos, submissions, quizzes, content, groups },
+      events,
+      ...policyIf,
+      extensions,
+      autoGrade: { grading, source: IN_MEMORY_QUIZ_GRADER },
+    }),
+    rubrics: new RubricService({ repos: { ...authRepos, rubrics, evaluations: rubricEvaluations, content, submissions }, ...policyIf }),
+    peerReviews: new PeerReviewService({
+      repos: { ...authRepos, peerReviews, submissions, content, rubrics, evaluations: rubricEvaluations },
+      ...policyIf,
+    }),
     grading,
-    accommodations: new AccommodationService({ ...authRepos, content, extensions, excusals }, bus, { policy }),
-    delegation: new DelegationService({ ...authRepos, delegations }, { policy }, bus),
-    guardians: new GuardianService({ users, courses, enrollments, guardianLinks }, { policy }, bus),
-    scheduling: new SchedulingService(scheduling, attendance, bus, {
-      ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}),
-      settings: scheduling,
+    accommodations: new AccommodationService({ repos: { ...authRepos, content, extensions, excusals }, policy, events }),
+    delegation: new DelegationService({ repos: { ...authRepos, delegations }, policy, events }),
+    guardians: new GuardianService({ repos: { users, courses, enrollments, guardianLinks }, policy, events }),
+    scheduling: new SchedulingService({ repos: { ...authRepos, scheduling, settings: scheduling, attendance }, events, ...policyIf }),
+    communication: new CommunicationService({
+      repos: { ...authRepos, announcements, threads, content, reminderLog },
+      sink: notifications,
+      events,
+      ...policyIf,
     }),
-    communication: new CommunicationService(
-      announcements,
-      threads,
-      notifications,
-      {
-        ...(enforce ? { enforcement: { policy, repos: { ...authRepos, content } } } : {}),
-        reminders: { content, enrollments, log: reminderLog },
-      },
-      bus,
-    ),
-    reporting: new ReportingService(
-      attendance,
-      {
-        sessions: sessionLocator,
-        roster: { enrollments, users },
-        ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}),
-      },
-      bus,
-    ),
-    admin: new AdminService(audit, enforce ? { enforcement: { policy, repos: { users } } } : {}),
+    reporting: new ReportingService({ repos: { ...authRepos, attendance }, sessions: sessionLocator, events, ...policyIf }),
+    admin: new AdminService({ repos: { audit, users }, ...policyIf }),
   };
 
   return {

@@ -74,7 +74,7 @@ anything: `delegation.grant` is for admins and instructors only.
 ## `DelegationService`
 
 ```ts
-new DelegationService(repos, { policy, delegableActions?, events? }, events?)
+new DelegationService({ repos, policy, events?, delegableActions? })
 ```
 
 - `repos`: the authorization repositories (`users`, `courses`, `enrollments`) plus
