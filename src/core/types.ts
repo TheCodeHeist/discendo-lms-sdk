@@ -163,7 +163,17 @@ export interface ContentNode {
   parentId?: Id;
   orderIndex: number;
   published: boolean;
+  /** Starts at 1 and goes up by one with every publish, unpublish and edit (`ContentService.updateNode`). */
   version: number;
+  /** UTC. Before this a student cannot open it (`ContentService.getNode`) or submit to it. Unset: no lower bound. */
+  availableFrom?: Timestamp;
+  /** UTC. After this a student can still read it but can no longer submit to it. Unset: never closes. */
+  availableUntil?: Timestamp;
+  /**
+   * UTC. When the work is due. Informational: a submission after it is still accepted (until
+   * `availableUntil`), and late penalties are the host's call (`applyLatePolicy`, `daysLate`).
+   */
+  dueAt?: Timestamp;
 }
 
 export interface AcademicTerm {

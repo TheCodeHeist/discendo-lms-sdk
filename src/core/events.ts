@@ -192,6 +192,18 @@ export interface ContentPublishedEvent {
   orgId?: string;
 }
 
+/** A content node was edited (`ContentService.updateNode` or `restoreRevision`); its version went up. */
+export interface ContentUpdatedEvent {
+  type: "content.updated";
+  contentId: string;
+  sectionId: string;
+  version: number;
+  /** The fields that changed: any of `title`, `kind`, `parentId`, `availableFrom`, `availableUntil`, `dueAt`. */
+  changedFields: string[];
+  updatedBy?: string;
+  orgId?: string;
+}
+
 export interface ContentUnpublishedEvent {
   type: "content.unpublished";
   contentId: string;
@@ -395,6 +407,7 @@ export type LmsEvent =
   | UnexcusedEvent
   | ContentPublishedEvent
   | ContentUnpublishedEvent
+  | ContentUpdatedEvent
   | OccurrenceCancelledEvent
   | OccurrenceRescheduledEvent
   | AttendanceRecordedEvent

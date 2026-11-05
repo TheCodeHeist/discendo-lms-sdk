@@ -133,6 +133,7 @@ interface ContentNode {
   orderIndex: number;
   published: boolean;
   version: number;
+  availableFrom?: Date; availableUntil?: Date; dueAt?: Date;   // UTC; see CONTENT.md
 }
 ```
 
@@ -227,6 +228,24 @@ actor and their enrollment); each module's page says which.
 | `ActorRequiredError` | an enforcing service is called without an `{ actorId }` | [PERMISSIONS.md](./PERMISSIONS.md) |
 | `TenantMismatchError` | something from one organization is used with another's | [TENANCY.md](./TENANCY.md) |
 | `UnknownDepartmentError` | a course names a department that was not found | [TENANCY.md](./TENANCY.md) |
+
+## Content dates (`content-availability.ts`)
+
+`contentAvailability(node, now?)` says where a content node's dates put it: `'not-yet-open'` before
+`availableFrom`, `'closed'` after `availableUntil`, otherwise `'open'`. Both ends are inclusive.
+`ContentNotAvailableError` (with `contentId` and `availability`) is what content and assessment
+throw at a student who is too early or too late. They live in `core` because both modules need
+them. See [CONTENT.md](./CONTENT.md).
+
+`ContentRepository.update` takes a `ContentNodeUpdate`. A field that is absent is left alone, and a
+field present with the value `undefined` must be **cleared**; that is how a date is removed. Some
+ORMs treat `undefined` as "leave it alone", so map it to `NULL`. `contentRepositoryContract` checks
+it. A repository that stores whole objects (a document store, a cache, a test fake) can call
+`applyContentUpdate(node, patch)`, which applies a patch exactly that way.
+
+**Upgrading.** An `update` written as `{ ...node, ...patch }` still clears the field correctly at
+runtime. Under `exactOptionalPropertyTypes` it no longer typechecks, because a patch field may now be
+`undefined`. Write `applyContentUpdate(node, patch)` instead.
 
 ## Known limitations
 

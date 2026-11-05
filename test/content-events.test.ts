@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { applyContentUpdate } from '../src/core/index.js';
 import { ContentService } from "../src/domains/content/index.js";
 import { EventBus } from "../src/core/index.js";
 import type { RepositoryContext } from "../src/core/index.js";
@@ -44,7 +45,7 @@ function makeRepos(): RepositoryContext {
       update: async (id, patch) => {
         const existing = nodes.get(id);
         if (!existing) throw new Error("not found");
-        const updated = { ...existing, ...patch };
+        const updated = applyContentUpdate(existing, patch);
         nodes.set(id, updated);
         return updated;
       },

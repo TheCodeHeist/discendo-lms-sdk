@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { applyContentUpdate } from '../src/core/index.js';
 import {
   AssessmentService,
   scoreQuiz,
@@ -137,7 +138,7 @@ function buildWorld(
       findById: async (id) => nodes.get(id) ?? null,
       listBySection: async () => [],
       create: async (x) => ({ ...x, id: 'c', version: 1 }),
-      update: async (id, patch) => ({ ...nodes.get(id)!, ...patch }),
+      update: async (id, patch) => applyContentUpdate(nodes.get(id)!, patch),
       reorder: async () => {},
     },
     guardianLinks: { findActive: async () => null },

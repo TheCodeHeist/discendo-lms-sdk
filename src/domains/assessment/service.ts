@@ -3,6 +3,7 @@ import type { RepositoryContext } from '../../core/repositories.js';
 import type { Action, ActorContext, PermissionPolicy } from '../../core/permissions.js';
 import { PermissionDeniedError, activeSectionRole } from '../../core/permissions.js';
 import { authorizeInSection, isStaff } from '../../core/authorization.js';
+import { ContentNotAvailableError, contentAvailability } from '../../core/content-availability.js';
 import type { AuthorizationRepos } from '../../core/authorization.js';
 import type {
   Submission,
@@ -637,11 +638,20 @@ export class AssessmentService {
     });
     const staff = isStaff(auth.ctx);
     if (node && !node.published && !staff) throw new PermissionDeniedError(action);
+    // The content's dates: a student cannot work on it before it opens or after it closes. Submitting
+    // a quiz attempt already started is still allowed after closing, so the answers saved in time count.
+    if (node && !staff && DATED_ACTIONS.has(action)) {
+      const availability = contentAvailability(node);
+      if (availability !== 'open') throw new ContentNotAvailableError(node.id, availability);
+    }
     // authorizeInSection has already refused a missing node, so there is a section here.
     const orgId = auth.ctx.resourceOrgId ?? auth.ctx.actor.orgId;
     return { sectionId: node!.sectionId, staff, kind: node!.kind, ...(orgId !== undefined ? { orgId } : {}) };
   }
 }
+
+/** The student actions that need the content to be open (see `contentAvailability`). */
+const DATED_ACTIONS: ReadonlySet<Action> = new Set<Action>(['assessment.submit', 'assessment.startAttempt', 'assessment.answerQuiz']);
 
 function shuffle<T>(arr: T[]): void {
   for (let i = arr.length - 1; i > 0; i--) {

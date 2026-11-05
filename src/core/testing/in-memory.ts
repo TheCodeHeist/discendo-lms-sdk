@@ -28,6 +28,7 @@ import type {
   TaGrant,
 } from '../types.js';
 import type {
+  ContentNodeUpdate,
   ContentRepository,
   CoursePrerequisiteRepository,
   CourseRepository,
@@ -42,6 +43,7 @@ import type {
   UserRepository,
 } from '../repositories.js';
 import { InMemoryTable } from './table.js';
+import { applyContentUpdate } from '../repositories.js';
 
 export class InMemoryUserRepository implements UserRepository {
   private readonly users = new InMemoryTable<Identity>('user');
@@ -204,8 +206,10 @@ export class InMemoryContentRepository implements ContentRepository {
     return this.nodes.insert({ ...node, version: 1 });
   }
 
-  async update(id: Id, patch: Partial<ContentNode>): Promise<ContentNode> {
-    return this.nodes.update(id, patch);
+  async update(id: Id, patch: ContentNodeUpdate): Promise<ContentNode> {
+    const current = this.nodes.get(id);
+    if (!current) throw new Error(`Content ${id} not found`);
+    return this.nodes.put(applyContentUpdate(current, { ...patch, id }));
   }
 
   async reorder(sectionId: Id, orderedIds: Id[]): Promise<void> {

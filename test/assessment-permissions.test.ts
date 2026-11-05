@@ -1,4 +1,5 @@
 import { unusedQuizAttempts } from './helpers/quiz-store.js';
+import { applyContentUpdate } from '../src/core/index.js';
 import { describe, it, expect } from 'bun:test';
 import { AssessmentService } from '../src/domains/assessment/index.js';
 import type {
@@ -117,7 +118,7 @@ async function buildWorld(opts: { policy?: PermissionPolicy; grants?: TaGrant[];
       findById: async (id) => (calls.contentLookups++, nodes.get(id) ?? null),
       listBySection: async () => [],
       create: async (x) => ({ ...x, id: 'c', version: 1 }),
-      update: async (id, patch) => ({ ...nodes.get(id)!, ...patch }),
+      update: async (id, patch) => applyContentUpdate(nodes.get(id)!, patch),
       reorder: async () => {},
     },
     guardianLinks: {

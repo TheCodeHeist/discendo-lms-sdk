@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'bun:test';
+import { applyContentUpdate } from '../src/core/index.js';
 import { EnrollmentService } from '../src/domains/enrollment/index.js';
 import { EventBus } from '../src/core/index.js';
 import type { RepositoryContext } from '../src/core/index.js';
@@ -46,7 +47,7 @@ function makeRepos(): RepositoryContext & { _sections: Map<string, CourseSection
       findById: async () => null,
       listBySection: async () => [],
       create: async (n) => ({ ...n, id: 'c1', version: 1 }),
-      update: async (id, patch) => ({ id, sectionId: 's1', kind: 'page', title: '', orderIndex: 0, published: false, version: 1, ...patch }),
+      update: async (id, patch) => applyContentUpdate({ id, sectionId: 's1', kind: 'page', title: '', orderIndex: 0, published: false, version: 1 }, patch),
       reorder: async () => {},
     },
     terms: {
