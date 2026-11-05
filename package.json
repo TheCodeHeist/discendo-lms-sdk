@@ -28,7 +28,7 @@
     "url": "https://github.com/TheCodeHeist/discendo-lms-sdk/issues"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "type": "module",
   "main": "./dist/index.js",

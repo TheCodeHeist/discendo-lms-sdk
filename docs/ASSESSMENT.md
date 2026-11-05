@@ -462,7 +462,8 @@ after each stored submission. A failing listener never fails the submission.
   [CALENDAR.md](./CALENDAR.md).
 - **The content kind is not checked.** Nothing stops `submit` being called on a page, or
   `generateAttempt` on an assignment.
-- **The shuffle uses `Math.random`**: unseeded and not reproducible.
+- **The shuffle cannot be seeded**, so an attempt's order is not reproducible. It uses the Web Crypto
+  API (`globalThis.crypto`), which Node 20+, Bun, Deno, browsers and edge runtimes provide.
 - `grading.view` covers a guardian's view of grades; there is no guardian access to
   attempts.
 
