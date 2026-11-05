@@ -13,7 +13,7 @@ events, not kept as mutable state.
 
 | | |
 | --- | --- |
-| **You import** | `ReportingService`, `toCsv`, and the types `AttendanceRecord`, `AttendanceStatus`, `AttendanceRepository`, `SessionLocator`, `ReportingServiceOptions`, `StudentAttendanceReport`, `CsvOptions`, `Exportable` |
+| **You import** | `ReportingService`, `toCsv`, `exportable`, `effectiveMarks`, `rosterRows`, `attendanceSheet`, and the types `AttendanceRecord`, `AttendanceStatus`, `AttendanceRepository`, `SessionLocator`, `ReportingServiceOptions`, `StudentAttendanceReport`, `CsvOptions`, `Exportable` |
 | **You implement** | `AttendanceRepository`, `SessionLocator` (to read reports or enforce permissions), and `Exportable` for whatever you want to export |
 | **Emits events** | `reporting.attendanceRecorded` |
 | **Permission actions** | `reporting.recordAttendance` (delegable), `reporting.view` (a guardian can hold it via the `attendance` scope) |
@@ -70,8 +70,14 @@ session it does not know is refused like a forbidden one.
 new ReportingService(attendance: AttendanceRepository, options?: {
   sessions?: SessionLocator;
   enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos };
+  roster?: { enrollments; users? };   // for the exports; defaults to the enforcement repos
 })
 ```
+
+`AttendanceRepository` has an optional, recommended **`listForSessions(sessionIds, userId?)`**: the
+marks of several sessions in one query (`WHERE session_id IN (...)`), only one person's when
+`userId` is given. With it, `attendanceForStudent` and `exportAttendance` make one repository call
+instead of one per session.
 
 `enforcement` requires `sessions`, and the constructor throws if it is missing. With enforcement
 every attendance method takes a trailing `actor?: { actorId }` that is **required**; without it the
@@ -92,19 +98,34 @@ actor is ignored and nothing is checked. The `repos` need `users`, `courses` and
   actor must be staff there even if a custom policy would say otherwise). A student or guardian uses
   `attendanceForStudent`.
 - **`attendanceForStudent(sectionId, userId, actor?): Promise<StudentAttendanceReport>`**: one
-  student's marks across the section's sessions, **oldest first**, with a count per status:
+  student's attendance across the section's sessions, **oldest first**, with a count per status:
 
   ```ts
-  const { records, summary } = await reporting.attendanceForStudent('sec-1', child.id, { actorId: parent.id });
+  const { records, history, summary } = await reporting.attendanceForStudent('sec-1', child.id, { actorId: parent.id });
   // summary: { present: 12, absent: 1, excused: 0, late: 2, total: 15 }
   ```
+
+  **A second mark for the same session is a correction.** `records` holds the mark that counts for
+  each session, which is the latest (`effectiveMarks`), and `summary` counts those. So a student first
+  marked absent and then late is counted once, as late. `history` keeps every mark, corrections
+  included.
 
   The owner is the student you name: a student may read their own, staff of the section anyone's,
   and a **guardian** whose verified link has the `attendance` scope their ward's, while the ward is
   an active student there. A dropped, waitlisted or **completed** student is refused: read-only
-  access after completion covers grades and content only. It makes **one repository call per
-  session**, once each, so a section with many sessions costs that many calls. It needs `sessions`
-  even without enforcement.
+  access after completion covers grades and content only. It makes one repository call with
+  `listForSessions`, and otherwise one per session. It needs `sessions` even without enforcement.
+- **`exportRoster(sectionId, actor?, { status? }): Promise<Exportable>`**: the roster as rows for
+  `toCsv`, one per enrollment: `userId`, `externalRef` (when the roster has `users`), `role`,
+  `status`, `enrolledAt`, `droppedAt`. Every status is included unless you pass one. **Staff only**
+  with enforcement.
+- **`exportAttendance(sectionId, actor?): Promise<Exportable>`**: an attendance sheet. It has one row
+  per active student, one column per session (in the locator's order) holding the mark that counts,
+  then a total per status. **Staff only** with enforcement. Needs `sessions`.
+
+Both exports stay staff-only even under a custom policy that would let students hold
+`reporting.view`. The gradebook export lives in grading, as `GradingService.exportGradebook` (see
+[GRADING.md](./GRADING.md)), and its rows go through `toCsv` the same way.
 - **`computeCompletionPercent(totalItems, completedItems): number`** is
   `round(completed / total * 100)`, kept **between 0 and 100**: more completed than total gives
   `100`, and a negative count, a total of zero or less, or anything that is not a finite number
@@ -132,12 +153,20 @@ appoint them for the other.
 ## CSV export
 
 ```ts
+type ExportValue = string | number | boolean | Date | null | undefined;
 interface Exportable {
-  toRows(): Record<string, string | number>[];
+  toRows(): Record<string, ExportValue>[];
 }
 
-toCsv(exportable: Exportable): string
+toCsv(exportable: Exportable, options?: { sanitizeFormulas?; lineEnding?: '\n' | '\r\n'; bom? }): string
+exportable(rows): Exportable   // wraps rows you already have
 ```
+
+The built-in exporters are pure functions, so you can also use them on data you load yourself:
+
+- `rosterRows(enrollments, externalRefs?)` builds the roster.
+- `attendanceSheet(sessionIds, studentIds, marks)` builds the attendance sheet.
+- `effectiveMarks(marks)` gives the mark that counts per person and session.
 
 Anything that can describe itself as flat rows can be exported: a gradebook, a roster,
 attendance.
@@ -157,7 +186,11 @@ How it behaves:
 - No rows gives an empty string.
 - A cell containing a comma, a double quote, a carriage return or a line break is wrapped in
   double quotes, with inner quotes doubled.
-- Lines are separated by `\n` (not CRLF), with no trailing newline.
+- A `Date` is written as its ISO time in UTC, a boolean as `true` or `false`, and `null` or
+  `undefined` as an empty cell.
+- Lines are separated by `\n` by default, with no trailing newline. Pass `lineEnding: '\r\n'` for
+  RFC 4180. Pass `bom: true` to start with a UTF-8 byte order mark, so Excel reads accented names
+  correctly.
 
 ### Spreadsheet formula injection
 
@@ -184,7 +217,7 @@ toCsv({ toRows: () => [{ name: '=1+1', score: -5 }] });
 | Method | Action | Who |
 | --- | --- | --- |
 | `recordAttendance` | `reporting.recordAttendance` | admins, and the section's instructor; a TA only when delegated. The student must be an active student of the section |
-| `listAttendanceForSession` | `reporting.view` | staff of the session's section (admins, instructors, TAs) |
+| `listAttendanceForSession`, `exportRoster`, `exportAttendance` | `reporting.view` | staff of the section (admins, instructors, TAs) |
 | `attendanceForStudent` | `reporting.view` | the student themselves; staff of the section; a guardian with the `attendance` scope, for their ward |
 
 **TAs get nothing by default.** A teaching assistant is optional and appointed by the instructor, so
@@ -202,24 +235,24 @@ classmate's, and a guardian sees only their ward's. See [PERMISSIONS.md](./PERMI
   section a session is in.
 - **Without enforcement `recordAttendance` does no validation**, and `listAttendanceForSession` and
   `attendanceForStudent` check nothing.
-- **A repeat mark** for the same person and session is the repository's call. The service does not
-  prevent one, and `attendanceForStudent` would count both.
+- **A repeat mark is stored, not refused.** The latest mark for a session counts, and the earlier ones
+  stay in `history`. If two marks have the same time, the one listed last wins.
 - **Reporting does not know a session was cancelled.** Only scheduling does, so use its method for
   scheduled classes.
-- **`attendanceForStudent` costs one repository call per session.** A repository that can answer
-  "this student's marks in these sessions" in one query is not part of the interface yet.
+- **Without `listForSessions`, a report costs one repository call per session.**
 - **A completed student cannot read their own attendance**, and neither can their guardian.
 - **Only the service is guarded.** Your own code can still use the repository directly.
-- **No events** when attendance is recorded (planned for the events round).
-- **No gradebook, roster or attendance exporters are provided.** The module defines the
-  `Exportable` shape and the CSV writer; building the rows is your code's job.
-- **`toCsv` uses `\n` line endings**, not CRLF.
+- **The exports name people by id.** The roster adds `externalRef` when it can, but the SDK holds no
+  names (see `Identity` in [CORE.md](./CORE.md)), so join your own before you hand a sheet to a person.
+- **The attendance sheet's columns are session ids**, in the locator's order. Rename them to dates
+  in your own code if a person will read the sheet.
 
 ## Tests
 
 | File | Covers |
 | --- | --- |
 | `test/reporting.test.ts` and `test/reporting-events.test.ts` | every attendance method with enforcement on (who may record and read, delegation, active-student targets, the locator, a rebuilt record that cannot be backdated, staff-only session lists, a student's and a guardian's report, check ordering, no lookups before the actor is known) and off, the completion percent, and `toCsv` (layout, quoting, formula injection and its opt-out) |
+| `test/communication-reporting.test.ts` | corrections (`effectiveMarks`, `attendanceForStudent` counting the latest mark and keeping the history, in one repository call), `attendanceSheet`, `exportRoster`, `exportAttendance` from scheduling's attendance, the exports staying staff-only under a lax policy, the gradebook export, and `toCsv`'s dates, booleans, CRLF and byte order mark |
 | `test/core-permissions.test.ts` | the two reporting rules, and that `reporting.recordAttendance` is delegable |
 | `test/scheduling-permissions.test.ts` | that scheduling stamps `recordedBy` on attendance too |
 | `test/scheduling-attendance.test.ts` | scheduling's attendance integration |

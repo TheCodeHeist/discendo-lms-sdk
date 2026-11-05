@@ -1,7 +1,7 @@
 /** In-memory implementations of the communication repositories, kept in this process only. */
 import { InMemoryTable } from '../../../core/testing/table.js';
 import type { AnnouncementRepository, ThreadRepository } from '../service.js';
-import type { Announcement, NotificationEvent, NotificationSink, Thread, ThreadPost } from '../types.js';
+import type { Announcement, NotificationEvent, NotificationSink, ReminderLog, Thread, ThreadPost } from '../types.js';
 
 /** Stores `audience` as given; `listBySection` returns both channels, oldest first. */
 export class InMemoryAnnouncementRepository implements AnnouncementRepository {
@@ -35,6 +35,21 @@ export class InMemoryThreadRepository implements ThreadRepository {
 
   async findById(id: string): Promise<Thread | null> {
     return this.threads.get(id);
+  }
+
+  async listBySection(sectionId: string): Promise<Thread[]> {
+    return this.threads.where((t) => t.sectionId === sectionId);
+  }
+}
+
+/** A `ReminderLog` in a Set: `claim` is atomic because it neither awaits nor yields. */
+export class InMemoryReminderLog implements ReminderLog {
+  private readonly claimed = new Set<string>();
+
+  async claim(key: string): Promise<boolean> {
+    if (this.claimed.has(key)) return false;
+    this.claimed.add(key);
+    return true;
   }
 }
 

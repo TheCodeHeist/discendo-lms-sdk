@@ -7,6 +7,9 @@ import {
 } from "../../core/permissions.js";
 import { authorizeInSection, isStaff } from "../../core/authorization.js";
 import type { AuthorizationRepos } from "../../core/authorization.js";
+import type { EnrollmentRepository, UserRepository } from "../../core/repositories.js";
+import type { Enrollment } from "../../core/types.js";
+import { attendanceSheet, effectiveMarks, rosterRows, type Exportable } from "./export.js";
 
 export type AttendanceStatus = "present" | "absent" | "excused" | "late";
 
@@ -22,6 +25,12 @@ export interface AttendanceRecord {
 export interface AttendanceRepository {
   record(entry: AttendanceRecord): Promise<void>;
   listForSession(sessionId: Id): Promise<AttendanceRecord[]>;
+  /**
+   * OPTIONAL, and recommended: the marks of several sessions in one query (`WHERE session_id IN
+   * (...)`), only `userId`'s when it is given. Without it `attendanceForStudent` and the attendance
+   * export ask `listForSession` once per session.
+   */
+  listForSessions?(sessionIds: Id[], userId?: Id): Promise<AttendanceRecord[]>;
 }
 
 /**
@@ -48,11 +57,22 @@ export interface ReportingServiceOptions {
   enforcement?: { policy: PermissionPolicy; repos: AuthorizationRepos };
   /** Optional EventBus to emit reporting events to. */
   events?: EventBus | undefined;
+  /**
+   * Where the roster comes from, for `exportRoster` and `exportAttendance`. Defaults to the
+   * enforcement repos when enforcement is on. `users` adds each person's `externalRef` to the
+   * roster.
+   */
+  roster?: { enrollments: Pick<EnrollmentRepository, "listBySection">; users?: Pick<UserRepository, "findById"> };
 }
 
-/** One student's attendance in a section: the marks, oldest first, and a count per status. */
+/**
+ * One student's attendance in a section. `records` holds the mark that counts for each session,
+ * oldest first: when a session was marked more than once (a correction), the latest mark wins.
+ * `history` holds every mark, corrections included. `summary` counts `records`.
+ */
 export interface StudentAttendanceReport {
   records: AttendanceRecord[];
+  history: AttendanceRecord[];
   summary: {
     present: number;
     absent: number;
@@ -68,49 +88,6 @@ const STATUSES: readonly AttendanceStatus[] = [
   "excused",
   "late",
 ];
-
-/** Anything exportable as flat rows can reuse this — gradebook, roster, attendance, etc. */
-export interface Exportable {
-  toRows(): Record<string, string | number>[];
-}
-
-export interface CsvOptions {
-  /**
-   * Text cells that start with `=`, `+`, `-`, `@`, a tab or a carriage return can be run as a
-   * formula when the file is opened in a spreadsheet. By default they are neutralized with a
-   * leading `'`. Set this to `false` only for data you wrote yourself. Numbers are never touched.
-   */
-  sanitizeFormulas?: boolean;
-}
-
-export function toCsv(
-  exportable: Exportable,
-  options: CsvOptions = {},
-): string {
-  const rows = exportable.toRows();
-  if (rows.length === 0) return "";
-  const sanitize = options.sanitizeFormulas !== false;
-  const cell = (value: string | number | undefined): string =>
-    escapeCsvCell(
-      typeof value === "string" && sanitize
-        ? neutralizeFormula(value)
-        : String(value ?? ""),
-    );
-  const headers = Object.keys(rows[0]!);
-  const lines = [headers.map((h) => cell(h)).join(",")];
-  for (const row of rows) {
-    lines.push(headers.map((h) => cell(row[h])).join(","));
-  }
-  return lines.join("\n");
-}
-
-function neutralizeFormula(value: string): string {
-  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
-}
-
-function escapeCsvCell(value: string): string {
-  return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
 
 export class ReportingService {
   private readonly events?: EventBus | undefined;
@@ -257,18 +234,78 @@ export class ReportingService {
     const sessions = this.options.sessions;
     if (!sessions) throw new Error("attendanceForStudent needs a SessionLocator (options.sessions)");
 
-    const records: AttendanceRecord[] = [];
-    for (const sessionId of await sessions.sessionsInSection(sectionId)) {
-      for (const r of await this.attendance.listForSession(sessionId)) {
-        if (r.userId === userId) records.push(r);
-      }
-    }
-    records.sort(
-      (a, b) => a.recordedAt.getTime() - b.recordedAt.getTime() || a.sessionId.localeCompare(b.sessionId),
-    );
+    const history = await this.marksOf(await sessions.sessionsInSection(sectionId), userId);
+    const records = effectiveMarks(history);
     const summary = { present: 0, absent: 0, excused: 0, late: 0, total: records.length };
     for (const r of records) if (STATUSES.includes(r.status)) summary[r.status]++;
-    return { records, summary };
+    return { records, history, summary };
+  }
+
+  /**
+   * The section's roster as rows for `toCsv`: one per enrollment (`userId`, `externalRef` when a
+   * user repository is given, `role`, `status`, `enrolledAt`, `droppedAt`), all statuses unless you
+   * pass `status`. With enforcement on, staff of the section only (`reporting.view`).
+   */
+  async exportRoster(sectionId: Id, actor?: ActorContext, options: { status?: Enrollment["status"] } = {}): Promise<Exportable> {
+    await this.authorizeStaffView(sectionId, actor);
+    const roster = this.roster();
+    const enrollments = await roster.enrollments.listBySection(sectionId, options.status);
+    const refs = new Map<string, string>();
+    if (roster.users) {
+      for (const e of enrollments) {
+        const ref = (await roster.users.findById(e.userId))?.externalRef;
+        if (ref !== undefined) refs.set(e.userId, ref);
+      }
+    }
+    return rosterRows(enrollments, refs);
+  }
+
+  /**
+   * The section's attendance as a sheet for `toCsv`: one row per active student, one column per
+   * session (in the locator's order) holding the mark that counts, and a total per status. With
+   * enforcement on, staff of the section only (`reporting.view`). Needs `options.sessions`.
+   */
+  async exportAttendance(sectionId: Id, actor?: ActorContext): Promise<Exportable> {
+    await this.authorizeStaffView(sectionId, actor);
+    const sessions = this.options.sessions;
+    if (!sessions) throw new Error("exportAttendance needs a SessionLocator (options.sessions)");
+    const sessionIds = await sessions.sessionsInSection(sectionId);
+    const students = (await this.roster().enrollments.listBySection(sectionId, "active"))
+      .filter((e) => e.role === "student")
+      .map((e) => e.userId);
+    return attendanceSheet(sessionIds, students, await this.marksOf(sessionIds));
+  }
+
+  /** Every mark of these sessions (only `userId`'s when given), in one query when the repository can. */
+  private async marksOf(sessionIds: Id[], userId?: Id): Promise<AttendanceRecord[]> {
+    if (sessionIds.length === 0) return [];
+    if (this.attendance.listForSessions) {
+      const all = await this.attendance.listForSessions(sessionIds, userId);
+      // Re-filter: the repository's answer is trusted for speed, not for scope.
+      const wanted = new Set(sessionIds);
+      return all.filter((r) => wanted.has(r.sessionId) && (userId === undefined || r.userId === userId));
+    }
+    const out: AttendanceRecord[] = [];
+    for (const sessionId of sessionIds) {
+      for (const r of await this.attendance.listForSession(sessionId)) {
+        if (userId === undefined || r.userId === userId) out.push(r);
+      }
+    }
+    return out;
+  }
+
+  private roster(): NonNullable<ReportingServiceOptions["roster"]> {
+    const roster = this.options.roster ?? (this.options.enforcement ? { enrollments: this.options.enforcement.repos.enrollments, users: this.options.enforcement.repos.users } : undefined);
+    if (!roster) throw new Error("Exports need a roster (options.roster) or enforcement");
+    return roster;
+  }
+
+  /** With enforcement: `reporting.view` in the section, and the actor must be staff there. */
+  private async authorizeStaffView(sectionId: Id, actor: ActorContext | undefined): Promise<void> {
+    const e = this.options.enforcement;
+    if (!e) return;
+    const auth = await authorizeInSection(e.policy, e.repos, "reporting.view", actor, { sectionId });
+    if (!isStaff(auth.ctx)) throw new PermissionDeniedError("reporting.view");
   }
 
   computeCompletionPercent(totalItems: number, completedItems: number): number {

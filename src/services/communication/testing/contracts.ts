@@ -1,6 +1,7 @@
 /** Contract suites for the communication repositories. See `core/testing/contract.ts` for how to run them. */
 import { check, checkEqual, idsOf, suite, type ContractCase, type RepositoryFactory } from '../../../core/testing/contract.js';
 import type { AnnouncementRepository, ThreadRepository } from '../service.js';
+import type { ReminderLog } from '../types.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -44,17 +45,49 @@ export function threadRepositoryContract(make: RepositoryFactory<ThreadRepositor
         checkEqual((await repo.findById(t.id))?.posts.map((p) => p.body), ['first', 'second'], 'posts in order');
       },
     },
+    {
+      name: 'create stores who started it and when; listBySection (if implemented) lists the section\'s threads with their posts',
+      run: async () => {
+        const repo = await make();
+        const createdAt = at('2026-09-01T10:00:00Z');
+        const t = await repo.create({ sectionId: 's1', title: 'Q', createdBy: 'u1', createdAt });
+        checkEqual([t.createdBy, t.createdAt], ['u1', createdAt], 'stored');
+        if (!repo.listBySection) return;
+        await repo.addPost(t.id, { authorId: 'u1', body: 'hi', postedAt: createdAt });
+        await repo.create({ sectionId: 's2', title: 'Other' });
+        const listed = await repo.listBySection('s1');
+        checkEqual(idsOf(listed), [t.id], 'only s1');
+        checkEqual(listed[0]?.posts.length, 1, 'with its posts');
+      },
+    },
+  ]);
+}
+
+export function reminderLogContract(make: RepositoryFactory<ReminderLog>): ContractCase[] {
+  return suite('ReminderLog', [
+    {
+      name: 'claim is true the first time for a key and false after, also when claimed at the same moment',
+      run: async () => {
+        const log = await make();
+        const results = await Promise.all([log.claim('a'), log.claim('a'), log.claim('a')]);
+        checkEqual(results.filter(Boolean).length, 1, 'exactly one claim of a wins');
+        checkEqual(await log.claim('b'), true, 'another key is free');
+        checkEqual(await log.claim('b'), false, 'and then taken');
+      },
+    },
   ]);
 }
 
 export interface CommunicationRepositoryFactories {
   announcements?: RepositoryFactory<AnnouncementRepository>;
   threads?: RepositoryFactory<ThreadRepository>;
+  reminders?: RepositoryFactory<ReminderLog>;
 }
 
 export function communicationRepositoryContracts(f: CommunicationRepositoryFactories): ContractCase[] {
   return [
     ...(f.announcements ? announcementRepositoryContract(f.announcements) : []),
     ...(f.threads ? threadRepositoryContract(f.threads) : []),
+    ...(f.reminders ? reminderLogContract(f.reminders) : []),
   ];
 }

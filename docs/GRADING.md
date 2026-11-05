@@ -189,6 +189,27 @@ content each entry belongs to, so **`listForUserInSection` must return a `conten
 student has an excusal and an entry has none, the calculation throws instead of guessing. Without the
 option, or for a student with no excusals, nothing changes and `contentId` is not needed.
 
+### `exportGradebook(sectionId, scheme, actor?, { userIds?, columns?, scale? })`
+
+The section's gradebook as rows, ready for reporting's `toCsv`:
+
+- one row per student (`userId`);
+- one column per piece of content, holding the current percentage, `EX` for excused work, or empty
+  when ungraded;
+- then `final`, and `letter` when you pass a `scale`.
+
+`columns` picks, orders and names the content columns (`{ contentId, label? }`). By default every
+graded content id is a column, in the order first met. Staff see every grade, held ones included.
+**Staff only** with enforcement (`grading.view`), and the students are the section's active ones.
+Without enforcement, pass `userIds`.
+
+```ts
+const csv = toCsv(await grading.exportGradebook('sec-1', scheme, as(teacher), {
+  columns: [{ contentId: essay.id, label: 'Essay' }, { contentId: quiz.id, label: 'Quiz 1' }],
+  scale,
+}), { bom: true });
+```
+
 ## Holding grades until they are released
 
 By default a grade is visible to the student the moment it is recorded. To hold grades back until the

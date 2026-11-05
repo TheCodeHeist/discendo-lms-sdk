@@ -26,7 +26,7 @@ type NotificationEvent =
   | { type: 'gradePosted'; userId: string; contentId: string; score: number }
   | { type: 'gradesReleased'; sectionId: string; contentId: string }   // held grades were released
   | { type: 'announcementCreated'; sectionId: string; title: string; audience: AnnouncementAudience }
-  | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };
+  | { type: 'dueDateApproaching'; userId: string; contentId: string; dueAt: Date };   // sendDueDateReminders
 
 type AnnouncementAudience = 'students' | 'guardians';
 
@@ -134,8 +134,54 @@ forbidden one. Guardians cannot reply.
 Reads a thread with its posts. With enforcement it needs `communication.participate` in the
 thread's section. Without it, an unknown thread throws `Thread <id> not found`.
 
-`ThreadRepository.create` is not exposed by the service: starting a thread is still your
-code's job.
+### `startThread(sectionId, authorId, title, body, actor?, { contentId? }): Promise<Thread>`
+
+Starts a discussion thread with its first post, and returns it with that post. The thread records
+`createdBy` and `createdAt`. It can be tied to one piece of content with `contentId`. A blank title
+throws. **With enforcement** it needs `communication.participate` in the section, so students may
+start threads. The author must be the actor. When the enforcement repos include `content`, the
+content must belong to that section.
+
+### `listThreads(sectionId, actor?, { contentId? }): Promise<Thread[]>`
+
+A section's threads with their posts, optionally only those tied to one piece of content. It needs
+the optional `ThreadRepository.listBySection`. With enforcement it needs `communication.participate`.
+
+**Threads on unpublished content.** When the enforcement repos include `content`
+(`{ policy, repos: { ...repos, content } }`), a thread tied to content that is not published is
+kept from anyone who is not staff. `listThreads` leaves it out, and `getThread` and `reply`
+refuse it. Once the content is published, the thread appears.
+
+### `sendDueDateReminders(sectionId, { within, now?, isDone? }): Promise<DueDateReminder[]>`
+
+Tells each **active student** of the section about the **published** work that is due soon: content
+whose `dueAt` (see [CONTENT.md](./CONTENT.md)) is after `now` and no more than `within` milliseconds
+later. For each student and piece of content it dispatches a `dueDateApproaching` notification to the
+sink, and returns what it sent.
+
+```ts
+const communication = new CommunicationService(announcements, threads, sink, {
+  reminders: { content: repos.content, enrollments: repos.enrollments, log: reminderLog },
+});
+
+// run hourly from your scheduler: everything due in the next 24 hours
+await communication.sendDueDateReminders('sec-1', {
+  within: 24 * 60 * 60 * 1000,
+  isDone: async (userId, contentId) => (await submissions.countAttempts(contentId, userId)) > 0,
+});
+```
+
+- **Once each.** With a `ReminderLog` (`claim(key)`: true the first time for a key, false afterwards,
+  atomically), each reminder goes out once however often you run it. The key names the student, the
+  content and the due date, so **moving a due date makes a new reminder due**. Without a log every
+  run sends again.
+- `isDone(userId, contentId)` skips work a student has already handed in.
+- **A failing sink does not stop the run.** Each failure is announced as
+  `communication.deliveryFailed` (`channel: 'reminder'`), and the others are still sent.
+- **It takes no actor and checks no permission**, like a scheduled job. Call it from your server
+  code only.
+
+The SDK has no clock of its own and no scheduler: running it regularly is up to you.
 
 ## The event bridge
 
@@ -211,7 +257,8 @@ await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId:
 | `postAnnouncement` (guardians) | `communication.postGuardianAnnouncement` | admins and instructors only; **not delegable** |
 | `listAnnouncements` (no ward) | `communication.viewAnnouncements` | active members of the section (students: their channel; staff: both) |
 | `listAnnouncements` (with ward) | `communication.viewGuardianAnnouncements` | guardians whose link has the `announcements` scope (see [GUARDIANS.md](./GUARDIANS.md)); staff |
-| `reply`, `getThread` | `communication.participate` | active members of the thread's section; `reply` only as yourself |
+| `startThread`, `listThreads`, `reply`, `getThread` | `communication.participate` | active members of the (thread's) section; `startThread` and `reply` only as yourself; threads on unpublished content for staff only (when the repos include `content`) |
+| `sendDueDateReminders` | none | your server code only: it takes no actor |
 
 - **The two channels are separate in every direction.** A guardian never reads the students'
   channel, a student never reads the guardians', and holding one posting action does not give
@@ -235,15 +282,17 @@ await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId:
   actor who is an instructor of the section or an admin, so a queued job has to carry the poster
   or an admin.
 - **A failing sink emits `communication.deliveryFailed`** to the bus (and invokes `onDeliveryError` if configured).
-- **A thread tied to unpublished content is still readable** by students of the section
-  (`Thread.contentId` is not checked against the content's draft state).
+- **Threads on unpublished content are hidden only when the enforcement repos include `content`.**
+  Without it, `Thread.contentId` is not checked against the content's draft state.
 - **A completed student cannot read announcements or threads.** Read-only access after
   completion covers grades and content only; the guardian channel is not extended to a
   completed ward either. Widening it would mean adding `afterCompletion` to the view rules
   and having this service opt in.
-- **No service method to start a thread.**
-- **`dueDateApproaching` is defined but nothing produces it.** The SDK has no scheduler;
-  your application would decide when to dispatch it.
+- **No moderation.** Posts cannot be edited, hidden or deleted through the service, and threads
+  cannot be locked or pinned.
+- **Reminders need you to run them.** `sendDueDateReminders` does the work, but the SDK has no
+  scheduler. Without a `ReminderLog` a repeated run reminds again. Students who join after a reminder
+  went out get one on the next run, as long as the work is still due within the window.
 - **Only grades are bridged.** The bridge does not forward announcements: the service
   notifies the sink itself.
 - **Only the service is guarded.** Your own code can still use the repositories directly.
@@ -253,4 +302,5 @@ await communication.listAnnouncements('sec-1', { actorId: parent.id }, { wardId:
 | File | Covers |
 | --- | --- |
 | `test/communication-event-bridge.test.ts` | the bridge: translating a grade event, an async `resolveContentId`, skipping unresolved submissions, forwarding nothing without a resolver, ignoring other events, a failing sink, a throwing resolver, and unsubscribing |
+| `test/communication-reporting.test.ts` | starting and listing threads (author is the actor, content of the section, filtering by content), threads on unpublished content hidden from students, due-date reminders (window, published only, active students only, once each, `isDone`, a moved due date, a failing sink) |
 | `test/communication-permissions.test.ts` | every method with enforcement on (both channels in both directions, delegation, guardian links and scopes, author = actor, thread sections, unknown and orphaned targets, check ordering, no lookups before the actor is known), a failing or throwing sink with and without `onDeliveryError`, and behaviour with enforcement off |

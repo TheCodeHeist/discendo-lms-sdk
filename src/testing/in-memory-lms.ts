@@ -55,6 +55,7 @@ import { InMemorySchedulingRepository } from '../domains/scheduling/testing/in-m
 import { CommunicationService } from '../services/communication/index.js';
 import {
   InMemoryAnnouncementRepository,
+  InMemoryReminderLog,
   InMemoryThreadRepository,
   RecordingNotificationSink,
 } from '../services/communication/testing/in-memory.js';
@@ -139,6 +140,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
   const attendance = new InMemoryAttendanceRepository();
   const announcements = new InMemoryAnnouncementRepository();
   const threads = new InMemoryThreadRepository();
+  const reminderLog = new InMemoryReminderLog();
   const audit = new InMemoryAuditRepository();
 
   const repos = {
@@ -231,12 +233,19 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
       announcements,
       threads,
       notifications,
-      enforce ? { enforcement: { policy, repos: authRepos } } : {},
+      {
+        ...(enforce ? { enforcement: { policy, repos: { ...authRepos, content } } } : {}),
+        reminders: { content, enrollments, log: reminderLog },
+      },
       bus,
     ),
     reporting: new ReportingService(
       attendance,
-      { sessions: sessionLocator, ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}) },
+      {
+        sessions: sessionLocator,
+        roster: { enrollments, users },
+        ...(enforce ? { enforcement: { policy, repos: authRepos } } : {}),
+      },
       bus,
     ),
     admin: new AdminService(audit, enforce ? { enforcement: { policy, repos: { users } } } : {}),
@@ -263,6 +272,7 @@ export function createInMemoryLms(options: InMemoryLmsOptions = {}) {
       attendance,
       announcements,
       threads,
+      reminderLog,
       audit,
     },
     services,

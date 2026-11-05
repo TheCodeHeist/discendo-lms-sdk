@@ -139,7 +139,7 @@ Every event is a variant of the `LmsEvent` union, discriminated by `type`.
 | `guardians.linkCreated` | `GuardianService.createLink` | an admin links a guardian to a ward with specific scopes | `linkId`, `guardianId`, `studentId`, `scopes`, `createdBy`, `orgId?` |
 | `guardians.scopesUpdated` | `GuardianService.updateScopes` | an admin modifies permissions scopes on an active link | `linkId`, `guardianId`, `studentId`, `scopes`, `previousScopes`, `updatedBy`, `orgId?` |
 | `guardians.linkRevoked` | `GuardianService.revokeLink` | an admin revokes a guardian link | `linkId`, `guardianId`, `studentId`, `revokedBy`, `orgId?` |
-| `communication.deliveryFailed` | `CommunicationService.postAnnouncement`, `bridgeEventBusToNotificationSink` | asynchronous delivery to a notification sink failed | `channel`, `recipientId`, `error`, `announcementId?`, `orgId?` |
+| `communication.deliveryFailed` | `CommunicationService.postAnnouncement`, `sendDueDateReminders`, `bridgeEventBusToNotificationSink` | delivery to a notification sink failed | `channel` (`announcement`, `reminder` or `bridge`), `error`, `sectionId?`, `title?`, `orgId?` |
 
 Details that are easy to get wrong:
 
